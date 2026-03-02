@@ -191,6 +191,27 @@ Control how many times a failed send (5xx server error) is retried:
 
 Rate-limit responses (HTTP 429) are retried automatically (up to 20 times), honouring the server's `Retry-After` header.
 
+### Importance
+
+Set the email importance flag (visible to recipients in most email clients):
+
+```bash
+--importance high    # low, normal, or high
+```
+
+When omitted, no importance field is sent and the email defaults to normal importance.
+
+### CC and BCC
+
+Add CC and/or BCC recipients to every email in the merge. Provide comma-separated addresses:
+
+```bash
+--cc "manager@example.com,team@example.com"
+--bcc "archive@example.com"
+```
+
+These addresses are static (not templated per recipient).
+
 ### Specific sheet
 
 If your workbook has multiple sheets, select one by name:
@@ -208,3 +229,12 @@ By default, the first sheet is used.
 3. **Check your inbox** — verify subject, body, and formatting
 4. **Full send** — run without `--dry-run` or `--test-email`
 5. **Review report** — check console summary or `--output report.csv`
+
+## Future features
+
+The following features are not yet implemented but are under consideration:
+
+- **Attachments** — attach files to each email (static or per-recipient)
+- **HTML body** — send rich HTML emails instead of plain text
+- **Save-to-sent-items control** — option to skip saving sent messages to the Sent Items folder
+- **Send-as / shared mailbox** — send from a different address or shared mailbox

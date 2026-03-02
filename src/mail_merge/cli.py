@@ -36,6 +36,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", default=None, help="Path to write CSV report")
     parser.add_argument("--delay", type=float, default=1.0, help="Base seconds between sends (adaptive throttling increases this on rate limits)")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per recipient for 5xx errors")
+    parser.add_argument("--importance", choices=["low", "normal", "high"], default=None, help="Email importance level")
+    parser.add_argument("--cc", default=None, help="Comma-separated CC addresses")
+    parser.add_argument("--bcc", default=None, help="Comma-separated BCC addresses")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args(argv)
 
@@ -125,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("Authentication failed: %s", exc)
             return 1
 
+    # Parse CC/BCC into lists
+    cc_list = [a.strip() for a in args.cc.split(",") if a.strip()] if args.cc else None
+    bcc_list = [a.strip() for a in args.bcc.split(",") if a.strip()] if args.bcc else None
+
     # Test email: send one email using first recipient's data, then exit
     if args.test_email:
         from mail_merge.template import render
@@ -135,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             "Sending test email to %s (using data from first recipient: %s)",
             args.test_email, sample.get(args.email_column, "?"),
         )
-        result = send_one(token, args.test_email, rendered_subject, rendered_body, max_retries=args.max_retries)
+        result = send_one(token, args.test_email, rendered_subject, rendered_body, max_retries=args.max_retries, importance=args.importance, cc=cc_list, bcc=bcc_list)
         if result.success:
             logger.info("Test email sent successfully to %s", args.test_email)
             return 0
@@ -153,6 +160,9 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         delay=args.delay,
         max_retries=args.max_retries,
+        importance=args.importance,
+        cc=cc_list,
+        bcc=bcc_list,
     )
 
     # Report

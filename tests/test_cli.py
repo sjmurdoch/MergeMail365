@@ -118,6 +118,33 @@ class TestTestEmail:
         assert exit_code == 1
 
 
+class TestImportanceCcBcc:
+    @responses.activate
+    def test_importance_cc_bcc_in_payload(self, sample_xlsx, body_template_file, monkeypatch):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--test-email", "tester@example.com",
+            "--importance", "high",
+            "--cc", "a@x.com,b@x.com",
+            "--bcc", "c@x.com",
+        ])
+        assert exit_code == 0
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["message"]["importance"] == "high"
+        cc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["ccRecipients"]]
+        assert cc_addrs == ["a@x.com", "b@x.com"]
+        bcc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["bccRecipients"]]
+        assert bcc_addrs == ["c@x.com"]
+
+
 class TestConfigFilePrecedence:
     """Verify CLI flag → env var → config file → default precedence."""
 

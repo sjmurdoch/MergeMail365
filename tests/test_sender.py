@@ -68,6 +68,43 @@ class TestSendOne:
         assert result.throttled is True
 
 
+class TestSendOneOptionalFields:
+    @responses.activate
+    def test_importance_included_in_payload(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one("fake-token", "test@example.com", "Subject", "Body", importance="high")
+        assert result.success
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["message"]["importance"] == "high"
+
+    @responses.activate
+    def test_cc_and_bcc_included_in_payload(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one(
+            "fake-token", "test@example.com", "Subject", "Body",
+            cc=["a@x.com", "b@x.com"], bcc=["c@x.com"],
+        )
+        assert result.success
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        cc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["ccRecipients"]]
+        assert cc_addrs == ["a@x.com", "b@x.com"]
+        bcc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["bccRecipients"]]
+        assert bcc_addrs == ["c@x.com"]
+
+    @responses.activate
+    def test_optional_fields_absent_by_default(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        assert result.success
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert "importance" not in payload["message"]
+        assert "ccRecipients" not in payload["message"]
+        assert "bccRecipients" not in payload["message"]
+
+
 class TestSendAll:
     def test_dry_run(self):
         recipients = [

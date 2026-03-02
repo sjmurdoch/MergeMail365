@@ -24,6 +24,9 @@ def send_one(
     subject: str,
     body: str,
     max_retries: int = 3,
+    importance: str | None = None,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
 ) -> SendResult:
     """Send a single email via Microsoft Graph API.
 
@@ -34,13 +37,18 @@ def send_one(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "message": {
-            "subject": subject,
-            "body": {"contentType": "Text", "content": body},
-            "toRecipients": [{"emailAddress": {"address": to_email}}],
-        }
+    message = {
+        "subject": subject,
+        "body": {"contentType": "Text", "content": body},
+        "toRecipients": [{"emailAddress": {"address": to_email}}],
     }
+    if importance:
+        message["importance"] = importance
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+    if bcc:
+        message["bccRecipients"] = [{"emailAddress": {"address": a}} for a in bcc]
+    payload = {"message": message}
 
     max_rate_limit_retries = 20
     retries = 0
@@ -102,6 +110,9 @@ def send_all(
     dry_run: bool = False,
     delay: float = 0.0,
     max_retries: int = 3,
+    importance: str | None = None,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails to all recipients.
 
@@ -126,7 +137,7 @@ def send_all(
             results.append(SendResult(email=to_email, success=True, status_code=None))
         else:
             logger.info("Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
-            result = send_one(token, to_email, rendered_subject, rendered_body, max_retries=max_retries)
+            result = send_one(token, to_email, rendered_subject, rendered_body, max_retries=max_retries, importance=importance, cc=cc, bcc=bcc)
             results.append(result)
             if not result.success:
                 logger.error("Failed to send to %s: %s", to_email, result.error)

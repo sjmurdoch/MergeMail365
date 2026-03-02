@@ -37,6 +37,8 @@ Key design decisions:
 - **`template.py`** uses case-insensitive matching — `{{Name}}` matches a column called `name`
 - **`cli.py:main()`** accepts `argv` parameter for testability — all CLI tests call `main([...])` directly
 - **`--test-email`** sends one email to a specified address using first recipient's data, then exits (for pre-send verification)
+- **`--importance`** sets email importance (`low`, `normal`, `high`); omitted from API by default
+- **`--cc`** / **`--bcc`** accept comma-separated addresses for CC/BCC recipients
 
 ## Testing
 
