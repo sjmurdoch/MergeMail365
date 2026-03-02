@@ -34,7 +34,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--test-email", default=None, help="Send a single test email to this address using the first recipient's data, then exit")
     parser.add_argument("--dry-run", action="store_true", help="Render and validate only, do not send")
     parser.add_argument("--output", default=None, help="Path to write CSV report")
-    parser.add_argument("--delay", type=float, default=0.0, help="Seconds between sends")
+    parser.add_argument("--delay", type=float, default=1.0, help="Base seconds between sends (adaptive throttling increases this on rate limits)")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per recipient for 5xx errors")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args(argv)

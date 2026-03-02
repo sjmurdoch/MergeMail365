@@ -33,6 +33,7 @@ Verify it works:
 6. Copy the **Application (client) ID** — you'll need this as `--client-id`.
 7. Go to **API permissions** > **Add a permission** > **Microsoft Graph** > **Delegated permissions** > search for `Mail.Send` > **Add**.
 8. If your tenant requires it, click **Grant admin consent**.
+9. Go to **Authentication** > **Advanced settings** > set **Allow public client flows** to **Yes** > **Save**. (Required for the device code flow used by this tool.)
 
 ## 3. Save your credentials (optional)
 
@@ -133,7 +134,7 @@ Check your inbox. If the email looks right, proceed to the full send.
   --tenant-id YOUR_TENANT_ID
 ```
 
-You can also set these via environment variables to avoid repeating them:
+If you saved your credentials in `~/.mail-merge.toml` (step 3), you can omit `--client-id` and `--tenant-id`. You can also use environment variables:
 
 ```bash
 export MAIL_MERGE_CLIENT_ID=YOUR_CLIENT_ID
@@ -171,10 +172,13 @@ The CSV contains columns: `email`, `success`, `status_code`, `error`.
 
 ### Rate limiting
 
-Add a delay between sends to stay within sending limits:
+By default, mail-merge waits 1 second between sends and uses adaptive throttling: if Microsoft Graph returns a 429 (rate limit) response, the delay doubles (up to 30s); once sends succeed without throttling, the delay halves back toward the base.
+
+To change the base delay:
 
 ```bash
---delay 1.0     # 1 second between each email
+--delay 2.0     # 2 seconds base delay between each email
+--delay 0       # no delay (not recommended for large sends)
 ```
 
 ### Retry control
@@ -185,7 +189,7 @@ Control how many times a failed send (5xx server error) is retried:
 --max-retries 5  # default is 3
 ```
 
-Rate-limit responses (HTTP 429) are always retried automatically, honouring the server's `Retry-After` header.
+Rate-limit responses (HTTP 429) are retried automatically (up to 20 times), honouring the server's `Retry-After` header.
 
 ### Specific sheet
 

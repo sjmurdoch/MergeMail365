@@ -15,6 +15,7 @@ class SendResult:
     success: bool
     status_code: int | None = None
     error: str = ""
+    throttled: bool = False
 
 
 def send_one(
@@ -44,6 +45,7 @@ def send_one(
     max_rate_limit_retries = 20
     retries = 0
     rate_limit_retries = 0
+    was_throttled = False
     while True:
         try:
             resp = requests.post(GRAPH_SEND_URL, json=payload, headers=headers, timeout=30)
@@ -57,9 +59,10 @@ def send_one(
             continue
 
         if resp.status_code == 202:
-            return SendResult(email=to_email, success=True, status_code=202)
+            return SendResult(email=to_email, success=True, status_code=202, throttled=was_throttled)
 
         if resp.status_code == 429:
+            was_throttled = True
             rate_limit_retries += 1
             if rate_limit_retries > max_rate_limit_retries:
                 return SendResult(
@@ -107,6 +110,8 @@ def send_all(
     from mail_merge.template import render
 
     results = []
+    current_delay = delay
+    max_delay = 30.0
     for i, recipient in enumerate(recipients):
         to_email = recipient[email_column]
         rendered_subject = render(subject_template, recipient)
@@ -126,7 +131,14 @@ def send_all(
             if not result.success:
                 logger.error("Failed to send to %s: %s", to_email, result.error)
 
-        if delay > 0 and i < len(recipients) - 1:
-            time.sleep(delay)
+            # Adaptive delay: back off on throttling, recover when clear
+            if result.throttled:
+                current_delay = min(current_delay * 2, max_delay)
+                logger.info("Rate limit hit, increasing delay to %.1fs", current_delay)
+            else:
+                current_delay = max(current_delay / 2, delay)
+
+        if current_delay > 0 and i < len(recipients) - 1:
+            time.sleep(current_delay)
 
     return results

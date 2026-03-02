@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import responses
 
 from mail_merge.sender import GRAPH_SEND_URL, SendResult, send_all, send_one
@@ -47,6 +49,24 @@ class TestSendOne:
         assert result.success
         assert len(responses.calls) == 2
 
+    @responses.activate
+    def test_throttled_false_on_clean_send(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        assert result.success
+        assert result.throttled is False
+
+    @responses.activate
+    def test_throttled_true_after_429(self):
+        responses.add(
+            responses.POST, GRAPH_SEND_URL, status=429,
+            headers={"Retry-After": "0"},
+        )
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        assert result.success
+        assert result.throttled is True
+
 
 class TestSendAll:
     def test_dry_run(self):
@@ -84,3 +104,39 @@ class TestSendAll:
         )
         assert results[0].success
         assert not results[1].success
+
+    @responses.activate
+    def test_adaptive_delay_increases_on_throttle(self):
+        # First send: 429 then 202 (throttled), second send: clean 202
+        responses.add(
+            responses.POST, GRAPH_SEND_URL, status=429,
+            headers={"Retry-After": "0"},
+        )
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        recipients = [
+            {"name": "Alice", "email": "alice@example.com"},
+            {"name": "Bob", "email": "bob@example.com"},
+        ]
+        sleep_values = []
+        original_sleep = __import__("time").sleep
+
+        def mock_sleep(secs):
+            sleep_values.append(secs)
+
+        with patch("mail_merge.sender.time.sleep", side_effect=mock_sleep):
+            results = send_all(
+                token="fake",
+                recipients=recipients,
+                email_column="email",
+                subject_template="Hi {{name}}",
+                body_template="Hello {{name}}",
+                delay=1.0,
+            )
+
+        assert results[0].success
+        assert results[0].throttled is True
+        assert results[1].success
+        # After throttled send, delay should have doubled to 2.0
+        assert sleep_values[-1] == 2.0

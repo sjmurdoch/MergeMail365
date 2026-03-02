@@ -33,7 +33,7 @@ Source lives under `src/mail_merge/` (src layout). The CLI orchestration flow in
 Key design decisions:
 - **`config.py`** reads `~/.mail-merge.toml` for persistent `client-id` / `tenant-id`. Precedence: CLI flag → env var → config file → default (`"common"` for tenant-id).
 - **`auth.py`** uses lazy import in `cli.py` — only imported when authentication is actually needed (skipped for `--dry-run`)
-- **`sender.py`** has two retry strategies: 429 (rate limit) retries are unlimited and honour `Retry-After`; 5xx retries use exponential backoff capped at `--max-retries`. 4xx errors (non-429) fail immediately.
+- **`sender.py`** has two retry strategies: 429 (rate limit) honours `Retry-After` with a cap of 20 attempts; 5xx retries use exponential backoff capped at `--max-retries`. 4xx errors (non-429) fail immediately. `--delay` defaults to 1s with adaptive throttling: delay doubles (up to 30s) on 429s and halves back to the base when clear.
 - **`template.py`** uses case-insensitive matching — `{{Name}}` matches a column called `name`
 - **`cli.py:main()`** accepts `argv` parameter for testability — all CLI tests call `main([...])` directly
 - **`--test-email`** sends one email to a specified address using first recipient's data, then exits (for pre-send verification)
