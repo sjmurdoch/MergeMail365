@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
 from mail_merge.template import validate_template, extract_placeholders
 from mail_merge.sender import send_all, send_one
@@ -21,8 +22,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--email-column", required=True, help="Column name containing email addresses")
     parser.add_argument(
         "--client-id",
-        default=os.environ.get("MAIL_MERGE_CLIENT_ID"),
-        help="Azure AD application (client) ID (or set MAIL_MERGE_CLIENT_ID env var)",
+        default=None,
+        help="Azure AD application (client) ID (or set MAIL_MERGE_CLIENT_ID env var, or ~/.mail-merge.toml)",
+    )
+    parser.add_argument(
+        "--tenant-id",
+        default=None,
+        help="Azure AD tenant ID (or set MAIL_MERGE_TENANT_ID env var, or ~/.mail-merge.toml; default: 'common')",
     )
     parser.add_argument("--sheet", default=None, help="Sheet name (default: first sheet)")
     parser.add_argument("--test-email", default=None, help="Send a single test email to this address using the first recipient's data, then exit")
@@ -34,8 +40,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _resolve_args(args: argparse.Namespace) -> None:
+    """Fill in client_id and tenant_id from env vars, config file, or defaults.
+
+    Precedence (highest wins): CLI flag → env var → config file → hardcoded default.
+    Mutates *args* in place.
+    """
+    config = load_config()
+
+    if not args.client_id:
+        args.client_id = (
+            os.environ.get("MAIL_MERGE_CLIENT_ID")
+            or config.get("client_id")
+        )
+
+    if not args.tenant_id:
+        args.tenant_id = (
+            os.environ.get("MAIL_MERGE_TENANT_ID")
+            or config.get("tenant_id")
+            or "common"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    _resolve_args(args)
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
@@ -46,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Validate client-id (not needed for dry-run but we still check)
     if not args.dry_run and not args.test_email and not args.client_id:
-        logger.error("--client-id is required (or set MAIL_MERGE_CLIENT_ID env var)")
+        logger.error("--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, or add to ~/.mail-merge.toml)")
         return 1
 
     # Read spreadsheet
@@ -92,11 +121,11 @@ def main(argv: list[str] | None = None) -> int:
     needs_auth = not args.dry_run or args.test_email
     if needs_auth:
         if not args.client_id:
-            logger.error("--client-id is required (or set MAIL_MERGE_CLIENT_ID env var)")
+            logger.error("--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, or add to ~/.mail-merge.toml)")
             return 1
         from mail_merge.auth import acquire_token
         try:
-            token = acquire_token(args.client_id)
+            token = acquire_token(args.client_id, args.tenant_id)
         except Exception as exc:
             logger.error("Authentication failed: %s", exc)
             return 1

@@ -9,7 +9,7 @@ import msal
 logger = logging.getLogger(__name__)
 
 SCOPES = ["Mail.Send"]
-AUTHORITY = "https://login.microsoftonline.com/common"
+AUTHORITY_BASE = "https://login.microsoftonline.com"
 CACHE_PATH = Path.home() / ".mail-merge-token-cache.json"
 
 
@@ -26,7 +26,7 @@ def _save_cache(cache: msal.SerializableTokenCache) -> None:
         CACHE_PATH.chmod(0o600)
 
 
-def acquire_token(client_id: str) -> str:
+def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     """Acquire an access token via MSAL device code flow.
 
     Tries silent acquisition first (cached refresh token), then falls back
@@ -34,10 +34,11 @@ def acquire_token(client_id: str) -> str:
 
     Returns the access token string.
     """
+    authority = f"{AUTHORITY_BASE}/{tenant_id}"
     cache = _load_cache()
     app = msal.PublicClientApplication(
         client_id,
-        authority=AUTHORITY,
+        authority=authority,
         token_cache=cache,
     )
 

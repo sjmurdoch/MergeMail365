@@ -31,6 +31,7 @@ uv venv && uv pip install -e ".[dev]"
 Source lives under `src/mail_merge/` (src layout). The CLI orchestration flow in `cli.py` is strictly ordered: parse args → read spreadsheet → read body template → validate all placeholders (abort if any unresolvable) → authenticate (MSAL device code) → send → report. All validation happens before any sending.
 
 Key design decisions:
+- **`config.py`** reads `~/.mail-merge.toml` for persistent `client-id` / `tenant-id`. Precedence: CLI flag → env var → config file → default (`"common"` for tenant-id).
 - **`auth.py`** uses lazy import in `cli.py` — only imported when authentication is actually needed (skipped for `--dry-run`)
 - **`sender.py`** has two retry strategies: 429 (rate limit) retries are unlimited and honour `Retry-After`; 5xx retries use exponential backoff capped at `--max-retries`. 4xx errors (non-429) fail immediately.
 - **`template.py`** uses case-insensitive matching — `{{Name}}` matches a column called `name`
