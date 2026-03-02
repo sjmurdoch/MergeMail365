@@ -9,21 +9,21 @@ A Python CLI tool (`mail-merge`) that sends personalised emails via Microsoft Gr
 ## Commands
 
 ```bash
-# Setup (use uv, not pip)
-uv venv && uv pip install -e ".[dev]"
+# Setup
+uv sync
 
 # Run all tests
-.venv/bin/pytest
+uv run pytest
 
 # Run a single test file or test
-.venv/bin/pytest tests/test_template.py
-.venv/bin/pytest tests/test_cli.py::TestTestEmail::test_test_email_sends_to_correct_address
+uv run pytest tests/test_template.py
+uv run pytest tests/test_cli.py::TestTestEmail::test_test_email_sends_to_correct_address
 
 # Run with coverage
-.venv/bin/pytest --cov=mail_merge
+uv run pytest --cov=mail_merge
 
 # CLI usage (after install)
-.venv/bin/mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email --client-id <azure-app-id>
+uv run mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email --client-id <azure-app-id>
 ```
 
 ## Architecture

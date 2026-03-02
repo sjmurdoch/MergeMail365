@@ -13,14 +13,13 @@ This tutorial walks you through setting up mail-merge and sending your first bat
 
 ```bash
 git clone <repo-url> && cd mail-merge
-uv venv
-uv pip install -e .
+uv sync
 ```
 
 Verify it works:
 
 ```bash
-.venv/bin/mail-merge --help
+uv run mail-merge --help
 ```
 
 ## 2. Register an Azure AD application
@@ -82,7 +81,7 @@ Your Name
 Before sending anything, validate your setup with `--dry-run`. This checks the spreadsheet, resolves all placeholders, and logs what would be sent — without authenticating or making any API calls.
 
 ```bash
-.venv/bin/mail-merge \
+uv run mail-merge \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Event invitation for {{name}}" \
@@ -99,7 +98,7 @@ Use `--log-level DEBUG` to see the fully rendered body for each recipient.
 Once the dry run looks good, send a single real email to yourself to verify delivery and formatting. `--test-email` renders the email using the first recipient's data but sends it to the address you specify:
 
 ```bash
-.venv/bin/mail-merge \
+uv run mail-merge \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Event invitation for {{name}}" \
@@ -125,7 +124,7 @@ Check your inbox. If the email looks right, proceed to the full send.
 ## 8. Send to all recipients
 
 ```bash
-.venv/bin/mail-merge \
+uv run mail-merge \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Event invitation for {{name}}" \
@@ -160,7 +159,7 @@ The exit code is 0 if all emails succeeded, or 1 if any failed.
 Save detailed per-recipient results to a CSV file:
 
 ```bash
-.venv/bin/mail-merge \
+uv run mail-merge \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Hello {{name}}" \
