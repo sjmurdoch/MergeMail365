@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mail-merge"
+version = "0.1.0"
+description = "Office 365 mail merge CLI using Microsoft Graph API"
+requires-python = ">=3.10"
+dependencies = [
+    "msal>=1.28.0",
+    "openpyxl>=3.1.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+mail-merge = "mail_merge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "responses>=0.25.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,61 @@
+import logging
+from pathlib import Path
+
+import openpyxl
+
+logger = logging.getLogger(__name__)
+
+
+def read_recipients(
+    path: str | Path,
+    email_column: str,
+    sheet_name: str | None = None,
+) -> list[dict[str, str]]:
+    """Read recipients from an Excel spreadsheet.
+
+    Returns a list of dicts mapping column header -> cell value.
+    Rows with an empty email cell are skipped with a warning.
+    Raises ValueError if the email column is not found.
+    """
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb[sheet_name] if sheet_name else wb.active
+
+    rows = ws.iter_rows()
+    header_row = next(rows, None)
+    if header_row is None:
+        wb.close()
+        raise ValueError("Spreadsheet is empty")
+
+    headers = [str(cell.value).strip() if cell.value is not None else "" for cell in header_row]
+
+    # Find the email column (case-insensitive)
+    email_col_idx = None
+    for i, h in enumerate(headers):
+        if h.lower() == email_column.lower():
+            email_col_idx = i
+            break
+
+    if email_col_idx is None:
+        wb.close()
+        raise ValueError(
+            f"Email column '{email_column}' not found. "
+            f"Available columns: {', '.join(h for h in headers if h)}"
+        )
+
+    recipients = []
+    for row_num, row in enumerate(rows, start=2):
+        values = [str(cell.value).strip() if cell.value is not None else "" for cell in row]
+        # Pad values if row is shorter than headers
+        while len(values) < len(headers):
+            values.append("")
+
+        email_value = values[email_col_idx]
+        if not email_value:
+            logger.warning("Row %d: empty email, skipping", row_num)
+            continue
+
+        record = {headers[i]: values[i] for i in range(len(headers)) if headers[i]}
+        recipients.append(record)
+
+    wb.close()
+    return recipients
