@@ -41,7 +41,9 @@ def send_one(
         }
     }
 
+    max_rate_limit_retries = 20
     retries = 0
+    rate_limit_retries = 0
     while True:
         try:
             resp = requests.post(GRAPH_SEND_URL, json=payload, headers=headers, timeout=30)
@@ -58,10 +60,16 @@ def send_one(
             return SendResult(email=to_email, success=True, status_code=202)
 
         if resp.status_code == 429:
+            rate_limit_retries += 1
+            if rate_limit_retries > max_rate_limit_retries:
+                return SendResult(
+                    email=to_email, success=False, status_code=429,
+                    error=f"Rate limited {max_rate_limit_retries} times, giving up",
+                )
             retry_after = int(resp.headers.get("Retry-After", 10))
             logger.warning("Rate limited, waiting %ds before retrying %s", retry_after, to_email)
             time.sleep(retry_after)
-            continue  # unlimited retries for 429
+            continue
 
         if 500 <= resp.status_code < 600:
             retries += 1

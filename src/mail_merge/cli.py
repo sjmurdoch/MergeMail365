@@ -73,11 +73,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     logger = logging.getLogger(__name__)
 
-    # Validate client-id (not needed for dry-run but we still check)
-    if not args.dry_run and not args.test_email and not args.client_id:
-        logger.error("--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, or add to ~/.mail-merge.toml)")
-        return 1
-
     # Read spreadsheet
     spreadsheet_path = Path(args.spreadsheet)
     if not spreadsheet_path.exists():
@@ -163,7 +158,10 @@ def main(argv: list[str] | None = None) -> int:
     # Report
     print_summary(results)
     if args.output:
-        write_csv(results, args.output)
+        try:
+            write_csv(results, args.output)
+        except OSError as exc:
+            logger.error("Failed to write report: %s", exc)
 
     has_failures = any(not r.success for r in results)
     return 1 if has_failures else 0

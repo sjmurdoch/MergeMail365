@@ -24,11 +24,8 @@ class TestLoadConfig:
     def test_malformed_file(self, tmp_path):
         cfg = tmp_path / "bad.toml"
         cfg.write_text("not valid toml [[[")
-        try:
-            load_config(cfg)
-            assert False, "Expected an exception"
-        except Exception:
-            pass
+        result = load_config(cfg)
+        assert result == {}
 
     def test_empty_file(self, tmp_path):
         cfg = tmp_path / "empty.toml"
