@@ -94,7 +94,7 @@ Use `--log-level DEBUG` to see the fully rendered body for each recipient.
 
 ## 7. Send a test email
 
-Once the dry run looks good, send a single real email to yourself to verify delivery and formatting. `--test-email` renders the email using the first recipient's data but sends it to the address you specify. Note `--send` is required to actually deliver the email:
+Once the dry run looks good, send a single real email to yourself to verify delivery and formatting. `--test-email` renders the email using the first recipient's data but sends it to the address you specify. Unlike the full send, `--test-email` always sends — no `--send` flag needed:
 
 ```bash
 uv run mail-merge \
@@ -104,8 +104,7 @@ uv run mail-merge \
   --email-column email \
   --client-id YOUR_CLIENT_ID \
   --tenant-id YOUR_TENANT_ID \
-  --test-email your.own@example.com \
-  --send
+  --test-email your.own@example.com
 ```
 
 If your Azure AD app is registered as single-tenant (the most common setup), you must provide `--tenant-id` with your directory (tenant) ID. You can find this in the Azure portal under **App registrations** > your app > **Overview**. You can also set it via the `MAIL_MERGE_TENANT_ID` environment variable. Multi-tenant apps can omit this flag (it defaults to `common`).
@@ -329,7 +328,7 @@ By default, the first sheet is used.
 ## Recommended workflow
 
 1. **Dry run** — validate placeholders and data (the default — no flags needed)
-2. **Test email** — send one real email to yourself (`--test-email you@example.com --send`)
+2. **Test email** — send one real email to yourself (`--test-email you@example.com`)
 3. **Check your inbox** — verify subject, body, and formatting
 4. **Full send** — add `--send` (confirmation prompt appears automatically)
 5. **Review report** — check console summary or `--output report.csv`

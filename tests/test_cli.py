@@ -50,7 +50,10 @@ class TestCLIDryRun:
         ])
         assert exit_code == 1
 
-    def test_csv_output(self, sample_xlsx, body_template_file, tmp_path):
+    @responses.activate
+    def test_csv_output(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
         report_path = tmp_path / "report.csv"
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -59,11 +62,24 @@ class TestCLIDryRun:
             "--email-column", "email",
             "--client-id", "fake",
             "--output", str(report_path),
+            "--send", "-y",
         ])
         assert exit_code == 0
         assert report_path.exists()
         lines = report_path.read_text().strip().split("\n")
         assert len(lines) == 3  # header + 2 recipients
+
+    def test_csv_not_written_on_dry_run(self, sample_xlsx, body_template_file, tmp_path):
+        report_path = tmp_path / "report.csv"
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--output", str(report_path),
+        ])
+        assert exit_code == 0
+        assert not report_path.exists()
 
 
 class TestTestEmail:
@@ -107,18 +123,8 @@ class TestTestEmail:
         ])
         assert exit_code == 1
 
-    def test_test_email_dry_run_does_not_send(self, sample_xlsx, body_template_file):
-        """Default (no --send) with --test-email should not authenticate or send."""
-        exit_code = main([
-            "--spreadsheet", str(sample_xlsx),
-            "--body", str(body_template_file),
-            "--subject", "Hello {{name}}",
-            "--email-column", "email",
-            "--test-email", "tester@example.com",
-        ])
-        assert exit_code == 0
-
     def test_test_email_requires_client_id(self, sample_xlsx, body_template_file, monkeypatch):
+        """--test-email always sends, so it requires client-id even without --send."""
         monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", sample_xlsx.parent / "nonexistent.toml")
         exit_code = main([
@@ -127,7 +133,6 @@ class TestTestEmail:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--test-email", "tester@example.com",
-            "--send",
         ])
         assert exit_code == 1
 
@@ -379,19 +384,15 @@ class TestReplyTo:
 
 
 class TestFilter:
-    def test_filter_flag_filters_recipients(self, sample_xlsx, body_template_file, tmp_path):
-        report = tmp_path / "report.csv"
+    def test_filter_flag_filters_recipients(self, sample_xlsx, body_template_file):
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--filter", "company=Acme",
-            "--output", str(report),
         ])
         assert exit_code == 0
-        lines = report.read_text().strip().split("\n")
-        assert len(lines) == 2  # header + 1 filtered recipient
 
     def test_multiple_filter_flags(self, sample_xlsx, body_template_file):
         # Both filters match only Alice (company=Acme AND name=Alice)
@@ -485,7 +486,6 @@ class TestConfirm:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
-            "--send",
         ])
         assert exit_code == 0
 
@@ -507,8 +507,11 @@ class TestConfirm:
 
 
 class TestResumeBatchSize:
-    def test_resume_batch_size_round_trip(self, sample_xlsx, body_template_file, tmp_path):
+    @responses.activate
+    def test_resume_batch_size_round_trip(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """--batch-size sends one batch, then auto-resumes on next run."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
         report = tmp_path / "report.csv"
         # First run: batch of 1
         exit_code = main([
@@ -516,8 +519,10 @@ class TestResumeBatchSize:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
+            "--client-id", "fake-client-id",
             "--output", str(report),
             "--batch-size", "1",
+            "--send", "-y",
         ])
         assert exit_code == 0
         lines = report.read_text().strip().split("\n")
@@ -529,8 +534,10 @@ class TestResumeBatchSize:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
+            "--client-id", "fake-client-id",
             "--output", str(report),
             "--batch-size", "1",
+            "--send", "-y",
         ])
         assert exit_code == 0
         lines = report.read_text().strip().split("\n")

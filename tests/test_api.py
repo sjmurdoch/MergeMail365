@@ -19,12 +19,17 @@ class TestDryRun:
         assert len(results) == 2
         assert all(r.success for r in results)
 
-    def test_dry_run_test_email(self, sample_xlsx, body_template_file):
+    @responses.activate
+    def test_test_email_always_sends(self, sample_xlsx, body_template_file, monkeypatch):
+        """test_email sends even without send=True."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
         results = send_merge(
             spreadsheet=sample_xlsx,
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
+            client_id="fake-client-id",
             test_email="me@example.com",
         )
         assert len(results) == 1
@@ -45,8 +50,11 @@ class TestDryRun:
             confirm=True,
         )
 
+    @responses.activate
     def test_confirm_disabled_on_test_email(self, sample_xlsx, body_template_file, monkeypatch):
         """No prompt should happen for test_email even if confirm=True."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
         def fail_on_input(prompt: str) -> str:
             pytest.fail("console.input was called during test_email!")
 
@@ -56,6 +64,7 @@ class TestDryRun:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
+            client_id="fake-client-id",
             test_email="me@example.com",
             confirm=True,
         )

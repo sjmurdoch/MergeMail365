@@ -162,7 +162,7 @@ def send_merge(
             ``MAIL_MERGE_TENANT_ID``, config file, or defaults to ``"common"``.
         sheet: Worksheet name (default: first sheet).
         test_email: Send one email to this address using first recipient's data,
-            then return.
+            then return. Always sends regardless of ``send`` flag.
         send: If ``True``, authenticate and send emails. If ``False``
             (the default), validate and render only (dry run).
         output: Path to write a CSV report of results.
@@ -323,9 +323,9 @@ def send_merge(
         if answer.lower() not in ("y", "yes"):
             raise KeyboardInterrupt("Send aborted by user")
 
-    # --- Authenticate (skip for dry run) ---
+    # --- Authenticate (skip for dry run, but always for test email) ---
     token = None
-    if send:
+    if send or test_email:
         if not client_id:
             raise RuntimeError(
                 "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
@@ -338,21 +338,13 @@ def send_merge(
         except Exception as exc:
             raise RuntimeError(f"Authentication failed: {exc}") from exc
 
-    # --- Test email ---
+    # --- Test email (always sends, regardless of --send flag) ---
     if test_email:
         from mail_merge.template import render
 
         sample = recipients[0]
         rendered_subject = render(subject, sample)
         rendered_body = render(body_template, sample)
-        if not send:
-            logger.info(
-                "🔄 DRY RUN test email to %s | Subject: %s",
-                test_email, rendered_subject,
-            )
-            logger.debug("Body:\n%s", rendered_body)
-            return [SendResult(email=test_email, success=True, status_code=None)]
-
         logger.info(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
