@@ -142,6 +142,7 @@ def send_merge(
     attachment: list[str | Path] | None = None,
     reply_to: str | list[str] | None = None,
     filter: list[str] | None = None,
+    confirm: bool = False,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -174,6 +175,8 @@ def send_merge(
         filter: Filter expressions to select recipients. Each expression is
             ``"column=value"`` (keep matching) or ``"column!=value"`` (exclude
             matching). Multiple filters use AND logic. Case-insensitive.
+        confirm: If ``True``, display a summary and prompt for confirmation
+            before sending. Aborted sends raise ``KeyboardInterrupt``.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -235,6 +238,30 @@ def send_merge(
             f"Unresolvable placeholders: {', '.join(bad)} "
             f"(available columns: {', '.join(columns)})"
         )
+
+    # --- Confirm before sending ---
+    if confirm:
+        from mail_merge.console import console
+        from mail_merge.template import render
+
+        sample = recipients[0]
+        console.print()
+        console.print(f"[bold]Subject:[/bold]  {render(subject, sample)}")
+        console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
+        if cc:
+            console.print(f"[bold]CC:[/bold]       {cc}")
+        if bcc:
+            console.print(f"[bold]BCC:[/bold]      {bcc}")
+        if attachment:
+            names = [Path(a).name for a in attachment]
+            console.print(f"[bold]Attach:[/bold]   {', '.join(names)}")
+        console.print()
+        try:
+            answer = console.input("[bold]Send? [y/N][/bold] ")
+        except EOFError:
+            answer = ""
+        if answer.lower() not in ("y", "yes"):
+            raise KeyboardInterrupt("Send aborted by user")
 
     # --- Authenticate (skip for dry-run) ---
     token = None

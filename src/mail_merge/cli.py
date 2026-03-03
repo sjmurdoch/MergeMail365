@@ -39,6 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--attachment", action="append", default=None, help="Path to file attachment (repeatable)")
     parser.add_argument("--reply-to", default=None, help="Comma-separated reply-to addresses")
     parser.add_argument("--filter", action="append", default=None, help="Filter recipients: 'column=value' or 'column!=value' (repeatable, AND logic)")
+    parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args(argv)
 
@@ -71,7 +72,11 @@ def main(argv: list[str] | None = None) -> int:
             attachment=args.attachment,
             reply_to=args.reply_to,
             filter=args.filter,
+            confirm=not (args.yes or args.dry_run or args.test_email),
         )
+    except KeyboardInterrupt:
+        logger.info("Aborted")
+        return 130
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         logger.error("%s", exc)
         return 1

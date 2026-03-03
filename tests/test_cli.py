@@ -48,6 +48,7 @@ class TestCLIDryRun:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
+            "--yes",
         ])
         assert exit_code == 1
 
@@ -252,6 +253,7 @@ class TestConfigFilePrecedence:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
+            "--yes",
         ])
         assert exit_code == 1
 
@@ -405,6 +407,92 @@ class TestFilter:
             "--filter", "company=NonExistent",
         ])
         assert exit_code == 1
+
+
+class TestConfirm:
+    def test_confirm_abort_exits_130(self, sample_xlsx, body_template_file, monkeypatch):
+        """Declining confirmation returns exit code 130."""
+        monkeypatch.setattr("mail_merge.console.console.input", lambda prompt: "n")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+        ])
+        assert exit_code == 130
+
+    def test_confirm_eof_aborts(self, sample_xlsx, body_template_file, monkeypatch):
+        """EOFError (piped input) is treated as decline."""
+        def raise_eof(prompt: str) -> str:
+            raise EOFError
+
+        monkeypatch.setattr("mail_merge.console.console.input", raise_eof)
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+        ])
+        assert exit_code == 130
+
+    @responses.activate
+    def test_confirm_yes_proceeds(self, sample_xlsx, body_template_file, monkeypatch):
+        """Typing 'y' at the prompt proceeds with sending."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.console.console.input", lambda prompt: "y")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+        ])
+        assert exit_code == 0
+        assert len(responses.calls) == 2  # 2 recipients
+
+    def test_dry_run_skips_confirm(self, sample_xlsx, body_template_file):
+        """--dry-run should not prompt for confirmation."""
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+        ])
+        assert exit_code == 0
+
+    @responses.activate
+    def test_test_email_skips_confirm(self, sample_xlsx, body_template_file, monkeypatch):
+        """--test-email should not prompt for confirmation."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--test-email", "tester@example.com",
+        ])
+        assert exit_code == 0
+
+    @responses.activate
+    def test_yes_flag_skips_confirm(self, sample_xlsx, body_template_file, monkeypatch):
+        """--yes should skip confirmation and go straight to sending."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--yes",
+        ])
+        assert exit_code == 0
 
 
 class TestRecipientCountValidation:
