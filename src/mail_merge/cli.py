@@ -27,7 +27,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--sheet", default=None, help="Sheet name (default: first sheet)")
     parser.add_argument("--test-email", default=None, help="Send a single test email to this address using the first recipient's data, then exit")
-    parser.add_argument("--dry-run", action="store_true", help="Render and validate only, do not send")
+    parser.add_argument("--send", action="store_true", help="Actually send emails (default is dry-run)")
     parser.add_argument("--output", default=None, help="Path to write CSV report")
     parser.add_argument("--delay", type=float, default=2.0, help="Base seconds between sends (default 2s; Exchange Online allows ~30 msgs/min; adaptive throttling increases this on rate limits)")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per recipient for 5xx errors")
@@ -39,7 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--attachment", action="append", default=None, help="Path to file attachment (repeatable)")
     parser.add_argument("--reply-to", default=None, help="Comma-separated reply-to addresses")
     parser.add_argument("--filter", action="append", default=None, help="Filter recipients: 'column=value' or 'column!=value' (repeatable, AND logic)")
-    parser.add_argument("--resume", action="store_true", help="Resume from output CSV, skipping already-successful recipients")
+    parser.add_argument("--no-resume", action="store_true", help="Disable automatic resume (by default, previous successes in --output CSV are skipped)")
     parser.add_argument("--batch-size", type=int, default=None, help="Max emails to send per invocation")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             tenant_id=args.tenant_id,
             sheet=args.sheet,
             test_email=args.test_email,
-            dry_run=args.dry_run,
+            send=args.send,
             output=args.output,
             delay=args.delay,
             max_retries=args.max_retries,
@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             reply_to=args.reply_to,
             filter=args.filter,
             confirm=not args.yes,
-            resume=args.resume,
+            resume=not args.no_resume,
             batch_size=args.batch_size,
         )
     except KeyboardInterrupt:

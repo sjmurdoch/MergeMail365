@@ -76,17 +76,16 @@ Best regards,
 Your Name
 ```
 
-## 6. Dry run
+## 6. Dry run (the default)
 
-Before sending anything, validate your setup with `--dry-run`. This checks the spreadsheet, resolves all placeholders, and logs what would be sent — without authenticating or making any API calls.
+Running mail-merge performs a dry run by default — it checks the spreadsheet, resolves all placeholders, and logs what would be sent, without authenticating or making any API calls.
 
 ```bash
 uv run mail-merge \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Event invitation for {{name}}" \
-  --email-column email \
-  --dry-run
+  --email-column email
 ```
 
 If a placeholder in your subject or body doesn't match any spreadsheet column, the tool will abort with an error listing the unresolvable placeholders and the available columns.
@@ -95,7 +94,7 @@ Use `--log-level DEBUG` to see the fully rendered body for each recipient.
 
 ## 7. Send a test email
 
-Once the dry run looks good, send a single real email to yourself to verify delivery and formatting. `--test-email` renders the email using the first recipient's data but sends it to the address you specify:
+Once the dry run looks good, send a single real email to yourself to verify delivery and formatting. `--test-email` renders the email using the first recipient's data but sends it to the address you specify. Note `--send` is required to actually deliver the email:
 
 ```bash
 uv run mail-merge \
@@ -105,7 +104,8 @@ uv run mail-merge \
   --email-column email \
   --client-id YOUR_CLIENT_ID \
   --tenant-id YOUR_TENANT_ID \
-  --test-email your.own@example.com
+  --test-email your.own@example.com \
+  --send
 ```
 
 If your Azure AD app is registered as single-tenant (the most common setup), you must provide `--tenant-id` with your directory (tenant) ID. You can find this in the Azure portal under **App registrations** > your app > **Overview**. You can also set it via the `MAIL_MERGE_TENANT_ID` environment variable. Multi-tenant apps can omit this flag (it defaults to `common`).
@@ -123,6 +123,8 @@ Check your inbox. If the email looks right, proceed to the full send.
 
 ## 8. Send to all recipients
 
+Add `--send` to actually deliver emails. You'll see a confirmation prompt before anything is sent:
+
 ```bash
 uv run mail-merge \
   --spreadsheet recipients.xlsx \
@@ -130,7 +132,8 @@ uv run mail-merge \
   --subject "Event invitation for {{name}}" \
   --email-column email \
   --client-id YOUR_CLIENT_ID \
-  --tenant-id YOUR_TENANT_ID
+  --tenant-id YOUR_TENANT_ID \
+  --send
 ```
 
 If you saved your credentials in `~/.mail-merge.toml` (step 3), you can omit `--client-id` and `--tenant-id`. You can also use environment variables:
@@ -264,9 +267,9 @@ Send to a subset of your spreadsheet by filtering on column values. Use `--filte
 
 ### Interactive confirmation
 
-By default, mail-merge shows a summary (subject, recipient count, CC/BCC, attachments) and asks for confirmation before sending. Type `y` to proceed or anything else to abort (exit code 130).
+When sending (`--send`), mail-merge shows a summary (subject, recipient count, CC/BCC, attachments) and asks for confirmation before proceeding. Type `y` to proceed or anything else to abort (exit code 130).
 
-Confirmation is automatically skipped for `--dry-run`, `--test-email`, and when `--yes`/`-y` is passed:
+Confirmation is automatically skipped for dry runs (the default), `--test-email`, and when `--yes`/`-y` is passed:
 
 ```bash
 # Skip the confirmation prompt
@@ -275,7 +278,7 @@ Confirmation is automatically skipped for `--dry-run`, `--test-email`, and when 
 
 ### Resume and batch size
 
-When sending to large lists, runs can fail partway through (network issues, rate limits, auth expiry). Use `--resume` with `--output` to restart where you left off — already-successful recipients are skipped and failures are retried:
+When sending to large lists, runs can fail partway through (network issues, rate limits, auth expiry). Resume is automatic: when `--output` is set, mail-merge reads the existing CSV on each run, skips already-successful recipients, and retries failures. Just re-run the same command:
 
 ```bash
 # First run — might fail partway through
@@ -284,31 +287,23 @@ uv run mail-merge \
   --body body.txt \
   --subject "Hello {{name}}" \
   --email-column email \
-  --output report.csv
+  --output report.csv \
+  --send
 
-# Resume — skips successes, retries failures
+# Just re-run the same command — successes are skipped automatically
 uv run mail-merge \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Hello {{name}}" \
   --email-column email \
   --output report.csv \
-  --resume
+  --send
 ```
 
-Use `--batch-size N` to limit how many emails are sent per invocation. This is useful for controlled rollout and combines naturally with `--resume`:
+Use `--batch-size N` to limit how many emails are sent per invocation. This is useful for controlled rollout — run the same command repeatedly until all emails are sent:
 
 ```bash
-# Send in batches of 50
-uv run mail-merge \
-  --spreadsheet recipients.xlsx \
-  --body body.txt \
-  --subject "Hello {{name}}" \
-  --email-column email \
-  --output report.csv \
-  --batch-size 50
-
-# Send the next 50
+# Send in batches of 50 — re-run until done
 uv run mail-merge \
   --spreadsheet recipients.xlsx \
   --body body.txt \
@@ -316,10 +311,10 @@ uv run mail-merge \
   --email-column email \
   --output report.csv \
   --batch-size 50 \
-  --resume
+  --send
 ```
 
-Run repeatedly with `--resume --batch-size N` until all emails are sent. When all recipients have succeeded, the tool logs "All emails already sent" and exits 0.
+When all recipients have succeeded, the tool logs "All emails already sent" and exits 0. Use `--no-resume` to disable automatic resume and send to all recipients fresh.
 
 ### Specific sheet
 
@@ -333,12 +328,12 @@ By default, the first sheet is used.
 
 ## Recommended workflow
 
-1. **Dry run** — validate placeholders and data (`--dry-run`)
-2. **Test email** — send one real email to yourself (`--test-email you@example.com`)
+1. **Dry run** — validate placeholders and data (the default — no flags needed)
+2. **Test email** — send one real email to yourself (`--test-email you@example.com --send`)
 3. **Check your inbox** — verify subject, body, and formatting
-4. **Full send** — run without `--dry-run` or `--test-email` (confirm prompt appears)
+4. **Full send** — add `--send` (confirmation prompt appears automatically)
 5. **Review report** — check console summary or `--output report.csv`
-6. **Resume if needed** — re-run with `--resume` to retry any failures
+6. **Resume if needed** — re-run the same command (resume is automatic with `--output`)
 
 ## 10. Python API
 
@@ -347,37 +342,37 @@ If you want to call mail-merge from Python code instead of the command line, use
 ```python
 from mail_merge.api import send_merge
 
-# Dry run — validate without sending
+# Dry run — validate without sending (this is the default)
 results = send_merge(
     spreadsheet="recipients.xlsx",
     body="body.txt",
     subject="Hello {{name}}",
     email_column="email",
-    dry_run=True,
 )
 
-# Send for real (client_id resolved from env var or ~/.mail-merge.toml)
+# Send for real — must explicitly set send=True
 results = send_merge(
     spreadsheet="recipients.xlsx",
     body="body.html",
     subject="Hello {{name}}",
     email_column="email",
+    send=True,
     html=True,
     attachment=["report.pdf"],
     cc=["manager@example.com"],
 )
 
-# Filter recipients and send in batches with resume
+# Filter recipients and send in batches
+# (resume and confirm are on by default)
 results = send_merge(
     spreadsheet="recipients.xlsx",
     body="body.txt",
     subject="Hello {{name}}",
     email_column="email",
+    send=True,
     filter=["company=Acme Corp"],
     output="report.csv",
     batch_size=50,
-    resume=True,        # skip already-successful recipients
-    confirm=True,       # show summary and prompt before sending
 )
 
 # Inspect results
@@ -392,9 +387,9 @@ Key differences from the CLI:
 - **`cc`/`bcc`/`reply_to`** accept a Python list or a comma-separated string.
 - **`save_to_sent_items`** is `True` by default (the CLI uses the `--no-save-to-sent` flag to set it to `False`).
 - **`attachment`** takes a list of file paths (strings or `Path` objects).
-- **`confirm`** is `False` by default (the CLI enables it unless `--yes`, `--dry-run`, or `--test-email` is used).
 - **`filter`** takes a list of filter expressions (e.g., `["company=Acme"]`).
-- **`resume`** and **`batch_size`** work the same as the CLI flags.
+- **Safe defaults** — `send` is `False`, `confirm` and `resume` are `True` by default. Pass `send=True` to actually send.
+- **`confirm`** is automatically disabled when `send=False` or `test_email` is set.
 
 See `examples/send_merge.py` for a complete example.
 

@@ -15,7 +15,6 @@ class TestDryRun:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
         )
         assert len(results) == 2
         assert all(r.success for r in results)
@@ -26,7 +25,6 @@ class TestDryRun:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             test_email="me@example.com",
         )
         assert len(results) == 1
@@ -34,9 +32,9 @@ class TestDryRun:
         assert results[0].email == "me@example.com"
 
     def test_confirm_disabled_on_dry_run(self, sample_xlsx, body_template_file, monkeypatch):
-        """No prompt should happen during dry_run even if confirm=True."""
+        """No prompt should happen during dry run even if confirm=True."""
         def fail_on_input(prompt: str) -> str:
-            pytest.fail("console.input was called during dry_run!")
+            pytest.fail("console.input was called during dry run!")
 
         monkeypatch.setattr("mail_merge.console.console.input", fail_on_input)
         send_merge(
@@ -44,7 +42,6 @@ class TestDryRun:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             confirm=True,
         )
 
@@ -59,7 +56,6 @@ class TestDryRun:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,  # Avoid auth/network
             test_email="me@example.com",
             confirm=True,
         )
@@ -73,8 +69,7 @@ class TestFileErrors:
                 body=body_template_file,
                 subject="Hi",
                 email_column="email",
-                dry_run=True,
-            )
+                )
 
     def test_missing_body(self, sample_xlsx, tmp_path):
         with pytest.raises(FileNotFoundError, match="Body template not found"):
@@ -83,8 +78,7 @@ class TestFileErrors:
                 body=tmp_path / "nonexistent.txt",
                 subject="Hi",
                 email_column="email",
-                dry_run=True,
-            )
+                )
 
     def test_missing_attachment(self, sample_xlsx, body_template_file, tmp_path):
         with pytest.raises(FileNotFoundError, match="Attachment not found"):
@@ -93,8 +87,7 @@ class TestFileErrors:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                dry_run=True,
-                attachment=[tmp_path / "gone.pdf"],
+                    attachment=[tmp_path / "gone.pdf"],
             )
 
 
@@ -106,8 +99,7 @@ class TestValidationErrors:
                 body=body_template_file,
                 subject="Hello {{missing}}",
                 email_column="email",
-                dry_run=True,
-            )
+                )
 
     def test_attachment_too_large(self, sample_xlsx, body_template_file, tmp_path):
         big = tmp_path / "huge.bin"
@@ -118,8 +110,7 @@ class TestValidationErrors:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                dry_run=True,
-                attachment=[big],
+                    attachment=[big],
             )
 
     def test_too_many_recipients(self, sample_xlsx, body_template_file):
@@ -130,8 +121,7 @@ class TestValidationErrors:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                dry_run=True,
-                cc=cc_list,
+                    cc=cc_list,
             )
 
 
@@ -145,6 +135,8 @@ class TestAuthError:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
+                send=True,
+                confirm=False,
             )
 
 
@@ -164,6 +156,7 @@ class TestPassThrough:
             email_column="email",
             client_id="fake-client-id",
             test_email="tester@example.com",
+            send=True,
             html=True,
             attachment=[att],
             reply_to=["reply@example.com", "other@example.com"],
@@ -191,6 +184,7 @@ class TestPassThrough:
             email_column="email",
             client_id="fake-client-id",
             test_email="tester@example.com",
+            send=True,
             cc=["a@x.com", "b@x.com"],
             bcc="c@x.com",
         )
@@ -211,7 +205,6 @@ class TestFilter:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             filter=["company=Acme"],
         )
         assert len(results) == 1
@@ -223,7 +216,6 @@ class TestFilter:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             filter=["company!=Acme"],
         )
         assert len(results) == 1
@@ -250,7 +242,6 @@ class TestFilter:
             body=body,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             filter=["role=PhD", "group=Security"],
         )
         assert len(results) == 1
@@ -262,7 +253,6 @@ class TestFilter:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             filter=["Company=acme"],
         )
         assert len(results) == 1
@@ -275,8 +265,7 @@ class TestFilter:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                dry_run=True,
-                filter=["company=NonExistent"],
+                    filter=["company=NonExistent"],
             )
 
     def test_bad_syntax_raises(self, sample_xlsx, body_template_file):
@@ -286,8 +275,7 @@ class TestFilter:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                dry_run=True,
-                filter=["no-operator-here"],
+                    filter=["no-operator-here"],
             )
 
     def test_unknown_column_raises(self, sample_xlsx, body_template_file):
@@ -297,8 +285,7 @@ class TestFilter:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                dry_run=True,
-                filter=["nonexistent=value"],
+                    filter=["nonexistent=value"],
             )
 
 
@@ -319,7 +306,6 @@ class TestResume:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             output=output,
             resume=True,
         )
@@ -347,12 +333,11 @@ class TestResume:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             output=output,
             resume=True,
         )
         bob = next(r for r in results if r.email == "bob@example.com")
-        assert bob.success  # dry_run always succeeds
+        assert bob.success  # dry run always succeeds
 
     def test_resume_all_sent_returns_previous(self, sample_xlsx, body_template_file, tmp_path):
         """When all recipients already succeeded, return previous results."""
@@ -370,23 +355,23 @@ class TestResume:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             output=output,
             resume=True,
         )
         assert len(results) == 2
         assert all(r.success for r in results)
 
-    def test_resume_without_output_raises(self, sample_xlsx, body_template_file):
-        with pytest.raises(ValueError, match="--resume requires --output"):
-            send_merge(
-                spreadsheet=sample_xlsx,
-                body=body_template_file,
-                subject="Hello {{name}}",
-                email_column="email",
-                dry_run=True,
-                resume=True,
-            )
+    def test_resume_without_output_skips_silently(self, sample_xlsx, body_template_file):
+        """Resume without output just runs normally (no error)."""
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            resume=True,
+        )
+        assert len(results) == 2
+        assert all(r.success for r in results)
 
 
 class TestBatchSize:
@@ -396,7 +381,6 @@ class TestBatchSize:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             batch_size=1,
         )
         assert len(results) == 1
@@ -416,7 +400,6 @@ class TestBatchSize:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
             output=output,
             resume=True,
             batch_size=1,
@@ -435,12 +418,11 @@ class TestConfigResolution:
         monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
         monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
 
-        # dry_run so no auth needed, but client_id should resolve
+        # dry run so no auth needed, but client_id should resolve
         results = send_merge(
             spreadsheet=sample_xlsx,
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            dry_run=True,
         )
         assert len(results) == 2

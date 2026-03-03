@@ -130,7 +130,7 @@ def send_merge(
     tenant_id: str | None = None,
     sheet: str | None = None,
     test_email: str | None = None,
-    dry_run: bool = False,
+    send: bool = False,
     output: str | Path | None = None,
     delay: float = 2.0,
     max_retries: int = 3,
@@ -142,8 +142,8 @@ def send_merge(
     attachment: list[str | Path] | None = None,
     reply_to: str | list[str] | None = None,
     filter: list[str] | None = None,
-    confirm: bool = False,
-    resume: bool = False,
+    confirm: bool = True,
+    resume: bool = True,
     batch_size: int | None = None,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
@@ -163,7 +163,8 @@ def send_merge(
         sheet: Worksheet name (default: first sheet).
         test_email: Send one email to this address using first recipient's data,
             then return.
-        dry_run: Validate and render only; do not authenticate or send.
+        send: If ``True``, authenticate and send emails. If ``False``
+            (the default), validate and render only (dry run).
         output: Path to write a CSV report of results.
         delay: Base seconds between sends (default 2.0).
         max_retries: Max retries per recipient for 5xx errors.
@@ -177,9 +178,10 @@ def send_merge(
         filter: Filter expressions to select recipients. Each expression is
             ``"column=value"`` (keep matching) or ``"column!=value"`` (exclude
             matching). Multiple filters use AND logic. Case-insensitive.
-        confirm: If ``True``, display a summary and prompt for confirmation
-            before sending. Automatically disabled if ``dry_run`` or
-            ``test_email`` is set. Aborted sends raise ``KeyboardInterrupt``.
+        confirm: If ``True`` (the default), display a summary and prompt for
+            confirmation before sending. Automatically disabled when ``send``
+            is ``False`` or ``test_email`` is set. Aborted sends raise
+            ``KeyboardInterrupt``.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -227,9 +229,7 @@ def send_merge(
 
     # --- Resume: skip already-successful recipients ---
     previous_results: list[SendResult] = []
-    if resume:
-        if not output:
-            raise ValueError("--resume requires --output to track progress")
+    if resume and output:
         output_path = Path(output)
         if output_path.exists():
             previous_results = read_csv(output_path)
@@ -273,7 +273,7 @@ def send_merge(
         )
 
     # --- Confirm before sending ---
-    if dry_run or test_email:
+    if not send or test_email:
         confirm = False
 
     if confirm:
@@ -299,9 +299,9 @@ def send_merge(
         if answer.lower() not in ("y", "yes"):
             raise KeyboardInterrupt("Send aborted by user")
 
-    # --- Authenticate (skip for dry-run) ---
+    # --- Authenticate (skip for dry run) ---
     token = None
-    if not dry_run:
+    if send:
         if not client_id:
             raise RuntimeError(
                 "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
@@ -337,7 +337,7 @@ def send_merge(
         sample = recipients[0]
         rendered_subject = render(subject, sample)
         rendered_body = render(body_template, sample)
-        if dry_run:
+        if not send:
             logger.info(
                 "🔄 DRY RUN test email to %s | Subject: %s",
                 test_email, rendered_subject,
@@ -366,7 +366,7 @@ def send_merge(
         email_column=email_column,
         subject_template=subject,
         body_template=body_template,
-        dry_run=dry_run,
+        dry_run=not send,
         delay=delay,
         max_retries=max_retries,
         importance=importance,

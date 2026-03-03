@@ -14,7 +14,6 @@ class TestCLIDryRun:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake-client-id",
-            "--dry-run",
         ])
         assert exit_code == 0
 
@@ -25,7 +24,6 @@ class TestCLIDryRun:
             "--subject", "Hello",
             "--email-column", "email",
             "--client-id", "fake",
-            "--dry-run",
         ])
         assert exit_code == 1
 
@@ -36,7 +34,6 @@ class TestCLIDryRun:
             "--subject", "Hello {{nonexistent}}",
             "--email-column", "email",
             "--client-id", "fake",
-            "--dry-run",
         ])
         assert exit_code == 1
 
@@ -48,6 +45,7 @@ class TestCLIDryRun:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
+            "--send",
             "--yes",
         ])
         assert exit_code == 1
@@ -60,7 +58,6 @@ class TestCLIDryRun:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake",
-            "--dry-run",
             "--output", str(report_path),
         ])
         assert exit_code == 0
@@ -83,6 +80,7 @@ class TestTestEmail:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
         ])
         assert exit_code == 0
         assert len(responses.calls) == 1
@@ -105,17 +103,17 @@ class TestTestEmail:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
         ])
         assert exit_code == 1
 
     def test_test_email_dry_run_does_not_send(self, sample_xlsx, body_template_file):
-        """--dry-run with --test-email should not authenticate or send."""
+        """Default (no --send) with --test-email should not authenticate or send."""
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
             "--test-email", "tester@example.com",
         ])
         assert exit_code == 0
@@ -129,6 +127,7 @@ class TestTestEmail:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--test-email", "tester@example.com",
+            "--send",
         ])
         assert exit_code == 1
 
@@ -146,6 +145,7 @@ class TestImportanceCcBcc:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
             "--importance", "high",
             "--cc", "a@x.com,b@x.com",
             "--bcc", "c@x.com",
@@ -181,6 +181,7 @@ class TestConfigFilePrecedence:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--test-email", "tester@example.com",
+            "--send",
         ])
         assert exit_code == 0
 
@@ -198,7 +199,6 @@ class TestConfigFilePrecedence:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "cli-client",
-            "--dry-run",
         ])
         assert exit_code == 0
 
@@ -215,7 +215,6 @@ class TestConfigFilePrecedence:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
         ])
         assert exit_code == 0
 
@@ -241,6 +240,7 @@ class TestConfigFilePrecedence:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
         ])
         assert exit_code == 0
         assert captured["tenant_id"] == "common"
@@ -255,6 +255,7 @@ class TestConfigFilePrecedence:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
+            "--send",
             "--yes",
         ])
         assert exit_code == 1
@@ -284,6 +285,7 @@ class TestHTMLFlag:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
             "--html",
         ])
         assert exit_code == 0
@@ -305,6 +307,7 @@ class TestNoSaveToSent:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
             "--no-save-to-sent",
         ])
         assert exit_code == 0
@@ -329,6 +332,7 @@ class TestAttachment:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
             "--attachment", str(att_file),
         ])
         assert exit_code == 0
@@ -346,7 +350,6 @@ class TestAttachment:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake-client-id",
-            "--dry-run",
             "--attachment", str(tmp_path / "nonexistent.txt"),
         ])
         assert exit_code == 1
@@ -365,6 +368,7 @@ class TestReplyTo:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
             "--reply-to", "reply@example.com,other@example.com",
         ])
         assert exit_code == 0
@@ -382,7 +386,6 @@ class TestFilter:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
             "--filter", "company=Acme",
             "--output", str(report),
         ])
@@ -397,7 +400,6 @@ class TestFilter:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
             "--filter", "company=Acme",
             "--filter", "name=Alice",
         ])
@@ -409,7 +411,6 @@ class TestFilter:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
             "--filter", "company=NonExistent",
         ])
         assert exit_code == 1
@@ -425,6 +426,7 @@ class TestConfirm:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake-client-id",
+            "--send",
         ])
         assert exit_code == 130
 
@@ -440,6 +442,7 @@ class TestConfirm:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake-client-id",
+            "--send",
         ])
         assert exit_code == 130
 
@@ -455,18 +458,18 @@ class TestConfirm:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake-client-id",
+            "--send",
         ])
         assert exit_code == 0
         assert len(responses.calls) == 2  # 2 recipients
 
     def test_dry_run_skips_confirm(self, sample_xlsx, body_template_file):
-        """--dry-run should not prompt for confirmation."""
+        """Default (dry run) should not prompt for confirmation."""
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
         ])
         assert exit_code == 0
 
@@ -482,6 +485,7 @@ class TestConfirm:
             "--email-column", "email",
             "--client-id", "fake-client-id",
             "--test-email", "tester@example.com",
+            "--send",
         ])
         assert exit_code == 0
 
@@ -496,6 +500,7 @@ class TestConfirm:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake-client-id",
+            "--send",
             "--yes",
         ])
         assert exit_code == 0
@@ -503,7 +508,7 @@ class TestConfirm:
 
 class TestResumeBatchSize:
     def test_resume_batch_size_round_trip(self, sample_xlsx, body_template_file, tmp_path):
-        """--resume --batch-size through CLI sends one batch then resumes."""
+        """--batch-size sends one batch, then auto-resumes on next run."""
         report = tmp_path / "report.csv"
         # First run: batch of 1
         exit_code = main([
@@ -511,7 +516,6 @@ class TestResumeBatchSize:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
             "--output", str(report),
             "--batch-size", "1",
         ])
@@ -519,31 +523,28 @@ class TestResumeBatchSize:
         lines = report.read_text().strip().split("\n")
         assert len(lines) == 2  # header + 1 recipient
 
-        # Second run: resume, batch of 1
+        # Second run: auto-resumes, sends next batch of 1
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
             "--output", str(report),
             "--batch-size", "1",
-            "--resume",
         ])
         assert exit_code == 0
         lines = report.read_text().strip().split("\n")
         assert len(lines) == 3  # header + 2 recipients (merged)
 
-    def test_resume_without_output_exits_1(self, sample_xlsx, body_template_file):
+    def test_resume_without_output_succeeds(self, sample_xlsx, body_template_file):
+        """Resume without --output just runs normally (no error)."""
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
-            "--dry-run",
-            "--resume",
         ])
-        assert exit_code == 1
+        assert exit_code == 0
 
 
 class TestRecipientCountValidation:
@@ -556,7 +557,6 @@ class TestRecipientCountValidation:
             "--subject", "Hello {{name}}",
             "--email-column", "email",
             "--client-id", "fake-client-id",
-            "--dry-run",
             "--cc", cc_addresses,
         ])
         assert exit_code == 1
