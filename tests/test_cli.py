@@ -2,7 +2,7 @@ import json
 
 import responses
 
-from mail_merge.cli import main, _resolve_args, parse_args
+from mail_merge.cli import main, parse_args
 from mail_merge.sender import GRAPH_SEND_URL
 
 
@@ -216,19 +216,31 @@ class TestConfigFilePrecedence:
         ])
         assert exit_code == 0
 
-    def test_tenant_defaults_to_common(self, tmp_path, monkeypatch):
+    @responses.activate
+    def test_tenant_defaults_to_common(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """When no tenant-id is set anywhere, it defaults to 'common'."""
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", tmp_path / "nonexistent.toml")
         monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
 
-        args = parse_args([
-            "--spreadsheet", "x.xlsx",
-            "--body", "b.txt",
-            "--subject", "s",
-            "--email-column", "e",
+        captured: dict[str, str] = {}
+
+        def fake_acquire(client_id: str, tenant_id: str = "common") -> str:
+            captured["tenant_id"] = tenant_id
+            return "fake-token"
+
+        monkeypatch.setattr("mail_merge.auth.acquire_token", fake_acquire)
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--test-email", "tester@example.com",
         ])
-        _resolve_args(args)
-        assert args.tenant_id == "common"
+        assert exit_code == 0
+        assert captured["tenant_id"] == "common"
 
     def test_missing_client_id_with_no_config(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """Without config file, env var, or CLI flag, client-id is None and send fails."""

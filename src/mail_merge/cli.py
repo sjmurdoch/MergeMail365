@@ -1,10 +1,8 @@
 import argparse
 import logging
-import os
 import sys
 
 from mail_merge.api import send_merge
-from mail_merge.config import load_config
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -41,28 +39,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--reply-to", default=None, help="Comma-separated reply-to addresses")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args(argv)
-
-
-def _resolve_args(args: argparse.Namespace) -> None:
-    """Fill in client_id and tenant_id from env vars, config file, or defaults.
-
-    Precedence (highest wins): CLI flag → env var → config file → hardcoded default.
-    Mutates *args* in place.
-    """
-    config = load_config()
-
-    if not args.client_id:
-        args.client_id = (
-            os.environ.get("MAIL_MERGE_CLIENT_ID")
-            or config.get("client_id")
-        )
-
-    if not args.tenant_id:
-        args.tenant_id = (
-            os.environ.get("MAIL_MERGE_TENANT_ID")
-            or config.get("tenant_id")
-            or "common"
-        )
 
 
 def main(argv: list[str] | None = None) -> int:
