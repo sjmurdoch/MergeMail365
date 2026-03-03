@@ -1,5 +1,6 @@
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import requests
@@ -19,7 +20,7 @@ class SendResult:
 
 
 def send_one(
-    token: str,
+    get_token: Callable[[], str],
     to_email: str,
     subject: str,
     body: str,
@@ -34,9 +35,12 @@ def send_one(
 ) -> SendResult:
     """Send a single email via Microsoft Graph API.
 
-    Handles 429 (rate limit) with Retry-After, 5xx with exponential backoff,
-    and 4xx (non-429) as immediate failures.
+    Handles 401 (token expired) with a single refresh attempt,
+    429 (rate limit) with Retry-After, 5xx with exponential backoff,
+    and 4xx (non-429/non-401) as immediate failures.
     """
+    token = get_token()
+    token_refreshed = False
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -80,6 +84,13 @@ def send_one(
         if resp.status_code == 202:
             return SendResult(email=to_email, success=True, status_code=202, throttled=was_throttled)
 
+        if resp.status_code == 401 and not token_refreshed:
+            logger.warning("Token expired, refreshing...")
+            token = get_token()
+            token_refreshed = True
+            headers["Authorization"] = f"Bearer {token}"
+            continue
+
         if resp.status_code == 429:
             was_throttled = True
             rate_limit_retries += 1
@@ -113,7 +124,7 @@ def send_one(
 
 
 def send_all(
-    token: str | None,
+    get_token: Callable[[], str] | None,
     recipients: list[dict[str, str]],
     email_column: str,
     subject_template: str,
@@ -151,10 +162,10 @@ def send_all(
             logger.debug("Body:\n%s", rendered_body)
             results.append(SendResult(email=to_email, success=True, status_code=None))
         else:
-            assert token is not None
+            assert get_token is not None
             logger.info("📧 Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
             result = send_one(
-                token, to_email, rendered_subject, rendered_body,
+                get_token, to_email, rendered_subject, rendered_body,
                 max_retries=max_retries, importance=importance, cc=cc, bcc=bcc,
                 html=html, save_to_sent_items=save_to_sent_items,
                 attachments=attachments, reply_to=reply_to,
@@ -170,7 +181,7 @@ def send_all(
             else:
                 current_delay = max(current_delay / 2, delay)
 
-        if current_delay > 0 and i < len(recipients) - 1:
+        if not dry_run and current_delay > 0 and i < len(recipients) - 1:
             time.sleep(current_delay)
 
     return results

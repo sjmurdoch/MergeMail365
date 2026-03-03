@@ -6,6 +6,7 @@ import base64
 import logging
 import mimetypes
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from mail_merge.config import load_config
@@ -328,19 +329,41 @@ def send_merge(
             raise KeyboardInterrupt("Send aborted by user")
 
     # --- Authenticate (skip for dry run, but always for test email) ---
-    token = None
+    get_token = None
     if send or test_email:
         if not client_id:
             raise RuntimeError(
                 "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
                 "or add to ~/.mail-merge.toml)"
             )
-        from mail_merge.auth import acquire_token
+        from mail_merge.auth import acquire_token, token_expires_at
 
         try:
+            # Eager call to trigger device-code flow if needed
             token = acquire_token(client_id, tenant_id)
         except Exception as exc:
             raise RuntimeError(f"Authentication failed: {exc}") from exc
+
+        # Subsequent calls will use silent acquisition (cached refresh token)
+        get_token = lambda: acquire_token(client_id, tenant_id)  # noqa: E731
+
+        # --- Pre-flight token expiry check ---
+        expires = token_expires_at(token)
+        if expires:
+            remaining = (expires - datetime.now(timezone.utc)).total_seconds()
+            estimated = len(recipients) * delay
+            min_token_lifetime = 5 * 60  # 5 minutes
+            if estimated > remaining or remaining < min_token_lifetime:
+                logger.warning(
+                    "Token expires in %d min but send may take ~%d min; "
+                    "refreshing token before sending",
+                    remaining // 60,
+                    estimated // 60,
+                )
+                try:
+                    token = acquire_token(client_id, tenant_id)
+                except Exception:
+                    logger.warning("Token refresh failed, continuing with current token")
 
     # --- Test email (always sends, regardless of --send flag) ---
     if test_email:
@@ -353,9 +376,9 @@ def send_merge(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
         )
-        assert token is not None
+        assert get_token is not None
         result = send_one(
-            token, test_email, rendered_subject, rendered_body,
+            get_token, test_email, rendered_subject, rendered_body,
             max_retries=max_retries, importance=importance,
             cc=cc_list, bcc=bcc_list, html=html,
             save_to_sent_items=save_to_sent_items,
@@ -365,7 +388,7 @@ def send_merge(
 
     # --- Send emails ---
     results = send_all(
-        token=token,
+        get_token=get_token,
         recipients=recipients,
         email_column=email_column,
         subject_template=subject,

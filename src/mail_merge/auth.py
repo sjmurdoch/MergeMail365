@@ -1,7 +1,9 @@
+import base64
 import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,3 +69,27 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
 
     token: str = result["access_token"]
     return token
+
+
+def token_expires_at(token: str) -> datetime | None:
+    """Decode JWT exp claim without signature verification.
+
+    Returns a timezone-aware UTC datetime, or None if the token
+    cannot be parsed.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        # base64url decode the payload (segment 1)
+        payload_b64 = parts[1]
+        # Add padding if needed
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        claims = json.loads(payload_bytes)
+        exp = claims.get("exp")
+        if exp is None:
+            return None
+        return datetime.fromtimestamp(int(exp), tz=timezone.utc)
+    except Exception:
+        return None

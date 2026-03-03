@@ -1,4 +1,7 @@
+import base64
 import json
+import logging
+import time
 from pathlib import Path
 
 import pytest
@@ -435,3 +438,71 @@ class TestConfigResolution:
             email_column="email",
         )
         assert len(results) == 2
+
+
+class TestTokenExpiryWarning:
+    @responses.activate
+    def test_warns_when_token_expires_before_send_completes(
+        self, sample_xlsx, body_template_file, monkeypatch, caplog
+    ):
+        """Warning is logged when estimated send time exceeds token lifetime."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        # Build a JWT with exp = now + 60 seconds (1 minute)
+        exp = int(time.time()) + 60
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"exp": exp}).encode()
+        ).rstrip(b"=").decode()
+        fake_jwt = f"header.{payload}.signature"
+
+        monkeypatch.setattr(
+            "mail_merge.auth.acquire_token",
+            lambda client_id, tenant_id="common": fake_jwt,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                client_id="fake-client-id",
+                test_email="me@example.com",
+                delay=120.0,  # 2 recipients * 120s = 240s > 60s token lifetime
+            )
+
+        assert any("Token expires" in msg for msg in caplog.messages)
+
+
+class TestTokenExpiresAt:
+    def test_valid_jwt(self):
+        from datetime import datetime, timezone
+
+        from mail_merge.auth import token_expires_at
+
+        exp = 1700000000
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"exp": exp}).encode()
+        ).rstrip(b"=").decode()
+        token = f"header.{payload}.signature"
+
+        result = token_expires_at(token)
+        assert result == datetime.fromtimestamp(exp, tz=timezone.utc)
+
+    def test_invalid_token_returns_none(self):
+        from mail_merge.auth import token_expires_at
+
+        assert token_expires_at("not-a-jwt") is None
+        assert token_expires_at("a.b") is None
+        assert token_expires_at("") is None
+        assert token_expires_at("a.!!!.c") is None
+
+    def test_missing_exp_returns_none(self):
+        from mail_merge.auth import token_expires_at
+
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"sub": "user"}).encode()
+        ).rstrip(b"=").decode()
+        token = f"header.{payload}.signature"
+
+        assert token_expires_at(token) is None

@@ -10,14 +10,14 @@ class TestSendOne:
     @responses.activate
     def test_success(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
         assert result.success
         assert result.status_code == 202
 
     @responses.activate
     def test_client_error_no_retry(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=400, body="Bad Request")
-        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
         assert not result.success
         assert result.status_code == 400
         assert len(responses.calls) == 1  # no retry
@@ -27,7 +27,7 @@ class TestSendOne:
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body", max_retries=3)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", max_retries=3)
         assert result.success
         assert len(responses.calls) == 3
 
@@ -35,7 +35,7 @@ class TestSendOne:
     def test_server_error_exhausts_retries(self):
         for _ in range(4):
             responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
-        result = send_one("fake-token", "test@example.com", "Subject", "Body", max_retries=3)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", max_retries=3)
         assert not result.success
         assert result.status_code == 500
 
@@ -46,14 +46,14 @@ class TestSendOne:
             headers={"Retry-After": "0"},
         )
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
         assert result.success
         assert len(responses.calls) == 2
 
     @responses.activate
     def test_throttled_false_on_clean_send(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
         assert result.success
         assert result.throttled is False
 
@@ -64,7 +64,7 @@ class TestSendOne:
             headers={"Retry-After": "0"},
         )
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
         assert result.success
         assert result.throttled is True
 
@@ -73,7 +73,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_html_sets_content_type(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "<b>Body</b>", html=True)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "<b>Body</b>", html=True)
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -82,7 +82,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_plain_text_default(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        send_one("fake-token", "test@example.com", "Subject", "Body")
+        send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["body"]["contentType"] == "Text"
@@ -90,7 +90,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_save_to_sent_items_false(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=False)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=False)
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -99,7 +99,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_save_to_sent_items_true_omitted(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        send_one("fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=True)
+        send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=True)
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert "saveToSentItems" not in payload
@@ -113,7 +113,7 @@ class TestSendOneNewFeatures:
             "contentType": "text/plain",
             "contentBytes": "SGVsbG8=",
         }]
-        result = send_one("fake-token", "test@example.com", "Subject", "Body", attachments=attachments)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", attachments=attachments)
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -122,7 +122,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_reply_to_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body", reply_to=["reply@example.com"])
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", reply_to=["reply@example.com"])
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -134,7 +134,7 @@ class TestSendOneOptionalFields:
     @responses.activate
     def test_importance_included_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body", importance="high")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", importance="high")
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -144,7 +144,7 @@ class TestSendOneOptionalFields:
     def test_cc_and_bcc_included_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one(
-            "fake-token", "test@example.com", "Subject", "Body",
+            lambda: "fake-token", "test@example.com", "Subject", "Body",
             cc=["a@x.com", "b@x.com"], bcc=["c@x.com"],
         )
         assert result.success
@@ -158,7 +158,7 @@ class TestSendOneOptionalFields:
     @responses.activate
     def test_optional_fields_absent_by_default(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one("fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -174,7 +174,7 @@ class TestSendAll:
             {"name": "Bob", "email": "bob@example.com"},
         ]
         results = send_all(
-            token=None,
+            get_token=None,
             recipients=recipients,
             email_column="email",
             subject_template="Hi {{name}}",
@@ -195,7 +195,7 @@ class TestSendAll:
             {"name": "Bob", "email": "bob@example.com"},
         ]
         results = send_all(
-            token="fake",
+            get_token=lambda: "fake",
             recipients=recipients,
             email_column="email",
             subject_template="Hi {{name}}",
@@ -225,7 +225,7 @@ class TestSendAll:
 
         with patch("mail_merge.sender.time.sleep", side_effect=mock_sleep):
             results = send_all(
-                token="fake",
+                get_token=lambda: "fake",
                 recipients=recipients,
                 email_column="email",
                 subject_template="Hi {{name}}",
@@ -238,3 +238,31 @@ class TestSendAll:
         assert results[1].success
         # After throttled send, delay should have doubled to 2.0
         assert sleep_values[-1] == 2.0
+
+
+class TestTokenRefreshOn401:
+    @responses.activate
+    def test_401_refreshes_token(self):
+        """On 401, send_one refreshes the token and retries once."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=401, body="Unauthorized")
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        tokens = iter(["old-token", "new-token"])
+        result = send_one(lambda: next(tokens), "test@example.com", "Subject", "Body")
+        assert result.success
+        assert len(responses.calls) == 2
+        # First request used old token, second used new token
+        assert responses.calls[0].request.headers["Authorization"] == "Bearer old-token"
+        assert responses.calls[1].request.headers["Authorization"] == "Bearer new-token"
+
+    @responses.activate
+    def test_401_refresh_only_once(self):
+        """Two consecutive 401s should fail (no infinite loop)."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=401, body="Unauthorized")
+        responses.add(responses.POST, GRAPH_SEND_URL, status=401, body="Unauthorized")
+
+        tokens = iter(["old-token", "new-token"])
+        result = send_one(lambda: next(tokens), "test@example.com", "Subject", "Body")
+        assert not result.success
+        assert result.status_code == 401
+        assert len(responses.calls) == 2
