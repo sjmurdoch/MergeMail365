@@ -182,6 +182,11 @@ def send_merge(
             confirmation before sending. Automatically disabled when ``send``
             is ``False`` or ``test_email`` is set. Aborted sends raise
             ``KeyboardInterrupt``.
+        resume: If ``True`` (the default), skip already-successful recipients
+            when ``output`` CSV exists. Silently ignored if ``output`` is not
+            set.
+        batch_size: If set, only process this many recipients per invocation.
+            Use with ``output`` for resumable batched rollout.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -254,6 +259,9 @@ def send_merge(
     # --- Batch size: limit sends per invocation ---
     if batch_size is not None:
         recipients = recipients[:batch_size]
+        if not recipients:
+            logger.info("✅ No recipients in this batch")
+            return previous_results
 
     # --- Read body template ---
     body_path = Path(body)
@@ -272,6 +280,22 @@ def send_merge(
             f"(available columns: {', '.join(columns)})"
         )
 
+    # --- Parse CC / BCC / reply-to ---
+    cc_list = _parse_address_list(cc)
+    bcc_list = _parse_address_list(bcc)
+    reply_to_list = _parse_address_list(reply_to)
+
+    # --- Validate recipient count ---
+    recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
+    if recipient_count > 500:
+        raise ValueError(
+            f"Too many recipients per message ({recipient_count}); "
+            f"Microsoft Graph API limit is 500 (to + cc + bcc)"
+        )
+
+    # --- Process attachments ---
+    attachment_list = _process_attachments(attachment)
+
     # --- Confirm before sending ---
     if not send or test_email:
         confirm = False
@@ -284,10 +308,10 @@ def send_merge(
         console.print()
         console.print(f"[bold]Subject:[/bold]  {render(subject, sample)}")
         console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
-        if cc:
-            console.print(f"[bold]CC:[/bold]       {cc}")
-        if bcc:
-            console.print(f"[bold]BCC:[/bold]      {bcc}")
+        if cc_list:
+            console.print(f"[bold]CC:[/bold]       {', '.join(cc_list)}")
+        if bcc_list:
+            console.print(f"[bold]BCC:[/bold]      {', '.join(bcc_list)}")
         if attachment:
             names = [Path(a).name for a in attachment]
             console.print(f"[bold]Attach:[/bold]   {', '.join(names)}")
@@ -313,22 +337,6 @@ def send_merge(
             token = acquire_token(client_id, tenant_id)
         except Exception as exc:
             raise RuntimeError(f"Authentication failed: {exc}") from exc
-
-    # --- Parse CC / BCC / reply-to ---
-    cc_list = _parse_address_list(cc)
-    bcc_list = _parse_address_list(bcc)
-    reply_to_list = _parse_address_list(reply_to)
-
-    # --- Validate recipient count ---
-    recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
-    if recipient_count > 500:
-        raise ValueError(
-            f"Too many recipients per message ({recipient_count}); "
-            f"Microsoft Graph API limit is 500 (to + cc + bcc)"
-        )
-
-    # --- Process attachments ---
-    attachment_list = _process_attachments(attachment)
 
     # --- Test email ---
     if test_email:

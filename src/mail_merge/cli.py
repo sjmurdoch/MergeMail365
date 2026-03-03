@@ -12,7 +12,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Send personalised emails via Microsoft Graph API",
     )
     parser.add_argument("--spreadsheet", required=True, help="Path to .xlsx file with recipients")
-    parser.add_argument("--body", required=True, help="Path to plain-text body template file")
+    parser.add_argument("--body", required=True, help="Path to body template file (plain text by default; use --html for HTML)")
     parser.add_argument("--subject", required=True, help="Email subject (supports {{placeholders}})")
     parser.add_argument("--email-column", required=True, help="Column name containing email addresses")
     parser.add_argument(
@@ -39,8 +39,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--attachment", action="append", default=None, help="Path to file attachment (repeatable)")
     parser.add_argument("--reply-to", default=None, help="Comma-separated reply-to addresses")
     parser.add_argument("--filter", action="append", default=None, help="Filter recipients: 'column=value' or 'column!=value' (repeatable, AND logic)")
-    parser.add_argument("--no-resume", action="store_true", help="Disable automatic resume (by default, previous successes in --output CSV are skipped)")
-    parser.add_argument("--batch-size", type=int, default=None, help="Max emails to send per invocation")
+    parser.add_argument("--no-resume", action="store_true", help="Send to all recipients even if --output CSV shows previous successes")
+    parser.add_argument("--batch-size", type=int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args(argv)
