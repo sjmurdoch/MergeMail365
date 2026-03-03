@@ -73,7 +73,7 @@ def send_one(
             if retries > max_retries:
                 return SendResult(email=to_email, success=False, error=str(exc))
             wait = 2**retries
-            logger.warning("Network error sending to %s, retry %d in %ds: %s", to_email, retries, wait, exc)
+            logger.warning("⚠️ Network error sending to %s, retry %d in %ds: %s", to_email, retries, wait, exc)
             time.sleep(wait)
             continue
 
@@ -89,7 +89,7 @@ def send_one(
                     error=f"Rate limited {max_rate_limit_retries} times, giving up",
                 )
             retry_after = int(resp.headers.get("Retry-After", 10))
-            logger.warning("Rate limited, waiting %ds before retrying %s", retry_after, to_email)
+            logger.warning("⚠️ Rate limited, waiting %ds before retrying %s", retry_after, to_email)
             time.sleep(retry_after)
             continue
 
@@ -101,7 +101,7 @@ def send_one(
                     error=resp.text[:500],
                 )
             wait = 2**retries
-            logger.warning("Server error %d for %s, retry %d in %ds", resp.status_code, to_email, retries, wait)
+            logger.warning("⚠️ Server error %d for %s, retry %d in %ds", resp.status_code, to_email, retries, wait)
             time.sleep(wait)
             continue
 
@@ -145,14 +145,14 @@ def send_all(
 
         if dry_run:
             logger.info(
-                "DRY RUN [%d/%d] To: %s | Subject: %s",
+                "🔄 DRY RUN [%d/%d] To: %s | Subject: %s",
                 i + 1, len(recipients), to_email, rendered_subject,
             )
             logger.debug("Body:\n%s", rendered_body)
             results.append(SendResult(email=to_email, success=True, status_code=None))
         else:
             assert token is not None
-            logger.info("Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
+            logger.info("📧 Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
             result = send_one(
                 token, to_email, rendered_subject, rendered_body,
                 max_retries=max_retries, importance=importance, cc=cc, bcc=bcc,
@@ -161,12 +161,12 @@ def send_all(
             )
             results.append(result)
             if not result.success:
-                logger.error("Failed to send to %s: %s", to_email, result.error)
+                logger.error("❌ Failed to send to %s: %s", to_email, result.error)
 
             # Adaptive delay: back off on throttling, recover when clear
             if result.throttled:
                 current_delay = min(current_delay * 2, max_delay)
-                logger.info("Rate limit hit, increasing delay to %.1fs", current_delay)
+                logger.info("⏱️ Rate limit hit, increasing delay to %.1fs", current_delay)
             else:
                 current_delay = max(current_delay / 2, delay)
 

@@ -3,6 +3,7 @@ import logging
 import sys
 
 from mail_merge.api import send_merge
+from mail_merge.console import setup_logging
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -44,11 +45,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logging.INFO),
-        format="%(levelname)s: %(message)s",
-        stream=sys.stderr,
-    )
+    setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     logger = logging.getLogger(__name__)
 
     try:

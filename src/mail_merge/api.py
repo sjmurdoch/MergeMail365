@@ -136,7 +136,7 @@ def send_merge(
     if not recipients:
         raise ValueError("No recipients found in spreadsheet")
 
-    logger.info("Loaded %d recipients", len(recipients))
+    logger.info("📋 Loaded %d recipients", len(recipients))
 
     # --- Read body template ---
     body_path = Path(body)
@@ -195,14 +195,14 @@ def send_merge(
         rendered_body = render(body_template, sample)
         if dry_run:
             logger.info(
-                "DRY RUN test email to %s | Subject: %s",
+                "🔄 DRY RUN test email to %s | Subject: %s",
                 test_email, rendered_subject,
             )
             logger.debug("Body:\n%s", rendered_body)
             return [SendResult(email=test_email, success=True, status_code=None)]
 
         logger.info(
-            "Sending test email to %s (using data from first recipient: %s)",
+            "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
         )
         assert token is not None

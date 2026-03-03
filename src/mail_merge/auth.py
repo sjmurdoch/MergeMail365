@@ -47,11 +47,11 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     result: dict[str, Any] | None = None
 
     if accounts:
-        logger.info("Found cached account, attempting silent token acquisition")
+        logger.info("🔑 Found cached account, attempting silent token acquisition")
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
 
     if not result:
-        logger.info("Starting device code authentication flow")
+        logger.info("🔑 Starting device code authentication flow")
         flow: dict[str, Any] = app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
             raise RuntimeError(f"Device code flow failed: {json.dumps(flow, indent=2)}")
