@@ -33,6 +33,37 @@ class TestDryRun:
         assert results[0].success
         assert results[0].email == "me@example.com"
 
+    def test_confirm_disabled_on_dry_run(self, sample_xlsx, body_template_file, monkeypatch):
+        """No prompt should happen during dry_run even if confirm=True."""
+        def fail_on_input(prompt: str) -> str:
+            pytest.fail("console.input was called during dry_run!")
+
+        monkeypatch.setattr("mail_merge.console.console.input", fail_on_input)
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            confirm=True,
+        )
+
+    def test_confirm_disabled_on_test_email(self, sample_xlsx, body_template_file, monkeypatch):
+        """No prompt should happen for test_email even if confirm=True."""
+        def fail_on_input(prompt: str) -> str:
+            pytest.fail("console.input was called during test_email!")
+
+        monkeypatch.setattr("mail_merge.console.console.input", fail_on_input)
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,  # Avoid auth/network
+            test_email="me@example.com",
+            confirm=True,
+        )
+
 
 class TestFileErrors:
     def test_missing_spreadsheet(self, tmp_path, body_template_file):
@@ -140,6 +171,7 @@ class TestPassThrough:
         assert len(results) == 1
         assert results[0].success
 
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["body"]["contentType"] == "HTML"
         assert len(payload["message"]["attachments"]) == 1
@@ -164,6 +196,7 @@ class TestPassThrough:
         )
         assert results[0].success
 
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         cc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["ccRecipients"]]
         assert cc_addrs == ["a@x.com", "b@x.com"]

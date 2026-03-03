@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             attachment=args.attachment,
             reply_to=args.reply_to,
             filter=args.filter,
-            confirm=not (args.yes or args.dry_run or args.test_email),
+            confirm=not args.yes,
             resume=args.resume,
             batch_size=args.batch_size,
         )

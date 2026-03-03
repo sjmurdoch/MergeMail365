@@ -86,6 +86,7 @@ class TestTestEmail:
         ])
         assert exit_code == 0
         assert len(responses.calls) == 1
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         actual_to = payload["message"]["toRecipients"][0]["emailAddress"]["address"]
         assert actual_to == "tester@example.com"
@@ -150,6 +151,7 @@ class TestImportanceCcBcc:
             "--bcc", "c@x.com",
         ])
         assert exit_code == 0
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["importance"] == "high"
         cc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["ccRecipients"]]
@@ -285,6 +287,7 @@ class TestHTMLFlag:
             "--html",
         ])
         assert exit_code == 0
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["body"]["contentType"] == "HTML"
 
@@ -305,6 +308,7 @@ class TestNoSaveToSent:
             "--no-save-to-sent",
         ])
         assert exit_code == 0
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert payload["saveToSentItems"] is False
 
@@ -328,6 +332,7 @@ class TestAttachment:
             "--attachment", str(att_file),
         ])
         assert exit_code == 0
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         atts = payload["message"]["attachments"]
         assert len(atts) == 1
@@ -363,6 +368,7 @@ class TestReplyTo:
             "--reply-to", "reply@example.com,other@example.com",
         ])
         assert exit_code == 0
+        assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         reply_addrs = [r["emailAddress"]["address"] for r in payload["message"]["replyTo"]]
         assert reply_addrs == ["reply@example.com", "other@example.com"]

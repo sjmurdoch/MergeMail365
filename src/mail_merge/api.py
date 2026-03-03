@@ -178,7 +178,8 @@ def send_merge(
             ``"column=value"`` (keep matching) or ``"column!=value"`` (exclude
             matching). Multiple filters use AND logic. Case-insensitive.
         confirm: If ``True``, display a summary and prompt for confirmation
-            before sending. Aborted sends raise ``KeyboardInterrupt``.
+            before sending. Automatically disabled if ``dry_run`` or
+            ``test_email`` is set. Aborted sends raise ``KeyboardInterrupt``.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -272,6 +273,9 @@ def send_merge(
         )
 
     # --- Confirm before sending ---
+    if dry_run or test_email:
+        confirm = False
+
     if confirm:
         from mail_merge.console import console
         from mail_merge.template import render
