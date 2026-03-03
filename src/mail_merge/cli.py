@@ -114,10 +114,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    # Authenticate (skip for dry-run without test-email)
+    # Authenticate (skip for dry-run)
     token = None
-    needs_auth = not args.dry_run or args.test_email
-    if needs_auth:
+    if not args.dry_run:
         if not args.client_id:
             logger.error("--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, or add to ~/.mail-merge.toml)")
             return 1
@@ -138,6 +137,13 @@ def main(argv: list[str] | None = None) -> int:
         sample = recipients[0]
         rendered_subject = render(args.subject, sample)
         rendered_body = render(body_template, sample)
+        if args.dry_run:
+            logger.info(
+                "DRY RUN test email to %s | Subject: %s",
+                args.test_email, rendered_subject,
+            )
+            logger.debug("Body:\n%s", rendered_body)
+            return 0
         logger.info(
             "Sending test email to %s (using data from first recipient: %s)",
             args.test_email, sample.get(args.email_column, "?"),

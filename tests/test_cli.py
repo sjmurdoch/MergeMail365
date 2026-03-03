@@ -105,6 +105,18 @@ class TestTestEmail:
         ])
         assert exit_code == 1
 
+    def test_test_email_dry_run_does_not_send(self, sample_xlsx, body_template_file):
+        """--dry-run with --test-email should not authenticate or send."""
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+            "--test-email", "tester@example.com",
+        ])
+        assert exit_code == 0
+
     def test_test_email_requires_client_id(self, sample_xlsx, body_template_file, monkeypatch):
         monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", sample_xlsx.parent / "nonexistent.toml")
