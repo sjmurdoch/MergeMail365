@@ -388,6 +388,7 @@ Key differences from the CLI:
 - **`attachment`** takes a list of file paths (strings or `Path` objects).
 - **`filter`** takes a list of filter expressions (e.g., `["company=Acme"]`).
 - **Safe defaults** — `send` is `False`, `confirm` and `resume` are `True` by default. Pass `send=True` to actually send.
+- **`test_email`** always sends (authenticates and delivers) regardless of `send`. Resume and batch size are ignored.
 - **`confirm`** is automatically disabled when `send=False` or `test_email` is set.
 
 See `examples/send_merge.py` for a complete example.

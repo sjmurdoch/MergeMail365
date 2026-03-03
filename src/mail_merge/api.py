@@ -220,6 +220,10 @@ def send_merge(
     if not recipients:
         raise ValueError("No recipients found in spreadsheet")
 
+    # Normalise email_column to match the actual header key (read_recipients
+    # uses case-insensitive matching, so the dict key may differ in case).
+    email_column = next(k for k in recipients[0] if k.lower() == email_column.lower())
+
     # --- Apply filters ---
     if filter:
         total = len(recipients)
@@ -232,36 +236,36 @@ def send_merge(
     else:
         logger.info("📋 Loaded %d recipients", len(recipients))
 
-    # --- Resume: skip already-successful recipients ---
+    # --- Resume and batch size (skip for test emails) ---
     previous_results: list[SendResult] = []
-    if resume and output:
-        output_path = Path(output)
-        if output_path.exists():
-            previous_results = read_csv(output_path)
-            successful_emails = {
-                r.email.lower() for r in previous_results if r.success
-            }
-            total_before = len(recipients)
-            recipients = [
-                r for r in recipients
-                if r[email_column].lower() not in successful_emails
-            ]
-            logger.info(
-                "📋 %d previously sent, %d remaining of %d total",
-                len(successful_emails),
-                len(recipients),
-                total_before,
-            )
-            if not recipients:
-                logger.info("✅ All emails already sent")
-                return previous_results
+    if not test_email:
+        if resume and output:
+            output_path = Path(output)
+            if output_path.exists():
+                previous_results = read_csv(output_path)
+                successful_emails = {
+                    r.email.lower() for r in previous_results if r.success
+                }
+                total_before = len(recipients)
+                recipients = [
+                    r for r in recipients
+                    if r[email_column].lower() not in successful_emails
+                ]
+                logger.info(
+                    "📋 %d previously sent, %d remaining of %d total",
+                    len(successful_emails),
+                    len(recipients),
+                    total_before,
+                )
+                if not recipients:
+                    logger.info("✅ All emails already sent")
+                    return previous_results
 
-    # --- Batch size: limit sends per invocation ---
-    if batch_size is not None:
-        recipients = recipients[:batch_size]
-        if not recipients:
-            logger.info("✅ No recipients in this batch")
-            return previous_results
+        if batch_size is not None:
+            recipients = recipients[:batch_size]
+            if not recipients:
+                logger.info("✅ No recipients in this batch")
+                return previous_results
 
     # --- Read body template ---
     body_path = Path(body)
