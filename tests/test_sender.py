@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import responses
@@ -74,7 +75,6 @@ class TestSendOneNewFeatures:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one("fake-token", "test@example.com", "Subject", "<b>Body</b>", html=True)
         assert result.success
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["body"]["contentType"] == "HTML"
 
@@ -82,7 +82,6 @@ class TestSendOneNewFeatures:
     def test_plain_text_default(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         send_one("fake-token", "test@example.com", "Subject", "Body")
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["body"]["contentType"] == "Text"
 
@@ -91,7 +90,6 @@ class TestSendOneNewFeatures:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one("fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=False)
         assert result.success
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert payload["saveToSentItems"] is False
 
@@ -99,7 +97,6 @@ class TestSendOneNewFeatures:
     def test_save_to_sent_items_true_omitted(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         send_one("fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=True)
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert "saveToSentItems" not in payload
 
@@ -114,7 +111,6 @@ class TestSendOneNewFeatures:
         }]
         result = send_one("fake-token", "test@example.com", "Subject", "Body", attachments=attachments)
         assert result.success
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["attachments"] == attachments
 
@@ -123,7 +119,6 @@ class TestSendOneNewFeatures:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one("fake-token", "test@example.com", "Subject", "Body", reply_to=["reply@example.com"])
         assert result.success
-        import json
         payload = json.loads(responses.calls[0].request.body)
         reply_addrs = [r["emailAddress"]["address"] for r in payload["message"]["replyTo"]]
         assert reply_addrs == ["reply@example.com"]
@@ -135,7 +130,6 @@ class TestSendOneOptionalFields:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one("fake-token", "test@example.com", "Subject", "Body", importance="high")
         assert result.success
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["importance"] == "high"
 
@@ -147,7 +141,6 @@ class TestSendOneOptionalFields:
             cc=["a@x.com", "b@x.com"], bcc=["c@x.com"],
         )
         assert result.success
-        import json
         payload = json.loads(responses.calls[0].request.body)
         cc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["ccRecipients"]]
         assert cc_addrs == ["a@x.com", "b@x.com"]
@@ -159,7 +152,6 @@ class TestSendOneOptionalFields:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one("fake-token", "test@example.com", "Subject", "Body")
         assert result.success
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert "importance" not in payload["message"]
         assert "ccRecipients" not in payload["message"]
@@ -218,7 +210,6 @@ class TestSendAll:
             {"name": "Bob", "email": "bob@example.com"},
         ]
         sleep_values = []
-        original_sleep = __import__("time").sleep
 
         def mock_sleep(secs):
             sleep_values.append(secs)

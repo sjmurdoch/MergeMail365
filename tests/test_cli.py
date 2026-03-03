@@ -85,7 +85,6 @@ class TestTestEmail:
         ])
         assert exit_code == 0
         assert len(responses.calls) == 1
-        import json
         payload = json.loads(responses.calls[0].request.body)
         actual_to = payload["message"]["toRecipients"][0]["emailAddress"]["address"]
         assert actual_to == "tester@example.com"
@@ -150,7 +149,6 @@ class TestImportanceCcBcc:
             "--bcc", "c@x.com",
         ])
         assert exit_code == 0
-        import json
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["importance"] == "high"
         cc_addrs = [r["emailAddress"]["address"] for r in payload["message"]["ccRecipients"]]

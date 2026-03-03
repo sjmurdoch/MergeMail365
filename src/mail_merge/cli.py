@@ -8,7 +8,7 @@ from pathlib import Path
 
 from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
-from mail_merge.template import validate_template, extract_placeholders
+from mail_merge.template import validate_template
 from mail_merge.sender import send_all, send_one
 from mail_merge.report import print_summary, write_csv
 
@@ -159,6 +159,13 @@ def main(argv: list[str] | None = None) -> int:
                 logger.error("Attachment not found: %s", att_path)
                 return 1
             content_bytes = att_path.read_bytes()
+            max_attachment_size = 3 * 1024 * 1024  # 3 MB — Graph API limit is 4 MB base64-encoded (~3 MB raw)
+            if len(content_bytes) > max_attachment_size:
+                logger.error(
+                    "Attachment too large: %s (%.1f MB); Graph API inline limit is ~3 MB",
+                    att_path, len(content_bytes) / (1024 * 1024),
+                )
+                return 1
             mime_type = mimetypes.guess_type(att_path.name)[0] or "application/octet-stream"
             attachment_list.append({
                 "@odata.type": "#microsoft.graph.fileAttachment",

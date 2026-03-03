@@ -171,12 +171,12 @@ The CSV contains columns: `email`, `success`, `status_code`, `error`.
 
 ### Rate limiting
 
-By default, mail-merge waits 1 second between sends and uses adaptive throttling: if Microsoft Graph returns a 429 (rate limit) response, the delay doubles (up to 30s); once sends succeed without throttling, the delay halves back toward the base.
+By default, mail-merge waits 2 seconds between sends (Exchange Online allows ~30 messages/minute) and uses adaptive throttling: if Microsoft Graph returns a 429 (rate limit) response, the delay doubles (up to 30s); once sends succeed without throttling, the delay halves back toward the base.
 
 To change the base delay:
 
 ```bash
---delay 2.0     # 2 seconds base delay between each email
+--delay 5.0     # 5 seconds base delay between each email
 --delay 0       # no delay (not recommended for large sends)
 ```
 
@@ -211,6 +211,42 @@ Add CC and/or BCC recipients to every email in the merge. Provide comma-separate
 
 These addresses are static (not templated per recipient).
 
+### HTML emails
+
+By default, the body is sent as plain text. To send HTML content instead:
+
+```bash
+--html
+```
+
+Your body template file should contain valid HTML when using this flag.
+
+### Attachments
+
+Attach files to every email in the merge. Specify `--attachment` once per file:
+
+```bash
+--attachment report.pdf --attachment logo.png
+```
+
+Files are base64-encoded inline. The Graph API limits inline attachments to ~3 MB per file.
+
+### Reply-To
+
+Set custom reply-to addresses (comma-separated) so replies go somewhere other than the sender:
+
+```bash
+--reply-to "support@example.com,team@example.com"
+```
+
+### Save to Sent Items
+
+By default, sent messages appear in your Sent Items folder. To suppress this (useful for large bulk sends):
+
+```bash
+--no-save-to-sent
+```
+
 ### Specific sheet
 
 If your workbook has multiple sheets, select one by name:
@@ -233,7 +269,4 @@ By default, the first sheet is used.
 
 The following features are not yet implemented but are under consideration:
 
-- **Attachments** — attach files to each email (static or per-recipient)
-- **HTML body** — send rich HTML emails instead of plain text
-- **Save-to-sent-items control** — option to skip saving sent messages to the Sent Items folder
-- **Send-as / shared mailbox** — send from a different address or shared mailbox
+- **Send-as / shared mailbox** — send from a different address or shared mailbox (requires `Mail.Send.Shared` permission and Exchange Online mailbox permissions)
