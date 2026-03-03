@@ -265,6 +265,48 @@ By default, the first sheet is used.
 4. **Full send** — run without `--dry-run` or `--test-email`
 5. **Review report** — check console summary or `--output report.csv`
 
+## 10. Python API
+
+If you want to call mail-merge from Python code instead of the command line, use the `send_merge()` function. It mirrors the CLI flags and returns a list of `SendResult` objects.
+
+```python
+from mail_merge.api import send_merge
+
+# Dry run — validate without sending
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="body.txt",
+    subject="Hello {{name}}",
+    email_column="email",
+    dry_run=True,
+)
+
+# Send for real (client_id resolved from env var or ~/.mail-merge.toml)
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="body.html",
+    subject="Hello {{name}}",
+    email_column="email",
+    html=True,
+    attachment=["report.pdf"],
+    cc=["manager@example.com"],
+)
+
+# Inspect results
+for r in results:
+    if not r.success:
+        print(f"Failed: {r.email} — {r.error}")
+```
+
+Key differences from the CLI:
+
+- **Exceptions instead of exit codes** — raises `FileNotFoundError`, `ValueError`, or `RuntimeError` on errors.
+- **`cc`/`bcc`/`reply_to`** accept a Python list or a comma-separated string.
+- **`save_to_sent_items`** is `True` by default (the CLI uses the `--no-save-to-sent` flag to set it to `False`).
+- **`attachment`** takes a list of file paths (strings or `Path` objects).
+
+See `examples/send_merge.py` for a complete example.
+
 ## Future features
 
 The following features are not yet implemented but are under consideration:

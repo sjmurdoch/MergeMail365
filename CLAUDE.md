@@ -31,11 +31,17 @@ uv run mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello
 
 ## Architecture
 
-Source lives under `src/mail_merge/` (src layout). The CLI orchestration flow in `cli.py` is strictly ordered: parse args → read spreadsheet → read body template → validate all placeholders (abort if any unresolvable) → authenticate (MSAL device code) → send → report. All validation happens before any sending.
+Source lives under `src/mail_merge/` (src layout). There are two entry points:
+
+1. **CLI** (`cli.py:main()`) — parses args, sets up logging, delegates to `send_merge()`, converts exceptions to exit codes.
+2. **Python API** (`api.py:send_merge()`) — single function mirroring all CLI flags. Raises exceptions (`FileNotFoundError`, `ValueError`, `RuntimeError`) instead of returning exit codes. Returns `list[SendResult]`.
+
+The orchestration flow (in `api.py`) is strictly ordered: resolve config → read spreadsheet → read body template → validate all placeholders (abort if any unresolvable) → authenticate (MSAL device code) → send → report. All validation happens before any sending.
 
 Key design decisions:
 - **`config.py`** reads `~/.mail-merge.toml` for persistent `client-id` / `tenant-id`. Precedence: CLI flag → env var → config file → default (`"common"` for tenant-id).
-- **`auth.py`** uses lazy import in `cli.py` — only imported when authentication is actually needed (skipped for `--dry-run`)
+- **`api.py`** contains `send_merge()`, the shared orchestration function used by both CLI and Python callers. Accepts `str | Path` for file args, `str | list[str]` for address lists.
+- **`auth.py`** uses lazy import in `api.py` — only imported when authentication is actually needed (skipped for `--dry-run`)
 - **`sender.py`** has two retry strategies: 429 (rate limit) honours `Retry-After` with a cap of 20 attempts; 5xx retries use exponential backoff capped at `--max-retries`. 4xx errors (non-429) fail immediately. `--delay` defaults to 2s (Exchange Online limit: ~30 msgs/min) with adaptive throttling: delay doubles (up to 30s) on 429s and halves back to the base when clear.
 - **`template.py`** uses case-insensitive matching — `{{Name}}` matches a column called `name`
 - **`cli.py:main()`** accepts `argv` parameter for testability — all CLI tests call `main([...])` directly
