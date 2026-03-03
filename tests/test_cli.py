@@ -366,6 +366,47 @@ class TestReplyTo:
         assert reply_addrs == ["reply@example.com", "other@example.com"]
 
 
+class TestFilter:
+    def test_filter_flag_filters_recipients(self, sample_xlsx, body_template_file, tmp_path):
+        report = tmp_path / "report.csv"
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+            "--filter", "company=Acme",
+            "--output", str(report),
+        ])
+        assert exit_code == 0
+        lines = report.read_text().strip().split("\n")
+        assert len(lines) == 2  # header + 1 filtered recipient
+
+    def test_multiple_filter_flags(self, sample_xlsx, body_template_file):
+        # Both filters match only Alice (company=Acme AND name=Alice)
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+            "--filter", "company=Acme",
+            "--filter", "name=Alice",
+        ])
+        assert exit_code == 0
+
+    def test_filter_no_match_exits_1(self, sample_xlsx, body_template_file):
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+            "--filter", "company=NonExistent",
+        ])
+        assert exit_code == 1
+
+
 class TestRecipientCountValidation:
     def test_too_many_recipients_errors(self, sample_xlsx, body_template_file):
         # 1 to + 500 cc = 501 > 500

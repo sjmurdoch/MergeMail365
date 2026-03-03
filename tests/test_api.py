@@ -171,6 +171,104 @@ class TestPassThrough:
         assert bcc_addrs == ["c@x.com"]
 
 
+class TestFilter:
+    def test_equality_filter(self, sample_xlsx, body_template_file):
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            filter=["company=Acme"],
+        )
+        assert len(results) == 1
+        assert results[0].email == "alice@example.com"
+
+    def test_not_equal_filter(self, sample_xlsx, body_template_file):
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            filter=["company!=Acme"],
+        )
+        assert len(results) == 1
+        assert results[0].email == "bob@example.com"
+
+    def test_multiple_filters_and_logic(self, tmp_path):
+        """Multiple filters use AND logic — all must match."""
+        import openpyxl
+
+        path = tmp_path / "multi.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email", "role", "group"])
+        ws.append(["Alice", "alice@example.com", "PhD", "Security"])
+        ws.append(["Bob", "bob@example.com", "PhD", "Networks"])
+        ws.append(["Carol", "carol@example.com", "MSc", "Security"])
+        wb.save(path)
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hi {{name}}")
+
+        results = send_merge(
+            spreadsheet=path,
+            body=body,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            filter=["role=PhD", "group=Security"],
+        )
+        assert len(results) == 1
+        assert results[0].email == "alice@example.com"
+
+    def test_case_insensitive(self, sample_xlsx, body_template_file):
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            filter=["Company=acme"],
+        )
+        assert len(results) == 1
+        assert results[0].email == "alice@example.com"
+
+    def test_no_match_raises(self, sample_xlsx, body_template_file):
+        with pytest.raises(ValueError, match="No recipients match"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                dry_run=True,
+                filter=["company=NonExistent"],
+            )
+
+    def test_bad_syntax_raises(self, sample_xlsx, body_template_file):
+        with pytest.raises(ValueError, match="Invalid filter syntax"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                dry_run=True,
+                filter=["no-operator-here"],
+            )
+
+    def test_unknown_column_raises(self, sample_xlsx, body_template_file):
+        with pytest.raises(ValueError, match="Filter column.*not found"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                dry_run=True,
+                filter=["nonexistent=value"],
+            )
+
+
 class TestConfigResolution:
     def test_client_id_from_config(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         cfg = tmp_path / "config.toml"

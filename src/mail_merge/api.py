@@ -54,6 +54,73 @@ def _process_attachments(
     return attachment_list
 
 
+def _parse_filter(expr: str) -> tuple[str, str, str]:
+    """Parse a filter expression into (column, operator, value).
+
+    Supported forms: ``"column=value"`` and ``"column!=value"``.
+    Raises ``ValueError`` for malformed expressions.
+    """
+    if "!=" in expr:
+        parts = expr.split("!=", 1)
+        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+            raise ValueError(
+                f"Invalid filter syntax: {expr!r} "
+                f"(expected 'column=value' or 'column!=value')"
+            )
+        return parts[0].strip(), "!=", parts[1].strip()
+    if "=" in expr:
+        parts = expr.split("=", 1)
+        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+            raise ValueError(
+                f"Invalid filter syntax: {expr!r} "
+                f"(expected 'column=value' or 'column!=value')"
+            )
+        return parts[0].strip(), "=", parts[1].strip()
+    raise ValueError(
+        f"Invalid filter syntax: {expr!r} "
+        f"(expected 'column=value' or 'column!=value')"
+    )
+
+
+def _apply_filters(
+    recipients: list[dict[str, str]], filters: list[str]
+) -> list[dict[str, str]]:
+    """Apply all filter expressions (AND logic) to recipients.
+
+    Column names and values are compared case-insensitively.
+    Raises ``ValueError`` for bad syntax or unknown columns.
+    """
+    parsed = [_parse_filter(f) for f in filters]
+
+    # Build a case-insensitive column lookup from the first recipient
+    if not recipients:
+        return recipients
+    col_lower = {k.lower(): k for k in recipients[0]}
+
+    for col, _op, _val in parsed:
+        if col.lower() not in col_lower:
+            raise ValueError(
+                f"Filter column {col!r} not found "
+                f"(available: {', '.join(recipients[0].keys())})"
+            )
+
+    result = []
+    for row in recipients:
+        match = True
+        for col, op, val in parsed:
+            actual_key = col_lower[col.lower()]
+            cell = str(row.get(actual_key, "")).lower()
+            if op == "=" and cell != val.lower():
+                match = False
+                break
+            if op == "!=" and cell == val.lower():
+                match = False
+                break
+        if match:
+            result.append(row)
+    return result
+
+
 def send_merge(
     spreadsheet: str | Path,
     body: str | Path,
@@ -74,6 +141,7 @@ def send_merge(
     save_to_sent_items: bool = True,
     attachment: list[str | Path] | None = None,
     reply_to: str | list[str] | None = None,
+    filter: list[str] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -103,6 +171,9 @@ def send_merge(
         save_to_sent_items: If ``False``, skip saving to Sent Items.
         attachment: List of file paths to attach.
         reply_to: Reply-to addresses — comma-separated string or list.
+        filter: Filter expressions to select recipients. Each expression is
+            ``"column=value"`` (keep matching) or ``"column!=value"`` (exclude
+            matching). Multiple filters use AND logic. Case-insensitive.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -136,7 +207,17 @@ def send_merge(
     if not recipients:
         raise ValueError("No recipients found in spreadsheet")
 
-    logger.info("📋 Loaded %d recipients", len(recipients))
+    # --- Apply filters ---
+    if filter:
+        total = len(recipients)
+        recipients = _apply_filters(recipients, filter)
+        if not recipients:
+            raise ValueError(
+                f"No recipients match the filter(s): {', '.join(filter)}"
+            )
+        logger.info("📋 Loaded %d recipients (filtered from %d)", len(recipients), total)
+    else:
+        logger.info("📋 Loaded %d recipients", len(recipients))
 
     # --- Read body template ---
     body_path = Path(body)
