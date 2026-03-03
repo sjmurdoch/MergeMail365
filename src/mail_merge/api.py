@@ -397,7 +397,7 @@ def send_merge(
 
     # --- Report ---
     print_summary(results)
-    if output:
+    if send and output:
         write_csv(results, output)
 
     return results
