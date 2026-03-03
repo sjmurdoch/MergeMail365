@@ -3,9 +3,11 @@
 import logging
 from pathlib import Path
 
-try:
+import sys
+
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:
+else:
     import tomli as tomllib
 
 logger = logging.getLogger(__name__)
@@ -13,7 +15,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_PATH = Path.home() / ".mail-merge.toml"
 
 
-def load_config(path: Path | None = None) -> dict:
+def load_config(path: Path | None = None) -> dict[str, str]:
     """Read TOML config and return {"client_id": ..., "tenant_id": ...}.
 
     Keys that are absent in the file are omitted from the result.

@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import msal
 
@@ -42,8 +43,8 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
         token_cache=cache,
     )
 
-    accounts = app.get_accounts()
-    result = None
+    accounts: list[dict[str, Any]] = app.get_accounts()
+    result: dict[str, Any] | None = None
 
     if accounts:
         logger.info("Found cached account, attempting silent token acquisition")
@@ -51,7 +52,7 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
 
     if not result:
         logger.info("Starting device code authentication flow")
-        flow = app.initiate_device_flow(scopes=SCOPES)
+        flow: dict[str, Any] = app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
             raise RuntimeError(f"Device code flow failed: {json.dumps(flow, indent=2)}")
 
@@ -64,4 +65,5 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
         error = result.get("error_description", result.get("error", "Unknown error"))
         raise RuntimeError(f"Authentication failed: {error}")
 
-    return result["access_token"]
+    token: str = result["access_token"]
+    return token

@@ -18,7 +18,7 @@ def render(template: str, data: dict[str, str]) -> str:
     """Substitute {{column_name}} placeholders with values from data dict."""
     lower_data = {k.lower(): v for k, v in data.items()}
 
-    def replacer(match: re.Match) -> str:
+    def replacer(match: re.Match[str]) -> str:
         key = match.group(1).lower()
         return str(lower_data.get(key, match.group(0)))
 

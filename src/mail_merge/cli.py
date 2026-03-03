@@ -148,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             "Sending test email to %s (using data from first recipient: %s)",
             args.test_email, sample.get(args.email_column, "?"),
         )
+        assert token is not None
         result = send_one(token, args.test_email, rendered_subject, rendered_body, max_retries=args.max_retries, importance=args.importance, cc=cc_list, bcc=bcc_list)
         if result.success:
             logger.info("Test email sent successfully to %s", args.test_email)

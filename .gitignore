@@ -10,3 +10,5 @@ htmlcov/
 ~$recipients.xlsx
 recipients.xlsx
 body.txt
+go.sh
+report.csv

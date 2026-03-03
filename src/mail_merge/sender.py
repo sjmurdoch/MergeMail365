@@ -136,6 +136,7 @@ def send_all(
             logger.debug("Body:\n%s", rendered_body)
             results.append(SendResult(email=to_email, success=True, status_code=None))
         else:
+            assert token is not None
             logger.info("Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
             result = send_one(token, to_email, rendered_subject, rendered_body, max_retries=max_retries, importance=importance, cc=cc, bcc=bcc)
             results.append(result)

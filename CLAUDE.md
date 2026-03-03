@@ -22,6 +22,9 @@ uv run pytest tests/test_cli.py::TestTestEmail::test_test_email_sends_to_correct
 # Run with coverage
 uv run pytest --cov=mail_merge
 
+# Type checking
+uv run mypy
+
 # CLI usage (after install)
 uv run mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email --client-id <azure-app-id>
 ```

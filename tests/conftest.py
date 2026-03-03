@@ -7,12 +7,12 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
-def fixtures_dir():
+def fixtures_dir() -> Path:
     return FIXTURES_DIR
 
 
 @pytest.fixture
-def sample_xlsx(tmp_path):
+def sample_xlsx(tmp_path: Path) -> Path:
     """Create a small test spreadsheet and return its path."""
     path = tmp_path / "test.xlsx"
     wb = openpyxl.Workbook()
@@ -26,7 +26,7 @@ def sample_xlsx(tmp_path):
 
 
 @pytest.fixture
-def body_template_file(tmp_path):
+def body_template_file(tmp_path: Path) -> Path:
     """Create a body template file."""
     path = tmp_path / "body.txt"
     path.write_text("Hello {{name}},\n\nWelcome from {{company}}.\n")

@@ -2,13 +2,14 @@ import csv
 import logging
 import sys
 from pathlib import Path
+from typing import TextIO
 
 from mail_merge.sender import SendResult
 
 logger = logging.getLogger(__name__)
 
 
-def print_summary(results: list[SendResult], file=sys.stderr) -> None:
+def print_summary(results: list[SendResult], file: TextIO = sys.stderr) -> None:
     total = len(results)
     sent = sum(1 for r in results if r.success)
     failed = total - sent
