@@ -27,6 +27,10 @@ def send_one(
     importance: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    html: bool = False,
+    save_to_sent_items: bool = True,
+    attachments: list[dict[str, str]] | None = None,
+    reply_to: list[str] | None = None,
 ) -> SendResult:
     """Send a single email via Microsoft Graph API.
 
@@ -37,9 +41,10 @@ def send_one(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    message = {
+    content_type = "HTML" if html else "Text"
+    message: dict[str, object] = {
         "subject": subject,
-        "body": {"contentType": "Text", "content": body},
+        "body": {"contentType": content_type, "content": body},
         "toRecipients": [{"emailAddress": {"address": to_email}}],
     }
     if importance:
@@ -48,7 +53,13 @@ def send_one(
         message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
     if bcc:
         message["bccRecipients"] = [{"emailAddress": {"address": a}} for a in bcc]
-    payload = {"message": message}
+    if attachments:
+        message["attachments"] = attachments
+    if reply_to:
+        message["replyTo"] = [{"emailAddress": {"address": a}} for a in reply_to]
+    payload: dict[str, object] = {"message": message}
+    if not save_to_sent_items:
+        payload["saveToSentItems"] = False
 
     max_rate_limit_retries = 20
     retries = 0
@@ -113,6 +124,10 @@ def send_all(
     importance: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    html: bool = False,
+    save_to_sent_items: bool = True,
+    attachments: list[dict[str, str]] | None = None,
+    reply_to: list[str] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails to all recipients.
 
@@ -138,7 +153,12 @@ def send_all(
         else:
             assert token is not None
             logger.info("Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
-            result = send_one(token, to_email, rendered_subject, rendered_body, max_retries=max_retries, importance=importance, cc=cc, bcc=bcc)
+            result = send_one(
+                token, to_email, rendered_subject, rendered_body,
+                max_retries=max_retries, importance=importance, cc=cc, bcc=bcc,
+                html=html, save_to_sent_items=save_to_sent_items,
+                attachments=attachments, reply_to=reply_to,
+            )
             results.append(result)
             if not result.success:
                 logger.error("Failed to send to %s: %s", to_email, result.error)

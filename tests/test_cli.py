@@ -1,3 +1,5 @@
+import json
+
 import responses
 
 from mail_merge.cli import main, _resolve_args, parse_args
@@ -240,5 +242,131 @@ class TestConfigFilePrecedence:
             "--body", str(body_template_file),
             "--subject", "Hello {{name}}",
             "--email-column", "email",
+        ])
+        assert exit_code == 1
+
+
+class TestDelayDefault:
+    def test_delay_default_is_two(self):
+        args = parse_args([
+            "--spreadsheet", "x.xlsx",
+            "--body", "b.txt",
+            "--subject", "s",
+            "--email-column", "e",
+        ])
+        assert args.delay == 2.0
+
+
+class TestHTMLFlag:
+    @responses.activate
+    def test_html_flag_sets_content_type(self, sample_xlsx, body_template_file, monkeypatch):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--test-email", "tester@example.com",
+            "--html",
+        ])
+        assert exit_code == 0
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["message"]["body"]["contentType"] == "HTML"
+
+
+class TestNoSaveToSent:
+    @responses.activate
+    def test_no_save_to_sent_flag(self, sample_xlsx, body_template_file, monkeypatch):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--test-email", "tester@example.com",
+            "--no-save-to-sent",
+        ])
+        assert exit_code == 0
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["saveToSentItems"] is False
+
+
+class TestAttachment:
+    @responses.activate
+    def test_attachment_included_in_payload(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+
+        att_file = tmp_path / "doc.txt"
+        att_file.write_text("hello")
+
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--test-email", "tester@example.com",
+            "--attachment", str(att_file),
+        ])
+        assert exit_code == 0
+        payload = json.loads(responses.calls[0].request.body)
+        atts = payload["message"]["attachments"]
+        assert len(atts) == 1
+        assert atts[0]["name"] == "doc.txt"
+        assert atts[0]["@odata.type"] == "#microsoft.graph.fileAttachment"
+
+    def test_missing_attachment_errors(self, sample_xlsx, body_template_file, tmp_path):
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--dry-run",
+            "--attachment", str(tmp_path / "nonexistent.txt"),
+        ])
+        assert exit_code == 1
+
+
+class TestReplyTo:
+    @responses.activate
+    def test_reply_to_in_payload(self, sample_xlsx, body_template_file, monkeypatch):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--test-email", "tester@example.com",
+            "--reply-to", "reply@example.com,other@example.com",
+        ])
+        assert exit_code == 0
+        payload = json.loads(responses.calls[0].request.body)
+        reply_addrs = [r["emailAddress"]["address"] for r in payload["message"]["replyTo"]]
+        assert reply_addrs == ["reply@example.com", "other@example.com"]
+
+
+class TestRecipientCountValidation:
+    def test_too_many_recipients_errors(self, sample_xlsx, body_template_file):
+        # 1 to + 500 cc = 501 > 500
+        cc_addresses = ",".join(f"user{i}@example.com" for i in range(500))
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--dry-run",
+            "--cc", cc_addresses,
         ])
         assert exit_code == 1

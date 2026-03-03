@@ -68,6 +68,67 @@ class TestSendOne:
         assert result.throttled is True
 
 
+class TestSendOneNewFeatures:
+    @responses.activate
+    def test_html_sets_content_type(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one("fake-token", "test@example.com", "Subject", "<b>Body</b>", html=True)
+        assert result.success
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["message"]["body"]["contentType"] == "HTML"
+
+    @responses.activate
+    def test_plain_text_default(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        send_one("fake-token", "test@example.com", "Subject", "Body")
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["message"]["body"]["contentType"] == "Text"
+
+    @responses.activate
+    def test_save_to_sent_items_false(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one("fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=False)
+        assert result.success
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["saveToSentItems"] is False
+
+    @responses.activate
+    def test_save_to_sent_items_true_omitted(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        send_one("fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=True)
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert "saveToSentItems" not in payload
+
+    @responses.activate
+    def test_attachments_in_payload(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        attachments = [{
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": "test.txt",
+            "contentType": "text/plain",
+            "contentBytes": "SGVsbG8=",
+        }]
+        result = send_one("fake-token", "test@example.com", "Subject", "Body", attachments=attachments)
+        assert result.success
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        assert payload["message"]["attachments"] == attachments
+
+    @responses.activate
+    def test_reply_to_in_payload(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one("fake-token", "test@example.com", "Subject", "Body", reply_to=["reply@example.com"])
+        assert result.success
+        import json
+        payload = json.loads(responses.calls[0].request.body)
+        reply_addrs = [r["emailAddress"]["address"] for r in payload["message"]["replyTo"]]
+        assert reply_addrs == ["reply@example.com"]
+
+
 class TestSendOneOptionalFields:
     @responses.activate
     def test_importance_included_in_payload(self):

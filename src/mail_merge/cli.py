@@ -1,5 +1,7 @@
 import argparse
+import base64
 import logging
+import mimetypes
 import os
 import sys
 from pathlib import Path
@@ -34,11 +36,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--test-email", default=None, help="Send a single test email to this address using the first recipient's data, then exit")
     parser.add_argument("--dry-run", action="store_true", help="Render and validate only, do not send")
     parser.add_argument("--output", default=None, help="Path to write CSV report")
-    parser.add_argument("--delay", type=float, default=1.0, help="Base seconds between sends (adaptive throttling increases this on rate limits)")
+    parser.add_argument("--delay", type=float, default=2.0, help="Base seconds between sends (default 2s; Exchange Online allows ~30 msgs/min; adaptive throttling increases this on rate limits)")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per recipient for 5xx errors")
     parser.add_argument("--importance", choices=["low", "normal", "high"], default=None, help="Email importance level")
     parser.add_argument("--cc", default=None, help="Comma-separated CC addresses")
     parser.add_argument("--bcc", default=None, help="Comma-separated BCC addresses")
+    parser.add_argument("--html", action="store_true", help="Treat body as HTML (default: plain text)")
+    parser.add_argument("--no-save-to-sent", action="store_true", help="Do not save sent messages to Sent Items folder")
+    parser.add_argument("--attachment", action="append", default=None, help="Path to file attachment (repeatable)")
+    parser.add_argument("--reply-to", default=None, help="Comma-separated reply-to addresses")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     return parser.parse_args(argv)
 
@@ -131,6 +137,36 @@ def main(argv: list[str] | None = None) -> int:
     cc_list = [a.strip() for a in args.cc.split(",") if a.strip()] if args.cc else None
     bcc_list = [a.strip() for a in args.bcc.split(",") if a.strip()] if args.bcc else None
 
+    # Parse reply-to into list
+    reply_to_list = [a.strip() for a in args.reply_to.split(",") if a.strip()] if args.reply_to else None
+
+    # Validate recipient count (Graph API limit: 500 across to+cc+bcc)
+    recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
+    if recipient_count > 500:
+        logger.error(
+            "Too many recipients per message (%d); Microsoft Graph API limit is 500 (to + cc + bcc)",
+            recipient_count,
+        )
+        return 1
+
+    # Process attachments
+    attachment_list: list[dict[str, str]] | None = None
+    if args.attachment:
+        attachment_list = []
+        for att_path_str in args.attachment:
+            att_path = Path(att_path_str)
+            if not att_path.exists():
+                logger.error("Attachment not found: %s", att_path)
+                return 1
+            content_bytes = att_path.read_bytes()
+            mime_type = mimetypes.guess_type(att_path.name)[0] or "application/octet-stream"
+            attachment_list.append({
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": att_path.name,
+                "contentType": mime_type,
+                "contentBytes": base64.b64encode(content_bytes).decode("ascii"),
+            })
+
     # Test email: send one email using first recipient's data, then exit
     if args.test_email:
         from mail_merge.template import render
@@ -149,7 +185,13 @@ def main(argv: list[str] | None = None) -> int:
             args.test_email, sample.get(args.email_column, "?"),
         )
         assert token is not None
-        result = send_one(token, args.test_email, rendered_subject, rendered_body, max_retries=args.max_retries, importance=args.importance, cc=cc_list, bcc=bcc_list)
+        result = send_one(
+            token, args.test_email, rendered_subject, rendered_body,
+            max_retries=args.max_retries, importance=args.importance,
+            cc=cc_list, bcc=bcc_list, html=args.html,
+            save_to_sent_items=not args.no_save_to_sent,
+            attachments=attachment_list, reply_to=reply_to_list,
+        )
         if result.success:
             logger.info("Test email sent successfully to %s", args.test_email)
             return 0
@@ -170,6 +212,10 @@ def main(argv: list[str] | None = None) -> int:
         importance=args.importance,
         cc=cc_list,
         bcc=bcc_list,
+        html=args.html,
+        save_to_sent_items=not args.no_save_to_sent,
+        attachments=attachment_list,
+        reply_to=reply_to_list,
     )
 
     # Report

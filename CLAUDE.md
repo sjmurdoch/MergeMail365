@@ -36,12 +36,17 @@ Source lives under `src/mail_merge/` (src layout). The CLI orchestration flow in
 Key design decisions:
 - **`config.py`** reads `~/.mail-merge.toml` for persistent `client-id` / `tenant-id`. Precedence: CLI flag → env var → config file → default (`"common"` for tenant-id).
 - **`auth.py`** uses lazy import in `cli.py` — only imported when authentication is actually needed (skipped for `--dry-run`)
-- **`sender.py`** has two retry strategies: 429 (rate limit) honours `Retry-After` with a cap of 20 attempts; 5xx retries use exponential backoff capped at `--max-retries`. 4xx errors (non-429) fail immediately. `--delay` defaults to 1s with adaptive throttling: delay doubles (up to 30s) on 429s and halves back to the base when clear.
+- **`sender.py`** has two retry strategies: 429 (rate limit) honours `Retry-After` with a cap of 20 attempts; 5xx retries use exponential backoff capped at `--max-retries`. 4xx errors (non-429) fail immediately. `--delay` defaults to 2s (Exchange Online limit: ~30 msgs/min) with adaptive throttling: delay doubles (up to 30s) on 429s and halves back to the base when clear.
 - **`template.py`** uses case-insensitive matching — `{{Name}}` matches a column called `name`
 - **`cli.py:main()`** accepts `argv` parameter for testability — all CLI tests call `main([...])` directly
 - **`--test-email`** sends one email to a specified address using first recipient's data, then exits (for pre-send verification)
 - **`--importance`** sets email importance (`low`, `normal`, `high`); omitted from API by default
 - **`--cc`** / **`--bcc`** accept comma-separated addresses for CC/BCC recipients
+- **`--html`** sends the body as HTML instead of plain text
+- **`--no-save-to-sent`** sets `saveToSentItems: false` so sent messages skip the Sent Items folder
+- **`--attachment`** (repeatable) attaches files as base64-encoded `#microsoft.graph.fileAttachment` objects
+- **`--reply-to`** comma-separated reply-to addresses added to the message `replyTo` field
+- Recipient count validation: errors if to + cc + bcc exceeds the Graph API limit of 500
 
 ## Testing
 
