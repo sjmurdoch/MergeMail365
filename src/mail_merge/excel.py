@@ -49,9 +49,11 @@ def read_recipients(
         while len(values) < len(headers):
             values.append("")
 
+        # Skip entirely empty rows silently; warn only for partial rows
         email_value = values[email_col_idx]
         if not email_value:
-            logger.warning("Row %d: empty email, skipping", row_num)
+            if any(v for v in values):
+                logger.warning("Row %d: empty email, skipping", row_num)
             continue
 
         record = {headers[i]: values[i] for i in range(len(headers)) if headers[i]}
