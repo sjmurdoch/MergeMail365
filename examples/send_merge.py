@@ -27,9 +27,45 @@ results = send_merge(
     cc=["manager@example.com"],       # accepts a list or comma-separated string
     reply_to="support@example.com",
     importance="high",
+    confirm=True,                     # prompt for confirmation before sending
 )
 
-# --- 3. Inspect results ---
+# --- 3. Filter recipients ---
+
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="body.txt",
+    subject="Hello {{name}}",
+    email_column="email",
+    dry_run=True,
+    filter=["company=Acme Corp"],              # only Acme Corp recipients
+)
+print(f"Filtered: {len(results)} recipients")
+
+# --- 4. Resume and batch: send in controlled chunks ---
+
+# First batch — sends up to 50 emails, writes results to report.csv
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="body.txt",
+    subject="Hello {{name}}",
+    email_column="email",
+    output="report.csv",
+    batch_size=50,
+)
+
+# Subsequent batches — resume skips successes, retries failures
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="body.txt",
+    subject="Hello {{name}}",
+    email_column="email",
+    output="report.csv",
+    batch_size=50,
+    resume=True,                      # read report.csv and skip successes
+)
+
+# --- 5. Inspect results ---
 
 for r in results:
     status = "OK" if r.success else f"FAILED ({r.status_code}: {r.error})"

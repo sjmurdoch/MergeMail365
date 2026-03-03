@@ -247,6 +247,80 @@ By default, sent messages appear in your Sent Items folder. To suppress this (us
 --no-save-to-sent
 ```
 
+### Filter recipients
+
+Send to a subset of your spreadsheet by filtering on column values. Use `--filter` (repeatable) with `column=value` or `column!=value` syntax. Multiple filters use AND logic. Matching is case-insensitive.
+
+```bash
+# Only send to people at Acme Corp
+--filter "company=Acme Corp"
+
+# Exclude a specific department
+--filter "department!=Marketing"
+
+# Combine filters (AND logic): PhD students in the Security group
+--filter "role=PhD" --filter "group=Security"
+```
+
+### Interactive confirmation
+
+By default, mail-merge shows a summary (subject, recipient count, CC/BCC, attachments) and asks for confirmation before sending. Type `y` to proceed or anything else to abort (exit code 130).
+
+Confirmation is automatically skipped for `--dry-run`, `--test-email`, and when `--yes`/`-y` is passed:
+
+```bash
+# Skip the confirmation prompt
+--yes
+```
+
+### Resume and batch size
+
+When sending to large lists, runs can fail partway through (network issues, rate limits, auth expiry). Use `--resume` with `--output` to restart where you left off — already-successful recipients are skipped and failures are retried:
+
+```bash
+# First run — might fail partway through
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body body.txt \
+  --subject "Hello {{name}}" \
+  --email-column email \
+  --output report.csv
+
+# Resume — skips successes, retries failures
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body body.txt \
+  --subject "Hello {{name}}" \
+  --email-column email \
+  --output report.csv \
+  --resume
+```
+
+Use `--batch-size N` to limit how many emails are sent per invocation. This is useful for controlled rollout and combines naturally with `--resume`:
+
+```bash
+# Send in batches of 50
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body body.txt \
+  --subject "Hello {{name}}" \
+  --email-column email \
+  --output report.csv \
+  --batch-size 50
+
+# Send the next 50
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body body.txt \
+  --subject "Hello {{name}}" \
+  --email-column email \
+  --output report.csv \
+  --batch-size 50 \
+  --resume
+```
+
+Run repeatedly with `--resume --batch-size N` until all emails are sent. When all recipients have succeeded, the tool logs "All emails already sent" and exits 0.
+
 ### Specific sheet
 
 If your workbook has multiple sheets, select one by name:
@@ -262,8 +336,9 @@ By default, the first sheet is used.
 1. **Dry run** — validate placeholders and data (`--dry-run`)
 2. **Test email** — send one real email to yourself (`--test-email you@example.com`)
 3. **Check your inbox** — verify subject, body, and formatting
-4. **Full send** — run without `--dry-run` or `--test-email`
+4. **Full send** — run without `--dry-run` or `--test-email` (confirm prompt appears)
 5. **Review report** — check console summary or `--output report.csv`
+6. **Resume if needed** — re-run with `--resume` to retry any failures
 
 ## 10. Python API
 
@@ -292,6 +367,19 @@ results = send_merge(
     cc=["manager@example.com"],
 )
 
+# Filter recipients and send in batches with resume
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="body.txt",
+    subject="Hello {{name}}",
+    email_column="email",
+    filter=["company=Acme Corp"],
+    output="report.csv",
+    batch_size=50,
+    resume=True,        # skip already-successful recipients
+    confirm=True,       # show summary and prompt before sending
+)
+
 # Inspect results
 for r in results:
     if not r.success:
@@ -304,6 +392,9 @@ Key differences from the CLI:
 - **`cc`/`bcc`/`reply_to`** accept a Python list or a comma-separated string.
 - **`save_to_sent_items`** is `True` by default (the CLI uses the `--no-save-to-sent` flag to set it to `False`).
 - **`attachment`** takes a list of file paths (strings or `Path` objects).
+- **`confirm`** is `False` by default (the CLI enables it unless `--yes`, `--dry-run`, or `--test-email` is used).
+- **`filter`** takes a list of filter expressions (e.g., `["company=Acme"]`).
+- **`resume`** and **`batch_size`** work the same as the CLI flags.
 
 See `examples/send_merge.py` for a complete example.
 
