@@ -403,3 +403,14 @@ See `examples/send_merge.py` for a complete example.
 The following features are not yet implemented but are under consideration:
 
 - **Send-as / shared mailbox** — send from a different address or shared mailbox (requires `Mail.Send.Shared` permission and Exchange Online mailbox permissions)
+- **Scheduling** — queue emails to send at a specific time (e.g. 9am Monday) to avoid the "why are you emailing at 2am" problem
+- **Blocklist** (`--exclude emails.txt`) — skip addresses in a blocklist (people who've already replied, opted out, etc.)
+- **Group-by** — send one email per unique value in a column, with a `{{members}}` placeholder listing all rows in that group (e.g. one email per research group)
+- **Dynamic body** — per-recipient body template selection via `--body-column`, for when different people need entirely different content
+- **Signatures** — append a separate signature file to the body template
+- **Markdown support** — write the body in Markdown and have it auto-converted to HTML
+- **Follow-up emails** — re-send (with modified subject/body) to recipients who haven't replied after N days
+- **Preview mode** — render and display the first N emails in the terminal for visual review before confirming the full send
+- **Calendar-aware sending** — check recipients' free/busy status and send during their working hours
+- **Read receipts** — request read receipts and track them via the Graph API
+- **Teams fallback** — if an email bounces, optionally send a message via Teams chat instead
