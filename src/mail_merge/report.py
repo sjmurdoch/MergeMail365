@@ -42,3 +42,24 @@ def write_csv(results: list[SendResult], path: str | Path) -> None:
         for r in results:
             writer.writerow([r.email, r.success, r.status_code or "", r.error])
     logger.info("Report written to %s", path)
+
+
+def read_csv(path: str | Path) -> list[SendResult]:
+    """Read back a CSV report written by :func:`write_csv`.
+
+    Returns a list of :class:`SendResult` with ``throttled`` defaulting to
+    ``False`` (not persisted in the CSV).
+    """
+    path = Path(path)
+    results: list[SendResult] = []
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            status_raw = row.get("status_code", "")
+            results.append(SendResult(
+                email=row["email"],
+                success=row["success"] == "True",
+                status_code=int(status_raw) if status_raw else None,
+                error=row.get("error", ""),
+            ))
+    return results

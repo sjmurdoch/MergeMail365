@@ -495,6 +495,51 @@ class TestConfirm:
         assert exit_code == 0
 
 
+class TestResumeBatchSize:
+    def test_resume_batch_size_round_trip(self, sample_xlsx, body_template_file, tmp_path):
+        """--resume --batch-size through CLI sends one batch then resumes."""
+        report = tmp_path / "report.csv"
+        # First run: batch of 1
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+            "--output", str(report),
+            "--batch-size", "1",
+        ])
+        assert exit_code == 0
+        lines = report.read_text().strip().split("\n")
+        assert len(lines) == 2  # header + 1 recipient
+
+        # Second run: resume, batch of 1
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+            "--output", str(report),
+            "--batch-size", "1",
+            "--resume",
+        ])
+        assert exit_code == 0
+        lines = report.read_text().strip().split("\n")
+        assert len(lines) == 3  # header + 2 recipients (merged)
+
+    def test_resume_without_output_exits_1(self, sample_xlsx, body_template_file):
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--dry-run",
+            "--resume",
+        ])
+        assert exit_code == 1
+
+
 class TestRecipientCountValidation:
     def test_too_many_recipients_errors(self, sample_xlsx, body_template_file):
         # 1 to + 500 cc = 501 > 500

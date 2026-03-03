@@ -269,6 +269,131 @@ class TestFilter:
             )
 
 
+class TestResume:
+    def test_resume_skips_successful(self, sample_xlsx, body_template_file, tmp_path):
+        """Resume skips recipients that previously succeeded."""
+        from mail_merge.report import write_csv
+        from mail_merge.sender import SendResult
+
+        output = tmp_path / "report.csv"
+        # Alice succeeded previously
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            output=output,
+            resume=True,
+        )
+        # Should have sent to Bob only, plus Alice from previous
+        emails = {r.email for r in results}
+        assert "alice@example.com" in emails
+        assert "bob@example.com" in emails
+        # Bob was the only one actually sent in this run
+        bob = next(r for r in results if r.email == "bob@example.com")
+        assert bob.success
+
+    def test_resume_retries_failed(self, sample_xlsx, body_template_file, tmp_path):
+        """Resume retries recipients that previously failed."""
+        from mail_merge.report import write_csv
+        from mail_merge.sender import SendResult
+
+        output = tmp_path / "report.csv"
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="bob@example.com", success=False, status_code=500, error="Server error"),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            output=output,
+            resume=True,
+        )
+        bob = next(r for r in results if r.email == "bob@example.com")
+        assert bob.success  # dry_run always succeeds
+
+    def test_resume_all_sent_returns_previous(self, sample_xlsx, body_template_file, tmp_path):
+        """When all recipients already succeeded, return previous results."""
+        from mail_merge.report import write_csv
+        from mail_merge.sender import SendResult
+
+        output = tmp_path / "report.csv"
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="bob@example.com", success=True, status_code=202),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            output=output,
+            resume=True,
+        )
+        assert len(results) == 2
+        assert all(r.success for r in results)
+
+    def test_resume_without_output_raises(self, sample_xlsx, body_template_file):
+        with pytest.raises(ValueError, match="--resume requires --output"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                dry_run=True,
+                resume=True,
+            )
+
+
+class TestBatchSize:
+    def test_batch_size_limits_sends(self, sample_xlsx, body_template_file):
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            batch_size=1,
+        )
+        assert len(results) == 1
+
+    def test_resume_with_batch_size(self, sample_xlsx, body_template_file, tmp_path):
+        """Resume + batch_size sends next batch of remaining."""
+        from mail_merge.report import write_csv
+        from mail_merge.sender import SendResult
+
+        output = tmp_path / "report.csv"
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            dry_run=True,
+            output=output,
+            resume=True,
+            batch_size=1,
+        )
+        # Should have Alice (previous) + Bob (this batch)
+        assert len(results) == 2
+        bob = next(r for r in results if r.email == "bob@example.com")
+        assert bob.success
+
+
 class TestConfigResolution:
     def test_client_id_from_config(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         cfg = tmp_path / "config.toml"

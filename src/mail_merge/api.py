@@ -12,7 +12,7 @@ from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
 from mail_merge.template import validate_template
 from mail_merge.sender import SendResult, send_all, send_one
-from mail_merge.report import print_summary, write_csv
+from mail_merge.report import print_summary, read_csv, write_csv
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,8 @@ def send_merge(
     reply_to: str | list[str] | None = None,
     filter: list[str] | None = None,
     confirm: bool = False,
+    resume: bool = False,
+    batch_size: int | None = None,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -221,6 +223,36 @@ def send_merge(
         logger.info("📋 Loaded %d recipients (filtered from %d)", len(recipients), total)
     else:
         logger.info("📋 Loaded %d recipients", len(recipients))
+
+    # --- Resume: skip already-successful recipients ---
+    previous_results: list[SendResult] = []
+    if resume:
+        if not output:
+            raise ValueError("--resume requires --output to track progress")
+        output_path = Path(output)
+        if output_path.exists():
+            previous_results = read_csv(output_path)
+            successful_emails = {
+                r.email.lower() for r in previous_results if r.success
+            }
+            total_before = len(recipients)
+            recipients = [
+                r for r in recipients
+                if r[email_column].lower() not in successful_emails
+            ]
+            logger.info(
+                "📋 %d previously sent, %d remaining of %d total",
+                len(successful_emails),
+                len(recipients),
+                total_before,
+            )
+            if not recipients:
+                logger.info("✅ All emails already sent")
+                return previous_results
+
+    # --- Batch size: limit sends per invocation ---
+    if batch_size is not None:
+        recipients = recipients[:batch_size]
 
     # --- Read body template ---
     body_path = Path(body)
@@ -341,6 +373,15 @@ def send_merge(
         attachments=attachment_list,
         reply_to=reply_to_list,
     )
+
+    # --- Merge with previous results when resuming ---
+    if previous_results:
+        merged: dict[str, SendResult] = {}
+        for r in previous_results:
+            merged[r.email.lower()] = r
+        for r in results:
+            merged[r.email.lower()] = r
+        results = list(merged.values())
 
     # --- Report ---
     print_summary(results)
