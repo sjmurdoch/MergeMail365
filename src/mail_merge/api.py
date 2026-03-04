@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mail_merge import config as _config
 from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
 from mail_merge.template import validate_template
@@ -272,7 +273,7 @@ def send_merge(
     body_path = Path(body)
     if not body_path.exists():
         raise FileNotFoundError(f"Body template not found: {body_path}")
-    body_template = body_path.read_text()
+    body_template = body_path.read_text(encoding="utf-8")
 
     # --- Validate placeholders ---
     columns = list(recipients[0].keys())
@@ -334,7 +335,7 @@ def send_merge(
         if not client_id:
             raise RuntimeError(
                 "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
-                "or add to ~/.mail-merge.toml)"
+                f"or add to config file {_config.DEFAULT_PATH})"
             )
         from mail_merge.auth import acquire_token, token_expires_at
 

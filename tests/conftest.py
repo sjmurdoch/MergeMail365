@@ -29,5 +29,5 @@ def sample_xlsx(tmp_path: Path) -> Path:
 def body_template_file(tmp_path: Path) -> Path:
     """Create a body template file."""
     path = tmp_path / "body.txt"
-    path.write_text("Hello {{name}},\n\nWelcome from {{company}}.\n")
+    path.write_text("Hello {{name}},\n\nWelcome from {{company}}.\n", encoding="utf-8")
     return path

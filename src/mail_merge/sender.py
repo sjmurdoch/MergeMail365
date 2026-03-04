@@ -99,7 +99,10 @@ def send_one(
                     email=to_email, success=False, status_code=429,
                     error=f"Rate limited {max_rate_limit_retries} times, giving up",
                 )
-            retry_after = int(resp.headers.get("Retry-After", 10))
+            try:
+                retry_after = int(resp.headers.get("Retry-After", 10))
+            except ValueError:
+                retry_after = 10
             logger.warning("⚠️ Rate limited, waiting %ds before retrying %s", retry_after, to_email)
             time.sleep(retry_after)
             continue

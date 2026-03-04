@@ -18,12 +18,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--client-id",
         default=None,
-        help="Azure AD application (client) ID (or set MAIL_MERGE_CLIENT_ID env var, or ~/.mail-merge.toml)",
+        help="Azure AD application (client) ID (or set MAIL_MERGE_CLIENT_ID env var, or config file)",
     )
     parser.add_argument(
         "--tenant-id",
         default=None,
-        help="Azure AD tenant ID (or set MAIL_MERGE_TENANT_ID env var, or ~/.mail-merge.toml; default: 'common')",
+        help="Azure AD tenant ID (or set MAIL_MERGE_TENANT_ID env var, or config file; default: 'common')",
     )
     parser.add_argument("--sheet", default=None, help="Sheet name (default: first sheet)")
     parser.add_argument("--test-email", default=None, help="Send a single test email to this address using the first recipient's data, then exit")

@@ -9,24 +9,32 @@ from typing import Any
 
 import msal
 
+from mail_merge._paths import data_dir
+
 logger = logging.getLogger(__name__)
 
 SCOPES = ["Mail.Send"]
 AUTHORITY_BASE = "https://login.microsoftonline.com"
-CACHE_PATH = Path.home() / ".mail-merge-token-cache.json"
+
+if sys.platform == "win32":
+    CACHE_PATH = data_dir() / "token-cache.json"
+else:
+    CACHE_PATH = Path.home() / ".mail-merge-token-cache.json"
 
 
 def _load_cache() -> msal.SerializableTokenCache:
     cache = msal.SerializableTokenCache()
     if CACHE_PATH.exists():
-        cache.deserialize(CACHE_PATH.read_text())
+        cache.deserialize(CACHE_PATH.read_text(encoding="utf-8"))
     return cache
 
 
 def _save_cache(cache: msal.SerializableTokenCache) -> None:
     if cache.has_state_changed:
-        CACHE_PATH.write_text(cache.serialize())
-        CACHE_PATH.chmod(0o600)
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text(cache.serialize(), encoding="utf-8")
+        if sys.platform != "win32":
+            CACHE_PATH.chmod(0o600)
 
 
 def acquire_token(client_id: str, tenant_id: str = "common") -> str:

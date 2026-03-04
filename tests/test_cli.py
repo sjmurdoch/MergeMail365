@@ -66,7 +66,7 @@ class TestCLIDryRun:
         ])
         assert exit_code == 0
         assert report_path.exists()
-        lines = report_path.read_text().strip().split("\n")
+        lines = report_path.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 3  # header + 2 recipients
 
     def test_csv_not_written_on_dry_run(self, sample_xlsx, body_template_file, tmp_path):
@@ -172,7 +172,7 @@ class TestConfigFilePrecedence:
     def test_config_file_provides_client_and_tenant(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """Config file values are used when CLI flags and env vars are absent."""
         cfg = tmp_path / "config.toml"
-        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n')
+        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
         monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
         monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
@@ -193,7 +193,7 @@ class TestConfigFilePrecedence:
     def test_cli_flag_overrides_config_file(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """CLI --client-id should beat config file value."""
         cfg = tmp_path / "config.toml"
-        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n')
+        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
         monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
         monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
@@ -210,7 +210,7 @@ class TestConfigFilePrecedence:
     def test_env_var_overrides_config_file(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """Env var should beat config file value."""
         cfg = tmp_path / "config.toml"
-        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n')
+        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
         monkeypatch.setenv("MAIL_MERGE_CLIENT_ID", "env-client")
         monkeypatch.setenv("MAIL_MERGE_TENANT_ID", "env-tenant")
@@ -328,7 +328,7 @@ class TestAttachment:
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
 
         att_file = tmp_path / "doc.txt"
-        att_file.write_text("hello")
+        att_file.write_text("hello", encoding="utf-8")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -525,7 +525,7 @@ class TestResumeBatchSize:
             "--send", "-y",
         ])
         assert exit_code == 0
-        lines = report.read_text().strip().split("\n")
+        lines = report.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 2  # header + 1 recipient
 
         # Second run: auto-resumes, sends next batch of 1
@@ -540,7 +540,7 @@ class TestResumeBatchSize:
             "--send", "-y",
         ])
         assert exit_code == 0
-        lines = report.read_text().strip().split("\n")
+        lines = report.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 3  # header + 2 recipients (merged)
 
     def test_resume_without_output_succeeds(self, sample_xlsx, body_template_file):

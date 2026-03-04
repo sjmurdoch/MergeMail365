@@ -159,7 +159,7 @@ class TestPassThrough:
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
 
         att = tmp_path / "file.txt"
-        att.write_text("data")
+        att.write_text("data", encoding="utf-8")
 
         results = send_merge(
             spreadsheet=sample_xlsx,
@@ -247,7 +247,7 @@ class TestFilter:
         wb.save(path)
 
         body = tmp_path / "body.txt"
-        body.write_text("Hi {{name}}")
+        body.write_text("Hi {{name}}", encoding="utf-8")
 
         results = send_merge(
             spreadsheet=path,
@@ -425,7 +425,7 @@ class TestBatchSize:
 class TestConfigResolution:
     def test_client_id_from_config(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         cfg = tmp_path / "config.toml"
-        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n')
+        cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
         monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
         monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)

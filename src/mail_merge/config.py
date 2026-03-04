@@ -1,18 +1,22 @@
-"""Load persistent configuration from ~/.mail-merge.toml."""
+"""Load persistent configuration."""
 
 import logging
-from pathlib import Path
-
 import sys
+from pathlib import Path
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib
 
+from mail_merge._paths import data_dir
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_PATH = Path.home() / ".mail-merge.toml"
+if sys.platform == "win32":
+    DEFAULT_PATH = data_dir() / "config.toml"
+else:
+    DEFAULT_PATH = Path.home() / ".mail-merge.toml"
 
 
 def load_config(path: Path | None = None) -> dict[str, str]:

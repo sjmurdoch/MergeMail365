@@ -36,7 +36,7 @@ def print_summary(results: list[SendResult]) -> None:
 
 def write_csv(results: list[SendResult], path: str | Path) -> None:
     path = Path(path)
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["email", "success", "status_code", "error"])
         for r in results:
@@ -52,7 +52,7 @@ def read_csv(path: str | Path) -> list[SendResult]:
     """
     path = Path(path)
     results: list[SendResult] = []
-    with path.open(newline="") as f:
+    with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             status_raw = row.get("status_code", "")
