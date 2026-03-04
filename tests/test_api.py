@@ -4,6 +4,7 @@ import logging
 import time
 from pathlib import Path
 
+import openpyxl
 import pytest
 import responses
 
@@ -134,6 +135,48 @@ class TestValidationErrors:
                 subject="Hello {{name}}",
                 email_column="email",
                     cc=cc_list,
+            )
+
+
+class TestNonAsciiEmail:
+    def test_non_ascii_email_skipped_with_warning(self, tmp_path, body_template_file, caplog):
+        """Recipients with non-ASCII email addresses are skipped with a warning."""
+        path = tmp_path / "non_ascii.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email", "company"])
+        ws.append(["Alice", "alice@example.com", "Acme"])
+        ws.append(["Böb", "böb@example.com", "Widgets"])
+        ws.append(["José", "josé@example.com", "Corp"])
+        wb.save(path)
+
+        with caplog.at_level(logging.WARNING):
+            results = send_merge(
+                spreadsheet=path,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+            )
+        assert len(results) == 1
+        assert results[0].email == "alice@example.com"
+        assert "böb@example.com" in caplog.text
+        assert "josé@example.com" in caplog.text
+
+    def test_all_non_ascii_raises(self, tmp_path, body_template_file):
+        """If all recipients have non-ASCII emails, raise ValueError."""
+        path = tmp_path / "all_non_ascii.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email", "company"])
+        ws.append(["Böb", "böb@example.com", "Widgets"])
+        wb.save(path)
+
+        with pytest.raises(ValueError, match="No recipients remaining"):
+            send_merge(
+                spreadsheet=path,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
             )
 
 
