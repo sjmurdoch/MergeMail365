@@ -84,6 +84,24 @@ def _parse_filter(expr: str) -> tuple[str, str, str]:
     )
 
 
+def _filter_ascii_emails(
+    recipients: list[dict[str, str]], email_column: str
+) -> list[dict[str, str]]:
+    """Remove recipients with non-ASCII email addresses, logging each skip."""
+    result = []
+    for row in recipients:
+        addr = row.get(email_column, "")
+        if not addr.isascii():
+            logger.warning("⚠️  Skipping non-ASCII email address: %s", addr)
+            continue
+        result.append(row)
+    if not result:
+        raise ValueError(
+            "No recipients remaining after skipping non-ASCII email addresses"
+        )
+    return result
+
+
 def _apply_filters(
     recipients: list[dict[str, str]], filters: list[str]
 ) -> list[dict[str, str]]:
@@ -227,18 +245,7 @@ def send_merge(
     email_column = next(k for k in recipients[0] if k.lower() == email_column.lower())
 
     # --- Skip non-ASCII email addresses ---
-    clean_recipients: list[dict[str, str]] = []
-    for row in recipients:
-        addr = row.get(email_column, "")
-        if not addr.isascii():
-            logger.warning(
-                "⚠️  Skipping non-ASCII email address: %s", addr
-            )
-            continue
-        clean_recipients.append(row)
-    if not clean_recipients:
-        raise ValueError("No recipients remaining after skipping non-ASCII email addresses")
-    recipients = clean_recipients
+    recipients = _filter_ascii_emails(recipients, email_column)
 
     # --- Apply filters ---
     if filter:
