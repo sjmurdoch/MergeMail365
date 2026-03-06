@@ -138,7 +138,7 @@ class TestValidationErrors:
             )
 
 
-class TestNonAsciiEmail:
+class TestEmailValidation:
     def test_non_ascii_email_skipped_with_warning(self, tmp_path, body_template_file, caplog):
         """Recipients with non-ASCII email addresses are skipped with a warning."""
         path = tmp_path / "non_ascii.xlsx"
@@ -159,12 +159,13 @@ class TestNonAsciiEmail:
             )
         assert len(results) == 1
         assert results[0].email == "alice@example.com"
+        assert "Skipping invalid email address" in caplog.text
         assert "böb@example.com" in caplog.text
         assert "josé@example.com" in caplog.text
 
-    def test_all_non_ascii_raises(self, tmp_path, body_template_file):
-        """If all recipients have non-ASCII emails, raise ValueError."""
-        path = tmp_path / "all_non_ascii.xlsx"
+    def test_all_invalid_raises(self, tmp_path, body_template_file):
+        """If all recipients have invalid emails, raise ValueError."""
+        path = tmp_path / "all_invalid.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.append(["name", "email", "company"])
@@ -178,6 +179,51 @@ class TestNonAsciiEmail:
                 subject="Hello {{name}}",
                 email_column="email",
             )
+
+    def test_malformed_emails_skipped(self, tmp_path, body_template_file, caplog):
+        """Malformed emails (missing @, no domain, etc.) are skipped."""
+        path = tmp_path / "malformed.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email", "company"])
+        ws.append(["Alice", "alice@example.com", "Acme"])
+        ws.append(["NoAt", "noatsign", "Corp"])
+        ws.append(["NoDomain", "user@", "Corp"])
+        ws.append(["Empty", "", "Corp"])
+        wb.save(path)
+
+        with caplog.at_level(logging.WARNING):
+            results = send_merge(
+                spreadsheet=path,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+            )
+        assert len(results) == 1
+        assert results[0].email == "alice@example.com"
+        assert "noatsign" in caplog.text
+        assert "user@" in caplog.text
+
+    def test_valid_edge_cases_pass(self, tmp_path, body_template_file):
+        """Plus-addressing and subdomains are valid and should pass."""
+        path = tmp_path / "valid_edge.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email", "company"])
+        ws.append(["Plus", "user+tag@example.com", "Acme"])
+        ws.append(["Sub", "user@mail.sub.example.com", "Acme"])
+        wb.save(path)
+
+        results = send_merge(
+            spreadsheet=path,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+        )
+        assert len(results) == 2
+        emails = {r.email for r in results}
+        assert "user+tag@example.com" in emails
+        assert "user@mail.sub.example.com" in emails
 
 
 class TestAuthError:
