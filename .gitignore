@@ -7,8 +7,4 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
-~$recipients.xlsx
-recipients.xlsx
-body.txt
-go.sh
-report.csv
+projects/
