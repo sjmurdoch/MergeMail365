@@ -326,7 +326,7 @@ When every recipient should receive the same email and must not be able to see o
 
 **Constraints (combinations that abort with an error):**
 - The subject and body must be **static text** — `{{placeholders}}` abort with an error (every recipient gets the same content)
-- `--test-email` aborts with an error (use a dry run then send to a small test spreadsheet instead)
+- `--test-email` aborts with an error — instead, do a dry run, then send to a small test spreadsheet containing only your own address (see **Step 2** below)
 - `--batch-size` aborts with an error (batch sizes are calculated automatically)
 - `--bcc-blast-to` is required — omitting it aborts with an error
 
@@ -370,9 +370,9 @@ uv run mail-merge \
 
 This validates the spreadsheet, calculates how many batches will be sent, and logs a summary without making any API calls. Check the log output to confirm the recipient count and batch count.
 
-**Step 2 — Send to a small test spreadsheet**
+**Step 2 — Send to a small test spreadsheet (replaces `--test-email`)**
 
-Since `--test-email` is not available in BCC blast mode, create a minimal spreadsheet containing only your own address (and a colleague's if you want to verify that multiple BCC recipients receive the email):
+Create a minimal spreadsheet containing only your own address and a colleague's. Using two addresses is important: it lets you verify that BCC is working correctly (neither of you should be able to see the other's address in the received email).
 
 ```
 email
@@ -394,7 +394,12 @@ uv run mail-merge \
   --yes
 ```
 
-Check both inboxes. Neither recipient should be able to see the other's address. Verify the subject, body, and sender address all look correct.
+Check both inboxes and verify:
+- The subject and body look correct
+- The `From:` address is your Microsoft 365 account (not the `--bcc-blast-to` address)
+- The `To:` field shows the `--bcc-blast-to` address, not anyone's personal address
+- Neither recipient can see the other's address (open the email and inspect the headers if unsure)
+- Any CC, attachments, or reply-to addresses are present if you used those flags
 
 **Step 3 — Full send with confirmation**
 
