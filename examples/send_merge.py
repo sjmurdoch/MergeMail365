@@ -39,7 +39,7 @@ results = send_merge(
     body="body.txt",
     subject="Hello {{name}}",
     email_column="email",
-    filter=["company=Acme Corp"],              # only Acme Corp recipients
+    filters=["company=Acme Corp"],              # only Acme Corp recipients
 )
 print(f"Filtered: {len(results)} recipients")
 
@@ -68,7 +68,56 @@ results = send_merge(
     batch_size=50,
 )
 
-# --- 5. Inspect results ---
+# --- 5. BCC blast: send same message to all recipients via BCC ---
+# All recipients are BCC'd in batches (up to 499 per batch).
+# Subject and body must be static (no {{placeholders}}).
+
+# 5a. Dry run — validate without sending
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="announcement.txt",
+    subject="Important announcement",
+    email_column="email",
+    bcc_blast=True,
+    bcc_blast_to="noreply@example.com",        # the To: address (recipients are BCC)
+    # send=False is the default
+)
+print(f"BCC blast dry run: {len(results)} batch(es)")
+
+# 5b. Test email — send the blast to yourself first
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="announcement.txt",
+    subject="Important announcement",
+    email_column="email",
+    client_id="YOUR_CLIENT_ID",
+    bcc_blast=True,
+    bcc_blast_to="noreply@example.com",
+    test_email="your-email@example.com",       # sends only to you, not the list
+)
+
+# 5c. Send for real
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="announcement.txt",
+    subject="Important announcement",
+    email_column="email",
+    client_id="YOUR_CLIENT_ID",
+    bcc_blast=True,
+    bcc_blast_to="Undisclosed recipients <noreply@example.com>",  # display name supported
+    send=True,
+    confirm=True,                              # prompts before sending (the default)
+)
+
+# 5d. Recover from errors — check batch results and re-send failures
+for r in results:
+    if not r.success:
+        print(f"Batch failed: {r.email} — {r.status_code}: {r.error}")
+        # Fix the issue (e.g. auth, rate limit) and re-run the same call.
+        # BCC blast does not support --output/resume, so you may need to
+        # manually remove already-notified recipients from the spreadsheet.
+
+# --- 6. Inspect results ---
 
 for r in results:
     status = "OK" if r.success else f"FAILED ({r.status_code}: {r.error})"
