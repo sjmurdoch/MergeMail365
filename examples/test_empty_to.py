@@ -80,6 +80,22 @@ def main() -> None:
             "Test B — toRecipients omitted entirely",
             {"message": _base_message(args.to)},
         ),
+        (
+            "Test C — toRecipients set to normal address",
+            {"message": {**_base_message(args.to), "toRecipients": [{
+                "emailAddress": {
+                    "address": "steven@test.murdoch.is"
+                }
+            }]}},
+        ),
+                (
+            "Test D — toRecipients set to undisclosed-recipients (with semicolon)",
+            {"message": {**_base_message(args.to), "toRecipients": [{
+                "emailAddress": {
+                    "address": "undisclosed-recipients:;"
+                }
+            }]}},
+        ),
     ]
 
     for label, payload in tests:
