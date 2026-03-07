@@ -17,6 +17,13 @@ def read_recipients(
     Rows with an empty email cell are skipped with a warning.
     Raises ValueError if the email column is not found.
     """
+    path = Path(path)
+    max_size = 50 * 1024 * 1024  # 50 MB
+    if path.stat().st_size > max_size:
+        raise ValueError(
+            f"Spreadsheet too large: {path.stat().st_size / (1024 * 1024):.0f} MB "
+            f"(limit: {max_size // (1024 * 1024)} MB)"
+        )
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb[sheet_name] if sheet_name else wb.active
 

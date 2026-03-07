@@ -1,9 +1,9 @@
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import responses
 
-from mail_merge.sender import GRAPH_SEND_URL, SendResult, send_all, send_one
+from mail_merge.sender import GRAPH_SEND_URL, SendResult, send_all, send_bcc_blast, send_one
 
 
 class TestSendOne:
@@ -122,7 +122,10 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_reply_to_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", reply_to=["reply@example.com"])
+        result = send_one(
+            lambda: "fake-token", "test@example.com", "Subject", "Body",
+            reply_to=[{"emailAddress": {"address": "reply@example.com"}}],
+        )
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -145,7 +148,8 @@ class TestSendOneOptionalFields:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one(
             lambda: "fake-token", "test@example.com", "Subject", "Body",
-            cc=["a@x.com", "b@x.com"], bcc=["c@x.com"],
+            cc=[{"emailAddress": {"address": "a@x.com"}}, {"emailAddress": {"address": "b@x.com"}}],
+            bcc=[{"emailAddress": {"address": "c@x.com"}}],
         )
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
@@ -240,6 +244,82 @@ class TestSendAll:
         assert sleep_values[-1] == 2.0
 
 
+class TestNetworkErrors:
+    def test_request_exception_exhausts_retries(self):
+        """RequestException triggers exponential backoff; exhausting max_retries returns failure."""
+        import requests as req_module
+
+        with patch("mail_merge.sender.time.sleep"), \
+             patch("requests.post", side_effect=req_module.exceptions.ConnectionError("refused")):
+            result = send_one(
+                lambda: "fake-token", "test@example.com", "Subject", "Body",
+                max_retries=2,
+            )
+
+        assert not result.success
+        assert result.error == "refused"
+
+    def test_request_exception_retries_then_succeeds(self):
+        """RequestException on first attempt retries; succeeds on second attempt."""
+        import requests as req_module
+
+        success_resp = MagicMock()
+        success_resp.status_code = 202
+
+        call_count = 0
+
+        def flaky_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise req_module.exceptions.ConnectionError("transient")
+            return success_resp
+
+        with patch("mail_merge.sender.time.sleep"), \
+             patch("requests.post", side_effect=flaky_post):
+            result = send_one(
+                lambda: "fake-token", "test@example.com", "Subject", "Body",
+                max_retries=2,
+            )
+
+        assert result.success
+        assert call_count == 2
+
+
+class TestRateLimitEdgeCases:
+    @responses.activate
+    def test_rate_limit_unparseable_retry_after_defaults_to_10(self):
+        """When Retry-After cannot be parsed as int, the code defaults to 10 seconds."""
+        responses.add(
+            responses.POST, GRAPH_SEND_URL, status=429,
+            headers={"Retry-After": "soon"},
+        )
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        sleep_values = []
+        with patch("mail_merge.sender.time.sleep", side_effect=lambda s: sleep_values.append(s)):
+            result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+
+        assert result.success
+        assert 10 in sleep_values
+
+    @responses.activate
+    def test_rate_limit_max_retries_exceeded(self):
+        """After exceeding 20 rate-limit retries, give up and return failure."""
+        for _ in range(21):
+            responses.add(
+                responses.POST, GRAPH_SEND_URL, status=429,
+                headers={"Retry-After": "0"},
+            )
+
+        with patch("mail_merge.sender.time.sleep"):
+            result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+
+        assert not result.success
+        assert result.status_code == 429
+        assert "Rate limited" in result.error
+
+
 class TestTokenRefreshOn401:
     @responses.activate
     def test_401_refreshes_token(self):
@@ -266,3 +346,62 @@ class TestTokenRefreshOn401:
         assert not result.success
         assert result.status_code == 401
         assert len(responses.calls) == 2
+
+
+class TestSendBccBlast:
+    @responses.activate
+    def test_single_batch_success(self):
+        """A small list fits in one batch; returns one SendResult."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        emails = ["a@x.com", "b@x.com", "c@x.com"]
+        results = send_bcc_blast(
+            lambda: "tok", emails, "noreply@x.com", "Hello", "Body"
+        )
+        assert len(results) == 1
+        assert results[0].success
+        assert "batch 1/1" in results[0].email
+        assert "3 recipients" in results[0].email
+
+    @responses.activate
+    def test_multiple_batches(self):
+        """Recipient list larger than batch capacity is split correctly."""
+        for _ in range(3):
+            responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        # With 1 to + 0 cc + 0 bcc_extra = 1 reserved → 499 per batch
+        # Force small batches by passing many cc addresses to shrink max_per_batch.
+        # Use 498 cc so max_per_batch = 500 - 1 - 498 = 1 → one recipient per batch.
+        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(498)]
+        emails = ["a@x.com", "b@x.com", "c@x.com"]
+        results = send_bcc_blast(
+            lambda: "tok", emails, "noreply@x.com", "Hi", "Body", cc=cc
+        )
+        assert len(results) == 3
+        assert all(r.success for r in results)
+
+    def test_dry_run_no_http(self):
+        """In dry-run mode no HTTP calls are made; returns one result per batch."""
+        emails = ["a@x.com", "b@x.com"]
+        results = send_bcc_blast(
+            None, emails, "noreply@x.com", "Hi", "Body", dry_run=True
+        )
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].status_code is None
+
+    def test_no_get_token_in_live_mode_raises(self):
+        """Passing get_token=None in live mode raises RuntimeError."""
+        import pytest
+        with pytest.raises(RuntimeError, match="get_token is required"):
+            send_bcc_blast(None, ["a@x.com"], "to@x.com", "Hi", "Body", dry_run=False)
+
+    @responses.activate
+    def test_batch_failure_recorded(self):
+        """A 4xx response is recorded as a failure in the corresponding result."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=400, body="Bad Request")
+        results = send_bcc_blast(
+            lambda: "tok", ["a@x.com"], "noreply@x.com", "Hi", "Body"
+        )
+        assert len(results) == 1
+        assert not results[0].success
+        assert results[0].status_code == 400

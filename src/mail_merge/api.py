@@ -13,19 +13,51 @@ from mail_merge import config as _config
 from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
 from mail_merge.template import validate_template
-from mail_merge.sender import SendResult, send_all, send_one
+from mail_merge.sender import SendResult, send_all, send_bcc_blast, send_one
 from mail_merge.report import print_summary, read_csv, write_csv
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_address_list(value: str | list[str] | None) -> list[str] | None:
-    """Normalise a comma-separated string or list into a list of addresses."""
+def _format_addrs(entries: list[dict[str, object]]) -> str:
+    """Format a list of Graph API emailAddress dicts for human-readable display."""
+    parts = []
+    for e in entries:
+        ea = e.get("emailAddress", {})
+        if isinstance(ea, dict):
+            name = ea.get("name")
+            addr = ea.get("address", "")
+            parts.append(f"{name} <{addr}>" if name else str(addr))
+    return ", ".join(parts)
+
+
+def _parse_one_addr(raw: str) -> tuple[str | None, str]:
+    """Extract (display_name | None, address) from 'Name <email>' or plain email."""
+    from email.utils import parseaddr
+    name, addr = parseaddr(raw.strip())
+    return (name or None), (addr or raw.strip())
+
+
+def _parse_address_entries(
+    value: str | list[str] | None,
+) -> list[dict[str, object]] | None:
+    """Parse addresses (supporting 'Display Name <email>' format) into Graph API dicts.
+
+    Accepts a comma-separated string or list. Returns ``None`` when empty.
+    """
     if value is None:
         return None
-    if isinstance(value, str):
-        return [a.strip() for a in value.split(",") if a.strip()] or None
-    return list(value) or None
+    items = [a.strip() for a in value.split(",") if a.strip()] if isinstance(value, str) else [a.strip() for a in value if a.strip()]
+    if not items:
+        return None
+    result = []
+    for raw in items:
+        name, addr = _parse_one_addr(raw)
+        entry: dict[str, str] = {"address": addr}
+        if name:
+            entry["name"] = name
+        result.append({"emailAddress": entry})
+    return result
 
 
 def _process_attachments(
@@ -169,6 +201,8 @@ def send_merge(
     confirm: bool = True,
     resume: bool = True,
     batch_size: int | None = None,
+    bcc_blast: bool = False,
+    bcc_blast_to: str | None = None,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -211,6 +245,13 @@ def send_merge(
             set.
         batch_size: If set, only process this many recipients per invocation.
             Use with ``output`` for resumable batched rollout.
+        bcc_blast: If ``True``, send all recipients as BCC in batches rather
+            than individually. Recipients cannot see each other's addresses.
+            Incompatible with ``batch_size`` and templates containing
+            ``{{placeholders}}``. When combined with ``test_email``, sends
+            the blast to only that address instead of the full recipient list.
+        bcc_blast_to: The ``To:`` address used in BCC blast mode. Required
+            when ``bcc_blast=True``.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -234,6 +275,19 @@ def send_merge(
             or config.get("tenant_id")
             or "common"
         )
+
+    # --- BCC blast conflict checks and To address parsing ---
+    bcc_blast_to_name: str | None = None
+    if bcc_blast:
+        if batch_size is not None:
+            raise ValueError(
+                "--batch-size is not supported with --bcc-blast; "
+                "batches are sized automatically based on the recipient list"
+            )
+        if not bcc_blast_to:
+            raise ValueError("bcc_blast_to is required when bcc_blast=True")
+        # Support "Display Name <email>" format (RFC 2822)
+        bcc_blast_to_name, bcc_blast_to = _parse_one_addr(bcc_blast_to)
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -263,9 +317,9 @@ def send_merge(
     else:
         logger.info("📋 Loaded %d recipients", len(recipients))
 
-    # --- Resume and batch size (skip for test emails) ---
+    # --- Resume and batch size (skip for test emails and bcc blast) ---
     previous_results: list[SendResult] = []
-    if not test_email:
+    if not test_email and not bcc_blast:
         if resume and output:
             output_path = Path(output)
             if output_path.exists():
@@ -301,28 +355,44 @@ def send_merge(
     body_template = body_path.read_text(encoding="utf-8")
 
     # --- Validate placeholders ---
-    columns = list(recipients[0].keys())
-    bad_subject = validate_template(subject, columns)
-    bad_body = validate_template(body_template, columns)
-    bad = sorted(set(bad_subject + bad_body))
-    if bad:
+    if bcc_blast:
+        from mail_merge.template import extract_placeholders
+        blast_ph = extract_placeholders(subject) | extract_placeholders(body_template)
+        if blast_ph:
+            raise ValueError(
+                "--bcc-blast does not support placeholders (body and subject must be "
+                f"static text); found: {', '.join(sorted(blast_ph))}"
+            )
+    else:
+        columns = list(recipients[0].keys())
+        bad_subject = validate_template(subject, columns)
+        bad_body = validate_template(body_template, columns)
+        bad = sorted(set(bad_subject + bad_body))
+        if bad:
+            raise ValueError(
+                f"Unresolvable placeholders: {', '.join(bad)} "
+                f"(available columns: {', '.join(columns)})"
+            )
+
+    # --- Validate importance ---
+    if importance is not None and importance not in ("low", "normal", "high"):
         raise ValueError(
-            f"Unresolvable placeholders: {', '.join(bad)} "
-            f"(available columns: {', '.join(columns)})"
+            f"Invalid importance {importance!r}; expected 'low', 'normal', or 'high'"
         )
 
     # --- Parse CC / BCC / reply-to ---
-    cc_list = _parse_address_list(cc)
-    bcc_list = _parse_address_list(bcc)
-    reply_to_list = _parse_address_list(reply_to)
+    cc_list = _parse_address_entries(cc)
+    bcc_list = _parse_address_entries(bcc)
+    reply_to_list = _parse_address_entries(reply_to)
 
-    # --- Validate recipient count ---
-    recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
-    if recipient_count > 500:
-        raise ValueError(
-            f"Too many recipients per message ({recipient_count}); "
-            f"Microsoft Graph API limit is 500 (to + cc + bcc)"
-        )
+    # --- Validate recipient count (skip for blast; each batch is validated internally) ---
+    if not bcc_blast:
+        recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
+        if recipient_count > 500:
+            raise ValueError(
+                f"Too many recipients per message ({recipient_count}); "
+                f"Microsoft Graph API limit is 500 (to + cc + bcc)"
+            )
 
     # --- Process attachments ---
     attachment_list = _process_attachments(attachment)
@@ -335,14 +405,21 @@ def send_merge(
         from mail_merge.console import console
         from mail_merge.template import render
 
-        sample = recipients[0]
         console.print()
-        console.print(f"[bold]Subject:[/bold]  {render(subject, sample)}")
-        console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
+        if bcc_blast:
+            reserved = 1 + len(cc_list or []) + len(bcc_list or [])
+            blast_batch_count = max(1, (len(recipients) + (500 - reserved) - 1) // (500 - reserved))
+            console.print(f"[bold]Subject:[/bold]  {subject}")
+            console.print(f"[bold]To:[/bold]       {bcc_blast_to}")
+            console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
+        else:
+            sample = recipients[0]
+            console.print(f"[bold]Subject:[/bold]  {render(subject, sample)}")
+            console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
         if cc_list:
-            console.print(f"[bold]CC:[/bold]       {', '.join(cc_list)}")
-        if bcc_list:
-            console.print(f"[bold]BCC:[/bold]      {', '.join(bcc_list)}")
+            console.print(f"[bold]CC:[/bold]       {_format_addrs(cc_list)}")
+        if not bcc_blast and bcc_list:
+            console.print(f"[bold]BCC:[/bold]      {_format_addrs(bcc_list)}")
         if attachment:
             names = [Path(a).name for a in attachment]
             console.print(f"[bold]Attach:[/bold]   {', '.join(names)}")
@@ -393,6 +470,23 @@ def send_merge(
 
     # --- Test email (always sends, regardless of --send flag) ---
     if test_email:
+        if get_token is None:
+            raise RuntimeError("Authentication is required to send a test email")
+        if bcc_blast:
+            logger.info(
+                "📧 BCC blast test: sending to %s via %s",
+                test_email, bcc_blast_to,
+            )
+            return send_bcc_blast(
+                get_token, [test_email], bcc_blast_to, subject, body_template,  # type: ignore[arg-type]
+                dry_run=False,
+                max_retries=max_retries, importance=importance,
+                cc=cc_list, bcc=bcc_list, html=html,
+                save_to_sent_items=save_to_sent_items,
+                attachments=attachment_list, reply_to=reply_to_list,
+                to_name=bcc_blast_to_name,
+            )
+
         from mail_merge.template import render
 
         sample = recipients[0]
@@ -402,7 +496,6 @@ def send_merge(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
         )
-        assert get_token is not None
         result = send_one(
             get_token, test_email, rendered_subject, rendered_body,
             max_retries=max_retries, importance=importance,
@@ -413,23 +506,43 @@ def send_merge(
         return [result]
 
     # --- Send emails ---
-    results = send_all(
-        get_token=get_token,
-        recipients=recipients,
-        email_column=email_column,
-        subject_template=subject,
-        body_template=body_template,
-        dry_run=not send,
-        delay=delay,
-        max_retries=max_retries,
-        importance=importance,
-        cc=cc_list,
-        bcc=bcc_list,
-        html=html,
-        save_to_sent_items=save_to_sent_items,
-        attachments=attachment_list,
-        reply_to=reply_to_list,
-    )
+    if bcc_blast:
+        emails = [r[email_column] for r in recipients]
+        results = send_bcc_blast(
+            get_token=get_token,
+            emails=emails,
+            to_email=bcc_blast_to,  # type: ignore[arg-type]  # validated above
+            subject=subject,
+            body=body_template,
+            dry_run=not send,
+            max_retries=max_retries,
+            importance=importance,
+            cc=cc_list,
+            bcc=bcc_list,
+            html=html,
+            save_to_sent_items=save_to_sent_items,
+            attachments=attachment_list,
+            reply_to=reply_to_list,
+            to_name=bcc_blast_to_name,
+        )
+    else:
+        results = send_all(
+            get_token=get_token,
+            recipients=recipients,
+            email_column=email_column,
+            subject_template=subject,
+            body_template=body_template,
+            dry_run=not send,
+            delay=delay,
+            max_retries=max_retries,
+            importance=importance,
+            cc=cc_list,
+            bcc=bcc_list,
+            html=html,
+            save_to_sent_items=save_to_sent_items,
+            attachments=attachment_list,
+            reply_to=reply_to_list,
+        )
 
     # --- Merge with previous results when resuming ---
     if previous_results:

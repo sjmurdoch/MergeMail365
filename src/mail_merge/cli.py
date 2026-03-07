@@ -43,6 +43,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
+    parser.add_argument(
+        "--bcc-blast",
+        action="store_true",
+        help="Send all recipients via BCC in batches (recipients cannot see each other)",
+    )
+    parser.add_argument(
+        "--bcc-blast-to",
+        default=None,
+        help="The To: address used in BCC blast mode (required with --bcc-blast)",
+    )
     return parser.parse_args(argv)
 
 
@@ -77,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
             confirm=not args.yes,
             resume=not args.no_resume,
             batch_size=args.batch_size,
+            bcc_blast=args.bcc_blast,
+            bcc_blast_to=args.bcc_blast_to,
         )
     except KeyboardInterrupt:
         logger.info("Aborted")

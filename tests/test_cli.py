@@ -567,3 +567,90 @@ class TestRecipientCountValidation:
             "--cc", cc_addresses,
         ])
         assert exit_code == 1
+
+
+class TestUnexpectedException:
+    def test_unexpected_exception_returns_1(self, sample_xlsx, body_template_file, monkeypatch):
+        """An unexpected exception (not FileNotFoundError/ValueError/RuntimeError) returns exit code 1."""
+        def explode(*args, **kwargs):
+            raise TypeError("unexpected internal error")
+
+        import mail_merge.cli as cli_module
+        monkeypatch.setattr(cli_module, "send_merge", explode)
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+        ])
+        assert exit_code == 1
+
+
+class TestBccBlastCLI:
+    def test_bcc_blast_dry_run(self, sample_xlsx, tmp_path):
+        """--bcc-blast dry run exits with code 0."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Announcement",
+            "--email-column", "email",
+            "--bcc-blast",
+            "--bcc-blast-to", "noreply@x.com",
+        ])
+        assert exit_code == 0
+
+    def test_bcc_blast_missing_to_errors(self, sample_xlsx, tmp_path):
+        """--bcc-blast without --bcc-blast-to exits with code 1."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Announcement",
+            "--email-column", "email",
+            "--bcc-blast",
+        ])
+        assert exit_code == 1
+
+    def test_bcc_blast_with_placeholder_errors(self, sample_xlsx, tmp_path):
+        """--bcc-blast with a {{placeholder}} subject exits with code 1."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--bcc-blast",
+            "--bcc-blast-to", "noreply@x.com",
+        ])
+        assert exit_code == 1
+
+    @responses.activate
+    def test_bcc_blast_with_test_email(self, sample_xlsx, tmp_path, monkeypatch):
+        """--bcc-blast + --test-email sends a blast to just the test address."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Announcement",
+            "--email-column", "email",
+            "--client-id", "fake-client",
+            "--bcc-blast",
+            "--bcc-blast-to", "noreply@x.com",
+            "--test-email", "me@x.com",
+        ])
+        assert exit_code == 0
+        assert len(responses.calls) == 1
+        payload = json.loads(responses.calls[0].request.body)
+        bcc_addrs = [b["emailAddress"]["address"] for b in payload["message"]["bccRecipients"]]
+        assert bcc_addrs == ["me@x.com"]
