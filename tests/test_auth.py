@@ -2,8 +2,6 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 import msal
 import pytest
 
