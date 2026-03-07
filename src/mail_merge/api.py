@@ -14,7 +14,13 @@ from mail_merge import config as _config
 from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
 from mail_merge.template import extract_placeholders, render, validate_template
-from mail_merge.sender import SendResult, send_all, send_bcc_blast, send_one
+from mail_merge.sender import (
+    MAX_RECIPIENTS_PER_MESSAGE,
+    SendResult,
+    send_all,
+    send_bcc_blast,
+    send_one,
+)
 from mail_merge.report import print_summary, read_csv, write_csv
 
 logger = logging.getLogger(__name__)
@@ -385,10 +391,10 @@ def send_merge(
     # --- Validate recipient count (skip for blast; each batch is validated internally) ---
     if not bcc_blast:
         recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
-        if recipient_count > 500:
+        if recipient_count > MAX_RECIPIENTS_PER_MESSAGE:
             raise ValueError(
                 f"Too many recipients per message ({recipient_count}); "
-                f"Microsoft Graph API limit is 500 (to + cc + bcc)"
+                f"Microsoft Graph API limit is {MAX_RECIPIENTS_PER_MESSAGE} (to + cc + bcc)"
             )
 
     # --- Process attachments ---
@@ -404,7 +410,8 @@ def send_merge(
         console.print()
         if bcc_blast:
             reserved = 1 + len(cc_list or []) + len(bcc_list or [])
-            blast_batch_count = max(1, (len(recipients) + (500 - reserved) - 1) // (500 - reserved))
+            max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
+            blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
             console.print(f"[bold]Subject:[/bold]  {subject}")
             console.print(f"[bold]To:[/bold]       {bcc_blast_to}")
             console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
@@ -444,7 +451,8 @@ def send_merge(
             raise RuntimeError(f"Authentication failed: {exc}") from exc
 
         # Subsequent calls will use silent acquisition (cached refresh token)
-        get_token = lambda: acquire_token(client_id, tenant_id)  # noqa: E731
+        def get_token() -> str:
+            return acquire_token(client_id, tenant_id)
 
         # --- Pre-flight token expiry check ---
         expires = token_expires_at(token)

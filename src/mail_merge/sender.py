@@ -8,6 +8,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 GRAPH_SEND_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
+MAX_RECIPIENTS_PER_MESSAGE = 500
 
 
 @dataclass
@@ -150,7 +151,7 @@ def send_bcc_blast(
     Returns one SendResult per batch (not per recipient).
     """
     reserved = 1 + len(cc or []) + len(bcc or [])
-    max_per_batch = max(1, 500 - reserved)
+    max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
     batches = [emails[i:i + max_per_batch] for i in range(0, len(emails), max_per_batch)]
     total = len(batches)
     results = []
