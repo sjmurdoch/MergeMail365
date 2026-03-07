@@ -50,7 +50,7 @@ def send_one(
     message: dict[str, object] = {
         "subject": subject,
         "body": {"contentType": content_type, "content": body},
-        "toRecipients": [{"emailAddress": {"address": to_email, **({"name": to_name} if to_name else {})}}],
+        "toRecipients": [{"emailAddress": {k: v for k, v in (("address", to_email), ("name", to_name)) if v}}],
     }
     if importance:
         message["importance"] = importance

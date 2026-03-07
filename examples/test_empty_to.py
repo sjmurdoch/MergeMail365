@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import requests
@@ -32,11 +33,11 @@ from mail_merge.sender import GRAPH_SEND_URL
 
 def _token(client_id: str | None, tenant_id: str | None) -> str:
     config = load_config()
-    cid = client_id or config.get("client_id")
-    tid = tenant_id or config.get("tenant_id") or "common"
+    cid = client_id or os.environ.get("MAIL_MERGE_CLIENT_ID") or config.get("client_id")
+    tid = tenant_id or os.environ.get("MAIL_MERGE_TENANT_ID") or config.get("tenant_id") or "common"
     if not cid:
         sys.exit(
-            "client-id is required (pass --client-id or add to ~/.mail-merge.toml)"
+            "client-id is required (pass --client-id, set MAIL_MERGE_CLIENT_ID, or add to ~/.mail-merge.toml)"
         )
     return acquire_token(cid, tid)
 
