@@ -736,18 +736,36 @@ class TestTokenRefreshFailure:
 
 
 class TestBccBlast:
-    def test_conflict_with_test_email(self, sample_xlsx, body_template_file):
-        """--bcc-blast and --test-email are mutually exclusive."""
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            send_merge(
-                spreadsheet=sample_xlsx,
-                body=body_template_file,
-                subject="Static subject",
-                email_column="email",
-                bcc_blast=True,
-                bcc_blast_to="noreply@x.com",
-                test_email="someone@x.com",
-            )
+    @responses.activate
+    def test_test_email_sends_to_single_address(self, sample_xlsx, tmp_path, monkeypatch):
+        """--bcc-blast + --test-email sends the blast to just the test address."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            client_id="fake-client",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            test_email="tester@x.com",
+        )
+        # One batch result, one HTTP call
+        assert len(results) == 1
+        assert results[0].success
+        assert len(responses.calls) == 1
+        payload = json.loads(responses.calls[0].request.body)
+        bcc_addrs = [b["emailAddress"]["address"] for b in payload["message"]["bccRecipients"]]
+        # Only the test address should be in BCC — not the spreadsheet recipients
+        assert bcc_addrs == ["tester@x.com"]
+        assert "alice@example.com" not in bcc_addrs
 
     def test_conflict_with_batch_size(self, sample_xlsx, body_template_file):
         """--bcc-blast and --batch-size are mutually exclusive."""

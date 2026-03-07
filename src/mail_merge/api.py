@@ -215,8 +215,9 @@ def send_merge(
             Use with ``output`` for resumable batched rollout.
         bcc_blast: If ``True``, send all recipients as BCC in batches rather
             than individually. Recipients cannot see each other's addresses.
-            Incompatible with ``test_email``, ``batch_size``, and templates
-            containing ``{{placeholders}}``.
+            Incompatible with ``batch_size`` and templates containing
+            ``{{placeholders}}``. When combined with ``test_email``, sends
+            the blast to only that address instead of the full recipient list.
         bcc_blast_to: The ``To:`` address used in BCC blast mode. Required
             when ``bcc_blast=True``.
 
@@ -245,8 +246,6 @@ def send_merge(
 
     # --- BCC blast conflict checks ---
     if bcc_blast:
-        if test_email:
-            raise ValueError("--bcc-blast and --test-email are mutually exclusive")
         if batch_size is not None:
             raise ValueError(
                 "--batch-size is not supported with --bcc-blast; "
@@ -436,6 +435,22 @@ def send_merge(
 
     # --- Test email (always sends, regardless of --send flag) ---
     if test_email:
+        if get_token is None:
+            raise RuntimeError("Authentication is required to send a test email")
+        if bcc_blast:
+            logger.info(
+                "📧 BCC blast test: sending to %s via %s",
+                test_email, bcc_blast_to,
+            )
+            return send_bcc_blast(
+                get_token, [test_email], bcc_blast_to, subject, body_template,  # type: ignore[arg-type]
+                dry_run=False,
+                max_retries=max_retries, importance=importance,
+                cc=cc_list, bcc_extra=bcc_list, html=html,
+                save_to_sent_items=save_to_sent_items,
+                attachments=attachment_list, reply_to=reply_to_list,
+            )
+
         from mail_merge.template import render
 
         sample = recipients[0]
@@ -445,8 +460,6 @@ def send_merge(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
         )
-        if get_token is None:
-            raise RuntimeError("Authentication is required to send a test email")
         result = send_one(
             get_token, test_email, rendered_subject, rendered_body,
             max_retries=max_retries, importance=importance,

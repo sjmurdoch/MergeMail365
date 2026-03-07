@@ -326,7 +326,6 @@ When every recipient should receive the same email and must not be able to see o
 
 **Constraints (combinations that abort with an error):**
 - The subject and body must be **static text** — `{{placeholders}}` abort with an error (every recipient gets the same content)
-- `--test-email` aborts with an error — instead, do a dry run, then send to a small test spreadsheet containing only your own address (see **Step 2** below)
 - `--batch-size` aborts with an error (batch sizes are calculated automatically)
 - `--bcc-blast-to` is required — omitting it aborts with an error
 
@@ -370,9 +369,30 @@ uv run mail-merge \
 
 This validates the spreadsheet, calculates how many batches will be sent, and logs a summary without making any API calls. Check the log output to confirm the recipient count and batch count.
 
-**Step 2 — Send to a small test spreadsheet (replaces `--test-email`)**
+**Step 2 — Test send with `--test-email`**
 
-Create a minimal spreadsheet containing only your own address and a colleague's. Using two addresses is important: it lets you verify that BCC is working correctly (neither of you should be able to see the other's address in the received email).
+`--test-email` works in BCC blast mode. Instead of sending to the full recipient list, it sends a single BCC blast batch to only the test address, using the real subject and body. No `--send` flag is needed:
+
+```bash
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body announcement.txt \
+  --subject "Upcoming event on Friday" \
+  --email-column email \
+  --bcc-blast \
+  --bcc-blast-to noreply@example.com \
+  --client-id YOUR_CLIENT_ID \
+  --tenant-id YOUR_TENANT_ID \
+  --test-email your.own@example.com
+```
+
+To verify BCC privacy, pass two addresses by running twice with different `--test-email` addresses, or instead run a brief two-address send (see below). Check the inbox and verify:
+- The subject and body look correct
+- The `From:` address is your Microsoft 365 account (not the `--bcc-blast-to` address)
+- The `To:` field shows the `--bcc-blast-to` address, not your personal address
+- Any CC, attachments, or reply-to addresses are present if you used those flags
+
+To verify BCC privacy (neither test recipient sees the other), send to a small two-address spreadsheet instead:
 
 ```
 email
@@ -393,13 +413,6 @@ uv run mail-merge \
   --send \
   --yes
 ```
-
-Check both inboxes and verify:
-- The subject and body look correct
-- The `From:` address is your Microsoft 365 account (not the `--bcc-blast-to` address)
-- The `To:` field shows the `--bcc-blast-to` address, not anyone's personal address
-- Neither recipient can see the other's address (open the email and inspect the headers if unsure)
-- Any CC, attachments, or reply-to addresses are present if you used those flags
 
 **Step 3 — Full send with confirmation**
 
@@ -469,8 +482,8 @@ By default, the first sheet is used.
 ### BCC blast (privacy-preserving bulk send)
 
 1. **Dry run** — validate the spreadsheet and confirm batch count (no extra flags needed)
-2. **Test send** — send to a small spreadsheet with your own address to verify delivery
-3. **Check your inbox** — confirm the email looks correct and no recipient addresses are visible
+2. **Test email** — `--test-email you@example.com` sends the blast to only your address
+3. **Check your inbox** — verify subject, body, `To:` address, and any CC/attachments
 4. **Full send** — add `--send` (confirmation prompt shows recipient and batch count)
 5. **Review exit code** — exit 0 means all batches succeeded, 1 means at least one failed
 6. **Retry failures** — re-run with a trimmed spreadsheet covering only the failed range
@@ -543,7 +556,7 @@ Key differences from the CLI:
 - **Safe defaults** — `send` is `False`, `confirm` and `resume` are `True` by default. Pass `send=True` to actually send.
 - **`test_email`** always sends (authenticates and delivers) regardless of `send`. Resume and batch size are ignored.
 - **`confirm`** is automatically disabled when `send=False` or `test_email` is set.
-- **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `test_email`, `batch_size`, or templates containing `{{placeholders}}`. `delay` is accepted but silently ignored. `bcc` works as extra static BCC addresses added to every batch. `output` writes a results CSV with batch labels but does not enable resume.
+- **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `batch_size` or templates containing `{{placeholders}}`. When `test_email` is set, the blast is sent to only that address instead of the full list. `delay` is accepted but silently ignored. `bcc` works as extra static BCC addresses added to every batch. `output` writes a results CSV with batch labels but does not enable resume.
 
 See `examples/send_merge.py` for a complete example.
 

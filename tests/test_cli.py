@@ -628,8 +628,15 @@ class TestBccBlastCLI:
         ])
         assert exit_code == 1
 
-    def test_bcc_blast_conflicts_with_test_email(self, sample_xlsx, tmp_path):
-        """--bcc-blast and --test-email together exit with code 1."""
+    @responses.activate
+    def test_bcc_blast_with_test_email(self, sample_xlsx, tmp_path, monkeypatch):
+        """--bcc-blast + --test-email sends a blast to just the test address."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
         body = tmp_path / "body.txt"
         body.write_text("Hello everyone.", encoding="utf-8")
         exit_code = main([
@@ -637,8 +644,13 @@ class TestBccBlastCLI:
             "--body", str(body),
             "--subject", "Announcement",
             "--email-column", "email",
+            "--client-id", "fake-client",
             "--bcc-blast",
             "--bcc-blast-to", "noreply@x.com",
             "--test-email", "me@x.com",
         ])
-        assert exit_code == 1
+        assert exit_code == 0
+        assert len(responses.calls) == 1
+        payload = json.loads(responses.calls[0].request.body)
+        bcc_addrs = [b["emailAddress"]["address"] for b in payload["message"]["bccRecipients"]]
+        assert bcc_addrs == ["me@x.com"]
