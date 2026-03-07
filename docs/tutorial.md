@@ -324,10 +324,19 @@ When every recipient should receive the same email and must not be able to see o
 - Situations where recipient privacy matters (no-one in the list can see who else received the email)
 - Large lists where sending individual emails would hit Exchange Online's per-minute rate limit
 
-**Constraints:**
-- The subject and body must be **static text** — `{{placeholders}}` are not supported (every recipient gets the same content)
-- `--test-email` is not supported (use a dry run then send to a small test spreadsheet instead)
-- `--batch-size` is not supported (batch sizes are calculated automatically)
+**Constraints (combinations that abort with an error):**
+- The subject and body must be **static text** — `{{placeholders}}` abort with an error (every recipient gets the same content)
+- `--test-email` aborts with an error (use a dry run then send to a small test spreadsheet instead)
+- `--batch-size` aborts with an error (batch sizes are calculated automatically)
+- `--bcc-blast-to` is required — omitting it aborts with an error
+
+**Flags that are accepted but have no effect:**
+- `--delay` — BCC blast sends batches one after another with no configurable inter-batch delay (this is not a concern in practice: a 50,000-recipient list becomes ~100 API calls, well within rate limits)
+- `--no-resume` — resume is already bypassed in BCC blast mode regardless
+
+**Flags that work with modified semantics:**
+- `--bcc` — the specified addresses are added as static extra BCC recipients on every batch, in addition to the blast recipients. They are not shown in the confirmation prompt (only the blast recipient count is shown).
+- `--output` — a results CSV is written, but rows use batch labels (`"batch 1/5 (499 recipients)"`) not individual email addresses, so the CSV serves as a run log only. On re-run, the CSV is **not** read for resume (resume is bypassed).
 
 **Basic usage:**
 
@@ -411,7 +420,7 @@ If a batch fails (network error, 5xx, or rate limit exhaustion), the tool logs t
 - **Exit code 0** — all batches succeeded
 - **Exit code 1** — one or more batches failed
 
-Because results in BCC blast mode are labelled by batch (e.g. `"batch 2/5 (499 recipients)"`) rather than by individual email address, the `--output` CSV resume feature does **not** apply. If a run fails partway through, re-run with a trimmed spreadsheet that excludes the addresses already covered by successful batches.
+Results in BCC blast mode are labelled by batch (e.g. `"batch 2/5 (499 recipients)"`) rather than by individual email address. If you pass `--output`, the CSV is written with those batch labels — useful as a run log — but re-running the same command will **not** skip already-sent batches (resume is bypassed in blast mode). If a run fails partway through, re-run with a trimmed spreadsheet that excludes the addresses already covered by successful batches.
 
 A practical approach for large lists:
 
@@ -529,7 +538,7 @@ Key differences from the CLI:
 - **Safe defaults** — `send` is `False`, `confirm` and `resume` are `True` by default. Pass `send=True` to actually send.
 - **`test_email`** always sends (authenticates and delivers) regardless of `send`. Resume and batch size are ignored.
 - **`confirm`** is automatically disabled when `send=False` or `test_email` is set.
-- **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `test_email`, `batch_size`, or templates containing `{{placeholders}}`.
+- **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `test_email`, `batch_size`, or templates containing `{{placeholders}}`. `delay` is accepted but silently ignored. `bcc` works as extra static BCC addresses added to every batch. `output` writes a results CSV with batch labels but does not enable resume.
 
 See `examples/send_merge.py` for a complete example.
 
