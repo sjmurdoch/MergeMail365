@@ -315,6 +315,122 @@ uv run mail-merge \
 
 When all recipients have succeeded, the tool logs "All emails already sent" and exits 0. Use `--no-resume` to disable automatic resume and send to all recipients fresh.
 
+### BCC blast
+
+When every recipient should receive the same email and must not be able to see other recipients' addresses, use BCC blast mode. Instead of sending one email per row, mail-merge groups all recipients into BCC batches (up to 499 addresses per email, respecting the Microsoft Graph API limit of 500 total recipients per message) and sends a small number of emails in total.
+
+**When to use BCC blast:**
+- Newsletters, announcements, or any message where the body is the same for everyone
+- Situations where recipient privacy matters (no-one in the list can see who else received the email)
+- Large lists where sending individual emails would hit Exchange Online's per-minute rate limit
+
+**Constraints:**
+- The subject and body must be **static text** — `{{placeholders}}` are not supported (every recipient gets the same content)
+- `--test-email` is not supported (use a dry run then send to a small test spreadsheet instead)
+- `--batch-size` is not supported (batch sizes are calculated automatically)
+
+**Basic usage:**
+
+```bash
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body announcement.txt \
+  --subject "Upcoming event on Friday" \
+  --email-column email \
+  --bcc-blast \
+  --bcc-blast-to noreply@example.com
+```
+
+`--bcc-blast-to` is the address that appears in the `To:` field of the outgoing message. Use a no-reply or organisational address — individual recipients are placed in BCC.
+
+#### BCC blast workflow
+
+Follow the same staged approach as a standard send:
+
+**Step 1 — Dry run (no flags beyond `--bcc-blast` and `--bcc-blast-to`)**
+
+```bash
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body announcement.txt \
+  --subject "Upcoming event on Friday" \
+  --email-column email \
+  --bcc-blast \
+  --bcc-blast-to noreply@example.com
+```
+
+This validates the spreadsheet, calculates how many batches will be sent, and logs a summary without making any API calls. Check the log output to confirm the recipient count and batch count.
+
+**Step 2 — Send to a small test spreadsheet**
+
+Since `--test-email` is not available in BCC blast mode, create a minimal spreadsheet containing only your own address (and a colleague's if you want to verify that multiple BCC recipients receive the email):
+
+```
+email
+you@example.com
+colleague@example.com
+```
+
+```bash
+uv run mail-merge \
+  --spreadsheet test-recipients.xlsx \
+  --body announcement.txt \
+  --subject "Upcoming event on Friday" \
+  --email-column email \
+  --bcc-blast \
+  --bcc-blast-to noreply@example.com \
+  --client-id YOUR_CLIENT_ID \
+  --tenant-id YOUR_TENANT_ID \
+  --send \
+  --yes
+```
+
+Check both inboxes. Neither recipient should be able to see the other's address. Verify the subject, body, and sender address all look correct.
+
+**Step 3 — Full send with confirmation**
+
+```bash
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body announcement.txt \
+  --subject "Upcoming event on Friday" \
+  --email-column email \
+  --bcc-blast \
+  --bcc-blast-to noreply@example.com \
+  --client-id YOUR_CLIENT_ID \
+  --tenant-id YOUR_TENANT_ID \
+  --send
+```
+
+The confirmation prompt shows the `To:` address, the total recipient count, and how many batches will be sent. Type `y` to proceed.
+
+#### Error recovery in BCC blast mode
+
+If a batch fails (network error, 5xx, or rate limit exhaustion), the tool logs the failure and moves on to the next batch. After the run, inspect the console output or exit code:
+
+- **Exit code 0** — all batches succeeded
+- **Exit code 1** — one or more batches failed
+
+Because results in BCC blast mode are labelled by batch (e.g. `"batch 2/5 (499 recipients)"`) rather than by individual email address, the `--output` CSV resume feature does **not** apply. If a run fails partway through, re-run with a trimmed spreadsheet that excludes the addresses already covered by successful batches.
+
+A practical approach for large lists:
+
+```bash
+# Split recipients.xlsx into chunks of ~490 rows using your spreadsheet tool,
+# then send each chunk individually:
+uv run mail-merge \
+  --spreadsheet recipients-chunk-1.xlsx \
+  --body announcement.txt \
+  --subject "Upcoming event on Friday" \
+  --email-column email \
+  --bcc-blast \
+  --bcc-blast-to noreply@example.com \
+  --send \
+  --yes
+```
+
+This keeps each invocation self-contained and makes it easy to identify exactly which addresses were covered if you need to retry.
+
 ### Specific sheet
 
 If your workbook has multiple sheets, select one by name:
@@ -327,12 +443,23 @@ By default, the first sheet is used.
 
 ## Recommended workflow
 
+### Standard (personalised) send
+
 1. **Dry run** — validate placeholders and data (the default — no flags needed)
 2. **Test email** — send one real email to yourself (`--test-email you@example.com`)
 3. **Check your inbox** — verify subject, body, and formatting
 4. **Full send** — add `--send` (confirmation prompt appears automatically)
 5. **Review report** — check console summary or `--output report.csv`
 6. **Resume if needed** — re-run the same command (resume is automatic with `--output`)
+
+### BCC blast (privacy-preserving bulk send)
+
+1. **Dry run** — validate the spreadsheet and confirm batch count (no extra flags needed)
+2. **Test send** — send to a small spreadsheet with your own address to verify delivery
+3. **Check your inbox** — confirm the email looks correct and no recipient addresses are visible
+4. **Full send** — add `--send` (confirmation prompt shows recipient and batch count)
+5. **Review exit code** — exit 0 means all batches succeeded, 1 means at least one failed
+6. **Retry failures** — re-run with a trimmed spreadsheet covering only the failed range
 
 ## 10. Python API
 
@@ -374,6 +501,18 @@ results = send_merge(
     batch_size=50,
 )
 
+# BCC blast — same message to everyone, recipients cannot see each other
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="announcement.txt",
+    subject="Upcoming event on Friday",
+    email_column="email",
+    send=True,
+    bcc_blast=True,
+    bcc_blast_to="noreply@example.com",
+    confirm=False,
+)
+
 # Inspect results
 for r in results:
     if not r.success:
@@ -390,6 +529,7 @@ Key differences from the CLI:
 - **Safe defaults** — `send` is `False`, `confirm` and `resume` are `True` by default. Pass `send=True` to actually send.
 - **`test_email`** always sends (authenticates and delivers) regardless of `send`. Resume and batch size are ignored.
 - **`confirm`** is automatically disabled when `send=False` or `test_email` is set.
+- **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `test_email`, `batch_size`, or templates containing `{{placeholders}}`.
 
 See `examples/send_merge.py` for a complete example.
 
