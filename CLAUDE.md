@@ -61,6 +61,17 @@ Key design decisions:
 - **`--batch-size N`** limits how many emails are sent per invocation
 - Recipient count validation: errors if to + cc + bcc exceeds the Graph API limit of 500
 
+## Graph API quirks
+
+Tested empirically via `examples/test_empty_to.py` (results in `out.txt`):
+
+- **`toRecipients: []`** (empty array) — accepted (HTTP 202). The email is delivered with no visible To header.
+- **`toRecipients` omitted entirely** — accepted (HTTP 202). Same behaviour as empty array.
+- **`toRecipients` with a normal address** — accepted (HTTP 202). Standard behaviour.
+- **`undisclosed-recipients:;`** as a To address — rejected (HTTP 400). The Graph API does not resolve this RFC 2822 group syntax and returns "Recipient is not resolved".
+
+Implication for BCC blast: it is safe to send with `toRecipients: []` or omit the field, but `--bcc-blast-to` uses a real address in the To field to avoid surprising recipients with a blank To header.
+
 ## Testing
 
 Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge.auth.acquire_token`) is monkeypatched in CLI tests that need authentication. The `sample_xlsx` and `body_template_file` fixtures in `conftest.py` create temporary test files.
