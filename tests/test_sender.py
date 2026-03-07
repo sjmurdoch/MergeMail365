@@ -3,7 +3,14 @@ from unittest.mock import MagicMock, patch
 
 import responses
 
-from mail_merge.sender import GRAPH_SEND_URL, SendResult, send_all, send_bcc_blast, send_one
+from mail_merge.sender import (
+    GRAPH_SEND_URL,
+    MAX_RECIPIENTS_PER_MESSAGE,
+    SendResult,
+    send_all,
+    send_bcc_blast,
+    send_one,
+)
 
 
 class TestSendOne:
@@ -367,10 +374,8 @@ class TestSendBccBlast:
         for _ in range(3):
             responses.add(responses.POST, GRAPH_SEND_URL, status=202)
 
-        # With 1 to + 0 cc + 0 bcc_extra = 1 reserved → 499 per batch
-        # Force small batches by passing many cc addresses to shrink max_per_batch.
-        # Use 498 cc so max_per_batch = 500 - 1 - 498 = 1 → one recipient per batch.
-        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(498)]
+        # Force 1 recipient per batch: reserved = 1 (to) + N (cc) must leave max_per_batch = 1
+        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
             lambda: "tok", emails, "noreply@x.com", "Hi", "Body", cc=cc
@@ -412,8 +417,8 @@ class TestSendBccBlast:
     @responses.activate
     def test_partial_batch_failure(self):
         """When one batch fails and another succeeds, results reflect per-recipient status."""
-        # Force 1 recipient per batch via 498 cc addresses
-        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(498)]
+        # Force 1 recipient per batch: reserved = 1 (to) + N (cc) must leave max_per_batch = 1
+        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")

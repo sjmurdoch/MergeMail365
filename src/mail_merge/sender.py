@@ -156,6 +156,7 @@ def send_bcc_blast(
     batches = [emails[i:i + max_per_batch] for i in range(0, len(emails), max_per_batch)]
     total = len(batches)
     results: list[SendResult] = []
+    bcc_extra = list(bcc or [])
     for i, batch in enumerate(batches):
         label = f"batch {i + 1}/{total} ({len(batch)} recipients)"
         if dry_run:
@@ -171,7 +172,7 @@ def send_bcc_blast(
         bcc_recipients: list[dict[str, object]] = [
             {"emailAddress": {"address": a}} for a in batch
         ]
-        bcc_all = list(bcc or []) + bcc_recipients
+        bcc_all = bcc_extra + bcc_recipients
         result = send_one(
             get_token, to_email, subject, body,
             max_retries=max_retries, importance=importance,

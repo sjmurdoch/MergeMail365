@@ -9,7 +9,8 @@ import pytest
 import responses
 
 from mail_merge.api import send_merge
-from mail_merge.sender import GRAPH_SEND_URL
+from mail_merge.report import write_csv
+from mail_merge.sender import GRAPH_SEND_URL, SendResult
 
 
 class TestDryRun:
@@ -414,8 +415,6 @@ class TestFilter:
 class TestResume:
     def test_resume_skips_successful(self, sample_xlsx, body_template_file, tmp_path):
         """Resume skips recipients that previously succeeded."""
-        from mail_merge.report import write_csv
-        from mail_merge.sender import SendResult
 
         output = tmp_path / "report.csv"
         # Alice succeeded previously
@@ -441,8 +440,6 @@ class TestResume:
 
     def test_resume_retries_failed(self, sample_xlsx, body_template_file, tmp_path):
         """Resume retries recipients that previously failed."""
-        from mail_merge.report import write_csv
-        from mail_merge.sender import SendResult
 
         output = tmp_path / "report.csv"
         write_csv([
@@ -463,8 +460,6 @@ class TestResume:
 
     def test_resume_all_sent_returns_previous(self, sample_xlsx, body_template_file, tmp_path):
         """When all recipients already succeeded, return previous results."""
-        from mail_merge.report import write_csv
-        from mail_merge.sender import SendResult
 
         output = tmp_path / "report.csv"
         write_csv([
@@ -509,8 +504,6 @@ class TestBatchSize:
 
     def test_resume_with_batch_size(self, sample_xlsx, body_template_file, tmp_path):
         """Resume + batch_size sends next batch of remaining."""
-        from mail_merge.report import write_csv
-        from mail_merge.sender import SendResult
 
         output = tmp_path / "report.csv"
         write_csv([
@@ -939,8 +932,6 @@ class TestBccBlastResume:
 
     def test_resume_skips_successful_recipients(self, sample_xlsx, tmp_path):
         """Resume skips recipients that previously succeeded in a BCC blast."""
-        from mail_merge.report import write_csv
-        from mail_merge.sender import SendResult
 
         body = tmp_path / "body.txt"
         body.write_text("Hello everyone.", encoding="utf-8")
@@ -970,8 +961,6 @@ class TestBccBlastResume:
 
     def test_resume_retries_failed_recipients(self, sample_xlsx, tmp_path):
         """Resume retries recipients that previously failed in a BCC blast."""
-        from mail_merge.report import write_csv
-        from mail_merge.sender import SendResult
 
         body = tmp_path / "body.txt"
         body.write_text("Hello everyone.", encoding="utf-8")
@@ -997,8 +986,6 @@ class TestBccBlastResume:
 
     def test_resume_all_sent_returns_previous(self, sample_xlsx, tmp_path):
         """When all recipients already succeeded, return previous results."""
-        from mail_merge.report import write_csv
-        from mail_merge.sender import SendResult
 
         body = tmp_path / "body.txt"
         body.write_text("Hello everyone.", encoding="utf-8")
