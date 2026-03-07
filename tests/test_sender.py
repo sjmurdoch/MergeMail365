@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import responses
 
@@ -238,6 +238,82 @@ class TestSendAll:
         assert results[1].success
         # After throttled send, delay should have doubled to 2.0
         assert sleep_values[-1] == 2.0
+
+
+class TestNetworkErrors:
+    def test_request_exception_exhausts_retries(self):
+        """RequestException triggers exponential backoff; exhausting max_retries returns failure."""
+        import requests as req_module
+
+        with patch("mail_merge.sender.time.sleep"), \
+             patch("requests.post", side_effect=req_module.exceptions.ConnectionError("refused")):
+            result = send_one(
+                lambda: "fake-token", "test@example.com", "Subject", "Body",
+                max_retries=2,
+            )
+
+        assert not result.success
+        assert result.error == "refused"
+
+    def test_request_exception_retries_then_succeeds(self):
+        """RequestException on first attempt retries; succeeds on second attempt."""
+        import requests as req_module
+
+        success_resp = MagicMock()
+        success_resp.status_code = 202
+
+        call_count = 0
+
+        def flaky_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise req_module.exceptions.ConnectionError("transient")
+            return success_resp
+
+        with patch("mail_merge.sender.time.sleep"), \
+             patch("requests.post", side_effect=flaky_post):
+            result = send_one(
+                lambda: "fake-token", "test@example.com", "Subject", "Body",
+                max_retries=2,
+            )
+
+        assert result.success
+        assert call_count == 2
+
+
+class TestRateLimitEdgeCases:
+    @responses.activate
+    def test_rate_limit_unparseable_retry_after_defaults_to_10(self):
+        """When Retry-After cannot be parsed as int, the code defaults to 10 seconds."""
+        responses.add(
+            responses.POST, GRAPH_SEND_URL, status=429,
+            headers={"Retry-After": "soon"},
+        )
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        sleep_values = []
+        with patch("mail_merge.sender.time.sleep", side_effect=lambda s: sleep_values.append(s)):
+            result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+
+        assert result.success
+        assert 10 in sleep_values
+
+    @responses.activate
+    def test_rate_limit_max_retries_exceeded(self):
+        """After exceeding 20 rate-limit retries, give up and return failure."""
+        for _ in range(21):
+            responses.add(
+                responses.POST, GRAPH_SEND_URL, status=429,
+                headers={"Retry-After": "0"},
+            )
+
+        with patch("mail_merge.sender.time.sleep"):
+            result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+
+        assert not result.success
+        assert result.status_code == 429
+        assert "Rate limited" in result.error
 
 
 class TestTokenRefreshOn401:

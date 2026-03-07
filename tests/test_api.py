@@ -595,3 +595,120 @@ class TestTokenExpiresAt:
         token = f"header.{payload}.signature"
 
         assert token_expires_at(token) is None
+
+
+class TestParseFilter:
+    """Unit tests for _parse_filter edge cases not reachable via send_merge."""
+
+    def setup_method(self):
+        from mail_merge.api import _parse_filter
+        self._parse_filter = _parse_filter
+
+    def test_empty_lhs_equals_raises(self):
+        """'=value' has empty left-hand side → ValueError."""
+        with pytest.raises(ValueError, match="Invalid filter syntax"):
+            self._parse_filter("=value")
+
+    def test_empty_rhs_equals_raises(self):
+        """'column=' has empty right-hand side → ValueError."""
+        with pytest.raises(ValueError, match="Invalid filter syntax"):
+            self._parse_filter("column=")
+
+    def test_empty_lhs_not_equals_raises(self):
+        """'!=value' has empty left-hand side → ValueError."""
+        with pytest.raises(ValueError, match="Invalid filter syntax"):
+            self._parse_filter("!=value")
+
+    def test_empty_rhs_not_equals_raises(self):
+        """'column!=' has empty right-hand side → ValueError."""
+        with pytest.raises(ValueError, match="Invalid filter syntax"):
+            self._parse_filter("column!=")
+
+    def test_valid_equals(self):
+        assert self._parse_filter("col=val") == ("col", "=", "val")
+
+    def test_valid_not_equals(self):
+        assert self._parse_filter("col!=val") == ("col", "!=", "val")
+
+
+class TestConfirmDisplay:
+    @responses.activate
+    def test_confirm_shows_cc_bcc_and_attachments(
+        self, sample_xlsx, body_template_file, tmp_path, monkeypatch
+    ):
+        """Confirmation prompt prints CC, BCC, and attachment lines when present."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+
+        att = tmp_path / "report.pdf"
+        att.write_bytes(b"PDF content")
+
+        printed_lines: list[str] = []
+        original_print = __import__("mail_merge.console", fromlist=["console"]).console.print
+
+        def capture_print(text="", *args, **kwargs):
+            printed_lines.append(str(text))
+            return original_print(text, *args, **kwargs)
+
+        monkeypatch.setattr("mail_merge.console.console.print", capture_print)
+        monkeypatch.setattr("mail_merge.console.console.input", lambda prompt: "y")
+
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            client_id="fake-client-id",
+            send=True,
+            cc="cc@example.com",
+            bcc="bcc@example.com",
+            attachment=[att],
+            confirm=True,
+        )
+
+        combined = "\n".join(printed_lines)
+        assert "cc@example.com" in combined
+        assert "bcc@example.com" in combined
+        assert "report.pdf" in combined
+
+
+class TestTokenRefreshFailure:
+    @responses.activate
+    def test_token_refresh_failure_logs_warning_and_continues(
+        self, sample_xlsx, body_template_file, monkeypatch, caplog
+    ):
+        """When preflight token refresh raises, a warning is logged and sending proceeds."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        # Build a JWT that expires soon (< 5 min → triggers preflight refresh)
+        exp = int(time.time()) + 60
+        payload_b64 = base64.urlsafe_b64encode(
+            json.dumps({"exp": exp}).encode()
+        ).rstrip(b"=").decode()
+        expiring_jwt = f"header.{payload_b64}.signature"
+
+        call_count = 0
+
+        def fake_acquire(client_id, tenant_id="common"):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return expiring_jwt       # initial auth
+            if call_count == 2:
+                raise RuntimeError("refresh failed")   # preflight refresh fails
+            return "fresh-token"          # subsequent get_token calls in send_one
+
+        monkeypatch.setattr("mail_merge.auth.acquire_token", fake_acquire)
+
+        with caplog.at_level(logging.WARNING):
+            results = send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                client_id="fake-client-id",
+                test_email="me@example.com",
+            )
+
+        assert any("Token refresh failed" in msg for msg in caplog.messages)
+        assert results[0].success

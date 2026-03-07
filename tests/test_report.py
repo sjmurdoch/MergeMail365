@@ -1,5 +1,34 @@
-from mail_merge.report import read_csv, write_csv
+from mail_merge.console import console
+from mail_merge.report import print_summary, read_csv, write_csv
 from mail_merge.sender import SendResult
+
+
+class TestPrintSummary:
+    def test_all_success_shows_no_failed_section(self, capsys):
+        results = [
+            SendResult(email="a@x.com", success=True, status_code=202),
+            SendResult(email="b@x.com", success=True, status_code=202),
+        ]
+        with console.capture() as cap:
+            print_summary(results)
+        output = cap.get()
+        assert "2" in output  # total
+        assert "Failed recipients" not in output
+
+    def test_with_failures_shows_failed_count_and_recipients(self, capsys):
+        results = [
+            SendResult(email="a@x.com", success=True, status_code=202),
+            SendResult(email="b@x.com", success=False, status_code=403, error="Forbidden"),
+        ]
+        with console.capture() as cap:
+            print_summary(results)
+        output = cap.get()
+        assert "Failed recipients" in output
+        assert "b@x.com" in output
+        assert "403" in output
+        assert "Forbidden" in output
+        # Failed count should appear
+        assert "1" in output
 
 
 class TestReadCsvRoundTrip:

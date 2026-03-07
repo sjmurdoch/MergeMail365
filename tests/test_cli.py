@@ -567,3 +567,20 @@ class TestRecipientCountValidation:
             "--cc", cc_addresses,
         ])
         assert exit_code == 1
+
+
+class TestUnexpectedException:
+    def test_unexpected_exception_returns_1(self, sample_xlsx, body_template_file, monkeypatch):
+        """An unexpected exception (not FileNotFoundError/ValueError/RuntimeError) returns exit code 1."""
+        def explode(*args, **kwargs):
+            raise TypeError("unexpected internal error")
+
+        import mail_merge.cli as cli_module
+        monkeypatch.setattr(cli_module, "send_merge", explode)
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+        ])
+        assert exit_code == 1
