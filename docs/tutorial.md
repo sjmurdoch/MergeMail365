@@ -52,7 +52,7 @@ Values are resolved in this order (highest wins):
 
 ## 4. Prepare your spreadsheet
 
-Create an `.xlsx` file with a header row. One column must contain recipient email addresses. Other columns can be used as placeholders in your subject and body.
+Create an `.xlsx` file with a header row. One column must contain recipient email addresses. Other columns can be used as placeholders in your subject and body. Email addresses are validated before sending — malformed addresses (missing `@`, no domain, non-ASCII characters, etc.) are automatically skipped with a warning.
 
 Example `recipients.xlsx`:
 
