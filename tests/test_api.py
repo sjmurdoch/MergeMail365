@@ -928,3 +928,108 @@ class TestBccBlast:
         to_field = payload["message"]["toRecipients"][0]["emailAddress"]
         assert to_field["address"] == "noreply@x.com"
         assert "name" not in to_field
+
+
+class TestAddressDisplayNames:
+    """CC, BCC, and reply-to accept 'Display Name <email>' format."""
+
+    @responses.activate
+    def test_cc_display_name(self, sample_xlsx, body_template_file, monkeypatch):
+        """'Name <email>' in --cc sets the display name in the Graph payload."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hi {{name}}",
+            email_column="email",
+            client_id="fake-client",
+            cc="Manager <manager@example.com>",
+            send=True,
+            confirm=False,
+        )
+        payload = json.loads(responses.calls[0].request.body)
+        cc_field = payload["message"]["ccRecipients"][0]["emailAddress"]
+        assert cc_field["address"] == "manager@example.com"
+        assert cc_field["name"] == "Manager"
+
+    @responses.activate
+    def test_bcc_plain_address_no_name(self, sample_xlsx, body_template_file, monkeypatch):
+        """Plain address in --bcc produces no name field in payload."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hi {{name}}",
+            email_column="email",
+            client_id="fake-client",
+            bcc="archive@example.com",
+            send=True,
+            confirm=False,
+        )
+        payload = json.loads(responses.calls[0].request.body)
+        bcc_field = payload["message"]["bccRecipients"][0]["emailAddress"]
+        assert bcc_field["address"] == "archive@example.com"
+        assert "name" not in bcc_field
+
+    @responses.activate
+    def test_reply_to_display_name(self, sample_xlsx, body_template_file, monkeypatch):
+        """'Name <email>' in --reply-to sets the display name in the Graph payload."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hi {{name}}",
+            email_column="email",
+            client_id="fake-client",
+            reply_to="Support Team <support@example.com>",
+            send=True,
+            confirm=False,
+        )
+        payload = json.loads(responses.calls[0].request.body)
+        rt_field = payload["message"]["replyTo"][0]["emailAddress"]
+        assert rt_field["address"] == "support@example.com"
+        assert rt_field["name"] == "Support Team"
+
+    @responses.activate
+    def test_comma_separated_mixed_formats(self, sample_xlsx, body_template_file, monkeypatch):
+        """Comma-separated list can mix plain addresses and 'Name <email>' format."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hi {{name}}",
+            email_column="email",
+            client_id="fake-client",
+            cc="plain@example.com, Named Person <named@example.com>",
+            send=True,
+            confirm=False,
+        )
+        payload = json.loads(responses.calls[0].request.body)
+        cc_fields = [e["emailAddress"] for e in payload["message"]["ccRecipients"]]
+        assert cc_fields[0]["address"] == "plain@example.com"
+        assert "name" not in cc_fields[0]
+        assert cc_fields[1]["address"] == "named@example.com"
+        assert cc_fields[1]["name"] == "Named Person"

@@ -7,7 +7,6 @@ import logging
 import mimetypes
 import os
 from datetime import datetime, timezone
-from email.utils import parseaddr
 from pathlib import Path
 
 from mail_merge import config as _config
@@ -20,13 +19,45 @@ from mail_merge.report import print_summary, read_csv, write_csv
 logger = logging.getLogger(__name__)
 
 
-def _parse_address_list(value: str | list[str] | None) -> list[str] | None:
-    """Normalise a comma-separated string or list into a list of addresses."""
+def _format_addrs(entries: list[dict[str, object]]) -> str:
+    """Format a list of Graph API emailAddress dicts for human-readable display."""
+    parts = []
+    for e in entries:
+        ea = e.get("emailAddress", {})
+        if isinstance(ea, dict):
+            name = ea.get("name")
+            addr = ea.get("address", "")
+            parts.append(f"{name} <{addr}>" if name else str(addr))
+    return ", ".join(parts)
+
+
+def _parse_one_addr(raw: str) -> tuple[str | None, str]:
+    """Extract (display_name | None, address) from 'Name <email>' or plain email."""
+    from email.utils import parseaddr
+    name, addr = parseaddr(raw.strip())
+    return (name or None), (addr or raw.strip())
+
+
+def _parse_address_entries(
+    value: str | list[str] | None,
+) -> list[dict[str, object]] | None:
+    """Parse addresses (supporting 'Display Name <email>' format) into Graph API dicts.
+
+    Accepts a comma-separated string or list. Returns ``None`` when empty.
+    """
     if value is None:
         return None
-    if isinstance(value, str):
-        return [a.strip() for a in value.split(",") if a.strip()] or None
-    return list(value) or None
+    items = [a.strip() for a in value.split(",") if a.strip()] if isinstance(value, str) else [a.strip() for a in value if a.strip()]
+    if not items:
+        return None
+    result = []
+    for raw in items:
+        name, addr = _parse_one_addr(raw)
+        entry: dict[str, str] = {"address": addr}
+        if name:
+            entry["name"] = name
+        result.append({"emailAddress": entry})
+    return result
 
 
 def _process_attachments(
@@ -256,10 +287,7 @@ def send_merge(
         if not bcc_blast_to:
             raise ValueError("bcc_blast_to is required when bcc_blast=True")
         # Support "Display Name <email>" format (RFC 2822)
-        bcc_blast_to_name, bcc_blast_to_addr = parseaddr(bcc_blast_to)
-        if bcc_blast_to_addr:
-            bcc_blast_to = bcc_blast_to_addr
-        bcc_blast_to_name = bcc_blast_to_name or None
+        bcc_blast_to_name, bcc_blast_to = _parse_one_addr(bcc_blast_to)
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -353,9 +381,9 @@ def send_merge(
         )
 
     # --- Parse CC / BCC / reply-to ---
-    cc_list = _parse_address_list(cc)
-    bcc_list = _parse_address_list(bcc)
-    reply_to_list = _parse_address_list(reply_to)
+    cc_list = _parse_address_entries(cc)
+    bcc_list = _parse_address_entries(bcc)
+    reply_to_list = _parse_address_entries(reply_to)
 
     # --- Validate recipient count (skip for blast; each batch is validated internally) ---
     if not bcc_blast:
@@ -389,9 +417,9 @@ def send_merge(
             console.print(f"[bold]Subject:[/bold]  {render(subject, sample)}")
             console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
         if cc_list:
-            console.print(f"[bold]CC:[/bold]       {', '.join(cc_list)}")
+            console.print(f"[bold]CC:[/bold]       {_format_addrs(cc_list)}")
         if not bcc_blast and bcc_list:
-            console.print(f"[bold]BCC:[/bold]      {', '.join(bcc_list)}")
+            console.print(f"[bold]BCC:[/bold]      {_format_addrs(bcc_list)}")
         if attachment:
             names = [Path(a).name for a in attachment]
             console.print(f"[bold]Attach:[/bold]   {', '.join(names)}")
@@ -453,7 +481,7 @@ def send_merge(
                 get_token, [test_email], bcc_blast_to, subject, body_template,  # type: ignore[arg-type]
                 dry_run=False,
                 max_retries=max_retries, importance=importance,
-                cc=cc_list, bcc_extra=bcc_list, html=html,
+                cc=cc_list, bcc=bcc_list, html=html,
                 save_to_sent_items=save_to_sent_items,
                 attachments=attachment_list, reply_to=reply_to_list,
                 to_name=bcc_blast_to_name,
@@ -490,7 +518,7 @@ def send_merge(
             max_retries=max_retries,
             importance=importance,
             cc=cc_list,
-            bcc_extra=bcc_list,
+            bcc=bcc_list,
             html=html,
             save_to_sent_items=save_to_sent_items,
             attachments=attachment_list,

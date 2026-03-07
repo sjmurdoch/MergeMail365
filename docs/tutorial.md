@@ -204,11 +204,12 @@ When omitted, no importance field is sent and the email defaults to normal impor
 
 ### CC and BCC
 
-Add CC and/or BCC recipients to every email in the merge. Provide comma-separated addresses:
+Add CC and/or BCC recipients to every email in the merge. Provide comma-separated addresses. Both plain addresses and `"Display Name <email>"` format are supported:
 
 ```bash
 --cc "manager@example.com,team@example.com"
---bcc "archive@example.com"
+--cc "Manager <manager@example.com>, Team Inbox <team@example.com>"
+--bcc "Archive <archive@example.com>"
 ```
 
 These addresses are static (not templated per recipient).
@@ -235,10 +236,11 @@ Files are base64-encoded inline. The Graph API limits inline attachments to ~3 M
 
 ### Reply-To
 
-Set custom reply-to addresses (comma-separated) so replies go somewhere other than the sender:
+Set custom reply-to addresses (comma-separated) so replies go somewhere other than the sender. Plain addresses and `"Display Name <email>"` format are both accepted:
 
 ```bash
 --reply-to "support@example.com,team@example.com"
+--reply-to "Support Team <support@example.com>"
 ```
 
 ### Save to Sent Items

@@ -122,7 +122,10 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_reply_to_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", reply_to=["reply@example.com"])
+        result = send_one(
+            lambda: "fake-token", "test@example.com", "Subject", "Body",
+            reply_to=[{"emailAddress": {"address": "reply@example.com"}}],
+        )
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -145,7 +148,8 @@ class TestSendOneOptionalFields:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one(
             lambda: "fake-token", "test@example.com", "Subject", "Body",
-            cc=["a@x.com", "b@x.com"], bcc=["c@x.com"],
+            cc=[{"emailAddress": {"address": "a@x.com"}}, {"emailAddress": {"address": "b@x.com"}}],
+            bcc=[{"emailAddress": {"address": "c@x.com"}}],
         )
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
@@ -367,7 +371,7 @@ class TestSendBccBlast:
         # With 1 to + 0 cc + 0 bcc_extra = 1 reserved → 499 per batch
         # Force small batches by passing many cc addresses to shrink max_per_batch.
         # Use 498 cc so max_per_batch = 500 - 1 - 498 = 1 → one recipient per batch.
-        cc = [f"cc{i}@x.com" for i in range(498)]
+        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(498)]
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
             lambda: "tok", emails, "noreply@x.com", "Hi", "Body", cc=cc

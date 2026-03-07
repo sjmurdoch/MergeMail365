@@ -26,12 +26,12 @@ def send_one(
     body: str,
     max_retries: int = 3,
     importance: str | None = None,
-    cc: list[str] | None = None,
-    bcc: list[str] | None = None,
+    cc: list[dict[str, object]] | None = None,
+    bcc: list[dict[str, object]] | None = None,
     html: bool = False,
     save_to_sent_items: bool = True,
     attachments: list[dict[str, str]] | None = None,
-    reply_to: list[str] | None = None,
+    reply_to: list[dict[str, object]] | None = None,
     to_name: str | None = None,
 ) -> SendResult:
     """Send a single email via Microsoft Graph API.
@@ -55,13 +55,13 @@ def send_one(
     if importance:
         message["importance"] = importance
     if cc:
-        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+        message["ccRecipients"] = cc
     if bcc:
-        message["bccRecipients"] = [{"emailAddress": {"address": a}} for a in bcc]
+        message["bccRecipients"] = bcc
     if attachments:
         message["attachments"] = attachments
     if reply_to:
-        message["replyTo"] = [{"emailAddress": {"address": a}} for a in reply_to]
+        message["replyTo"] = reply_to
     payload: dict[str, object] = {"message": message}
     if not save_to_sent_items:
         payload["saveToSentItems"] = False
@@ -136,12 +136,12 @@ def send_bcc_blast(
     dry_run: bool = False,
     max_retries: int = 3,
     importance: str | None = None,
-    cc: list[str] | None = None,
-    bcc_extra: list[str] | None = None,
+    cc: list[dict[str, object]] | None = None,
+    bcc: list[dict[str, object]] | None = None,
     html: bool = False,
     save_to_sent_items: bool = True,
     attachments: list[dict[str, str]] | None = None,
-    reply_to: list[str] | None = None,
+    reply_to: list[dict[str, object]] | None = None,
     to_name: str | None = None,
 ) -> list[SendResult]:
     """Send a single subject/body to all emails via BCC, in batches of up to 499.
@@ -149,7 +149,7 @@ def send_bcc_blast(
     Recipients within each batch cannot see each other's addresses.
     Returns one SendResult per batch (not per recipient).
     """
-    reserved = 1 + len(cc or []) + len(bcc_extra or [])
+    reserved = 1 + len(cc or []) + len(bcc or [])
     max_per_batch = max(1, 500 - reserved)
     batches = [emails[i:i + max_per_batch] for i in range(0, len(emails), max_per_batch)]
     total = len(batches)
@@ -163,7 +163,8 @@ def send_bcc_blast(
         if get_token is None:
             raise RuntimeError("get_token is required when not in dry-run mode")
         logger.info("📧 Sending %s", label)
-        bcc_all = list(bcc_extra or []) + batch
+        bcc_recipients = [{"emailAddress": {"address": a}} for a in batch]
+        bcc_all = list(bcc or []) + bcc_recipients
         result = send_one(
             get_token, to_email, subject, body,
             max_retries=max_retries, importance=importance,
@@ -192,12 +193,12 @@ def send_all(
     delay: float = 0.0,
     max_retries: int = 3,
     importance: str | None = None,
-    cc: list[str] | None = None,
-    bcc: list[str] | None = None,
+    cc: list[dict[str, object]] | None = None,
+    bcc: list[dict[str, object]] | None = None,
     html: bool = False,
     save_to_sent_items: bool = True,
     attachments: list[dict[str, str]] | None = None,
-    reply_to: list[str] | None = None,
+    reply_to: list[dict[str, object]] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails to all recipients.
 
