@@ -32,6 +32,7 @@ def send_one(
     save_to_sent_items: bool = True,
     attachments: list[dict[str, str]] | None = None,
     reply_to: list[str] | None = None,
+    to_name: str | None = None,
 ) -> SendResult:
     """Send a single email via Microsoft Graph API.
 
@@ -49,7 +50,7 @@ def send_one(
     message: dict[str, object] = {
         "subject": subject,
         "body": {"contentType": content_type, "content": body},
-        "toRecipients": [{"emailAddress": {"address": to_email}}],
+        "toRecipients": [{"emailAddress": {"address": to_email, **({"name": to_name} if to_name else {})}}],
     }
     if importance:
         message["importance"] = importance
@@ -141,6 +142,7 @@ def send_bcc_blast(
     save_to_sent_items: bool = True,
     attachments: list[dict[str, str]] | None = None,
     reply_to: list[str] | None = None,
+    to_name: str | None = None,
 ) -> list[SendResult]:
     """Send a single subject/body to all emails via BCC, in batches of up to 499.
 
@@ -168,6 +170,7 @@ def send_bcc_blast(
             cc=cc, bcc=bcc_all, html=html,
             save_to_sent_items=save_to_sent_items,
             attachments=attachments, reply_to=reply_to,
+            to_name=to_name,
         )
         results.append(SendResult(
             email=label,

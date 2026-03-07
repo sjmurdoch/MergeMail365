@@ -349,7 +349,19 @@ uv run mail-merge \
   --bcc-blast-to noreply@example.com
 ```
 
-`--bcc-blast-to` is the address that appears in the `To:` field of the outgoing message. Use a no-reply or organisational address — individual recipients are placed in BCC.
+`--bcc-blast-to` is the address that appears in the `To:` field of the outgoing message. Individual recipients are placed in BCC and cannot see each other's addresses.
+
+Common choices for this address:
+
+- `noreply@yourdomain.com` — signals to recipients that replies are not monitored
+- Your own address — recipients can reply directly
+- A shared mailbox alias (`announcements@yourdomain.com`) — replies go to a shared inbox
+
+You can include a display name using standard `"Name <email>"` format. Passing `"Undisclosed recipients <noreply@yourdomain.com>"` is a conventional choice: recipients see "Undisclosed recipients" in the `To:` field, which makes the nature of the mailing explicit.
+
+```bash
+--bcc-blast-to "Undisclosed recipients <noreply@yourdomain.com>"
+```
 
 #### BCC blast workflow
 

@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import os
 from datetime import datetime, timezone
+from email.utils import parseaddr
 from pathlib import Path
 
 from mail_merge import config as _config
@@ -244,7 +245,8 @@ def send_merge(
             or "common"
         )
 
-    # --- BCC blast conflict checks ---
+    # --- BCC blast conflict checks and To address parsing ---
+    bcc_blast_to_name: str | None = None
     if bcc_blast:
         if batch_size is not None:
             raise ValueError(
@@ -253,6 +255,11 @@ def send_merge(
             )
         if not bcc_blast_to:
             raise ValueError("bcc_blast_to is required when bcc_blast=True")
+        # Support "Display Name <email>" format (RFC 2822)
+        bcc_blast_to_name, bcc_blast_to_addr = parseaddr(bcc_blast_to)
+        if bcc_blast_to_addr:
+            bcc_blast_to = bcc_blast_to_addr
+        bcc_blast_to_name = bcc_blast_to_name or None
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -449,6 +456,7 @@ def send_merge(
                 cc=cc_list, bcc_extra=bcc_list, html=html,
                 save_to_sent_items=save_to_sent_items,
                 attachments=attachment_list, reply_to=reply_to_list,
+                to_name=bcc_blast_to_name,
             )
 
         from mail_merge.template import render
@@ -487,6 +495,7 @@ def send_merge(
             save_to_sent_items=save_to_sent_items,
             attachments=attachment_list,
             reply_to=reply_to_list,
+            to_name=bcc_blast_to_name,
         )
     else:
         results = send_all(

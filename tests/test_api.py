@@ -872,3 +872,59 @@ class TestBccBlast:
         bcc_addrs = [b["emailAddress"]["address"] for b in payload["message"]["bccRecipients"]]
         assert "alice@example.com" in bcc_addrs
         assert "bob@example.com" in bcc_addrs
+
+    @responses.activate
+    def test_bcc_blast_to_display_name(self, sample_xlsx, tmp_path, monkeypatch):
+        """'Name <email>' format in bcc_blast_to sets the To display name."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            client_id="fake-client",
+            bcc_blast=True,
+            bcc_blast_to="Undisclosed recipients <noreply@x.com>",
+            send=True,
+            confirm=False,
+        )
+        assert results[0].success
+        payload = json.loads(responses.calls[0].request.body)
+        to_field = payload["message"]["toRecipients"][0]["emailAddress"]
+        assert to_field["address"] == "noreply@x.com"
+        assert to_field["name"] == "Undisclosed recipients"
+
+    @responses.activate
+    def test_bcc_blast_to_plain_address_no_name(self, sample_xlsx, tmp_path, monkeypatch):
+        """Plain address in bcc_blast_to sets no display name in the payload."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            client_id="fake-client",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            send=True,
+            confirm=False,
+        )
+        assert results[0].success
+        payload = json.loads(responses.calls[0].request.body)
+        to_field = payload["message"]["toRecipients"][0]["emailAddress"]
+        assert to_field["address"] == "noreply@x.com"
+        assert "name" not in to_field
