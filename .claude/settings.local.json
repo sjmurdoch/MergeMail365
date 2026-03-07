@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C c:/Users/sjmur/w/mail-merge log --oneline -3)",
+      "Bash(tee c:/Users/sjmur/w/mail-merge/tmp_git.txt)"
+    ]
+  }
+}
