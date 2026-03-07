@@ -327,7 +327,7 @@ class TestFilter:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            filter=["company=Acme"],
+            filters=["company=Acme"],
         )
         assert len(results) == 1
         assert results[0].email == "alice@example.com"
@@ -338,7 +338,7 @@ class TestFilter:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            filter=["company!=Acme"],
+            filters=["company!=Acme"],
         )
         assert len(results) == 1
         assert results[0].email == "bob@example.com"
@@ -364,7 +364,7 @@ class TestFilter:
             body=body,
             subject="Hello {{name}}",
             email_column="email",
-            filter=["role=PhD", "group=Security"],
+            filters=["role=PhD", "group=Security"],
         )
         assert len(results) == 1
         assert results[0].email == "alice@example.com"
@@ -375,7 +375,7 @@ class TestFilter:
             body=body_template_file,
             subject="Hello {{name}}",
             email_column="email",
-            filter=["Company=acme"],
+            filters=["Company=acme"],
         )
         assert len(results) == 1
         assert results[0].email == "alice@example.com"
@@ -387,7 +387,7 @@ class TestFilter:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                    filter=["company=NonExistent"],
+                    filters=["company=NonExistent"],
             )
 
     def test_bad_syntax_raises(self, sample_xlsx, body_template_file):
@@ -397,7 +397,7 @@ class TestFilter:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                    filter=["no-operator-here"],
+                    filters=["no-operator-here"],
             )
 
     def test_unknown_column_raises(self, sample_xlsx, body_template_file):
@@ -407,7 +407,7 @@ class TestFilter:
                 body=body_template_file,
                 subject="Hello {{name}}",
                 email_column="email",
-                    filter=["nonexistent=value"],
+                    filters=["nonexistent=value"],
             )
 
 

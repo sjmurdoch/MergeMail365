@@ -7,13 +7,20 @@ import logging
 import mimetypes
 import os
 from datetime import datetime, timezone
+from email.utils import parseaddr
 from pathlib import Path
 
 from mail_merge import config as _config
 from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
-from mail_merge.template import validate_template
-from mail_merge.sender import SendResult, send_all, send_bcc_blast, send_one
+from mail_merge.template import extract_placeholders, render, validate_template
+from mail_merge.sender import (
+    MAX_RECIPIENTS_PER_MESSAGE,
+    SendResult,
+    send_all,
+    send_bcc_blast,
+    send_one,
+)
 from mail_merge.report import print_summary, read_csv, write_csv
 
 logger = logging.getLogger(__name__)
@@ -33,7 +40,6 @@ def _format_addrs(entries: list[dict[str, object]]) -> str:
 
 def _parse_one_addr(raw: str) -> tuple[str | None, str]:
     """Extract (display_name | None, address) from 'Name <email>' or plain email."""
-    from email.utils import parseaddr
     name, addr = parseaddr(raw.strip())
     return (name or None), (addr or raw.strip())
 
@@ -47,10 +53,11 @@ def _parse_address_entries(
     """
     if value is None:
         return None
-    items = [a.strip() for a in value.split(",") if a.strip()] if isinstance(value, str) else [a.strip() for a in value if a.strip()]
+    parts = value.split(",") if isinstance(value, str) else value
+    items = [s for a in parts if (s := a.strip())]
     if not items:
         return None
-    result = []
+    result: list[dict[str, object]] = []
     for raw in items:
         name, addr = _parse_one_addr(raw)
         entry: dict[str, str] = {"address": addr}
@@ -69,9 +76,10 @@ def _process_attachments(
     max_attachment_size = 3 * 1024 * 1024  # ~3 MB raw ≈ 4 MB base64
     for att_path_raw in paths:
         att_path = Path(att_path_raw)
-        if not att_path.exists():
+        try:
+            content_bytes = att_path.read_bytes()
+        except FileNotFoundError:
             raise FileNotFoundError(f"Attachment not found: {att_path}")
-        content_bytes = att_path.read_bytes()
         if len(content_bytes) > max_attachment_size:
             raise ValueError(
                 f"Attachment too large: {att_path} "
@@ -94,26 +102,17 @@ def _parse_filter(expr: str) -> tuple[str, str, str]:
     Supported forms: ``"column=value"`` and ``"column!=value"``.
     Raises ``ValueError`` for malformed expressions.
     """
-    if "!=" in expr:
-        parts = expr.split("!=", 1)
-        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-            raise ValueError(
-                f"Invalid filter syntax: {expr!r} "
-                f"(expected 'column=value' or 'column!=value')"
-            )
-        return parts[0].strip(), "!=", parts[1].strip()
-    if "=" in expr:
-        parts = expr.split("=", 1)
-        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-            raise ValueError(
-                f"Invalid filter syntax: {expr!r} "
-                f"(expected 'column=value' or 'column!=value')"
-            )
-        return parts[0].strip(), "=", parts[1].strip()
-    raise ValueError(
+    err = (
         f"Invalid filter syntax: {expr!r} "
         f"(expected 'column=value' or 'column!=value')"
     )
+    for op in ("!=", "="):
+        if op in expr:
+            parts = expr.split(op, 1)
+            if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+                raise ValueError(err)
+            return parts[0].strip(), op, parts[1].strip()
+    raise ValueError(err)
 
 
 def _validate_emails(
@@ -160,16 +159,20 @@ def _apply_filters(
                 f"(available: {', '.join(recipients[0].keys())})"
             )
 
+    # Pre-resolve column keys and lowercase filter values once
+    resolved = [
+        (col_lower[col.lower()], op, val.lower()) for col, op, val in parsed
+    ]
+
     result = []
     for row in recipients:
         match = True
-        for col, op, val in parsed:
-            actual_key = col_lower[col.lower()]
+        for actual_key, op, val_lower in resolved:
             cell = str(row.get(actual_key, "")).lower()
-            if op == "=" and cell != val.lower():
+            if op == "=" and cell != val_lower:
                 match = False
                 break
-            if op == "!=" and cell == val.lower():
+            if op == "!=" and cell == val_lower:
                 match = False
                 break
         if match:
@@ -197,7 +200,7 @@ def send_merge(
     save_to_sent_items: bool = True,
     attachment: list[str | Path] | None = None,
     reply_to: str | list[str] | None = None,
-    filter: list[str] | None = None,
+    filters: list[str] | None = None,
     confirm: bool = True,
     resume: bool = True,
     batch_size: int | None = None,
@@ -233,7 +236,7 @@ def send_merge(
         save_to_sent_items: If ``False``, skip saving to Sent Items.
         attachment: List of file paths to attach.
         reply_to: Reply-to addresses — comma-separated string or list.
-        filter: Filter expressions to select recipients. Each expression is
+        filters: Filter expressions to select recipients. Each expression is
             ``"column=value"`` (keep matching) or ``"column!=value"`` (exclude
             matching). Multiple filters use AND logic. Case-insensitive.
         confirm: If ``True`` (the default), display a summary and prompt for
@@ -277,7 +280,8 @@ def send_merge(
         )
 
     # --- BCC blast conflict checks and To address parsing ---
-    bcc_blast_to_name: str | None = None
+    blast_to: str = ""
+    blast_to_name: str | None = None
     if bcc_blast:
         if batch_size is not None:
             raise ValueError(
@@ -287,7 +291,7 @@ def send_merge(
         if not bcc_blast_to:
             raise ValueError("bcc_blast_to is required when bcc_blast=True")
         # Support "Display Name <email>" format (RFC 2822)
-        bcc_blast_to_name, bcc_blast_to = _parse_one_addr(bcc_blast_to)
+        blast_to_name, blast_to = _parse_one_addr(bcc_blast_to)
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -306,12 +310,12 @@ def send_merge(
     recipients = _validate_emails(recipients, email_column)
 
     # --- Apply filters ---
-    if filter:
+    if filters:
         total = len(recipients)
-        recipients = _apply_filters(recipients, filter)
+        recipients = _apply_filters(recipients, filters)
         if not recipients:
             raise ValueError(
-                f"No recipients match the filter(s): {', '.join(filter)}"
+                f"No recipients match the filter(s): {', '.join(filters)}"
             )
         logger.info("📋 Loaded %d recipients (filtered from %d)", len(recipients), total)
     else:
@@ -350,13 +354,13 @@ def send_merge(
 
     # --- Read body template ---
     body_path = Path(body)
-    if not body_path.exists():
+    try:
+        body_template = body_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         raise FileNotFoundError(f"Body template not found: {body_path}")
-    body_template = body_path.read_text(encoding="utf-8")
 
     # --- Validate placeholders ---
     if bcc_blast:
-        from mail_merge.template import extract_placeholders
         blast_ph = extract_placeholders(subject) | extract_placeholders(body_template)
         if blast_ph:
             raise ValueError(
@@ -388,10 +392,10 @@ def send_merge(
     # --- Validate recipient count (skip for blast; each batch is validated internally) ---
     if not bcc_blast:
         recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
-        if recipient_count > 500:
+        if recipient_count > MAX_RECIPIENTS_PER_MESSAGE:
             raise ValueError(
                 f"Too many recipients per message ({recipient_count}); "
-                f"Microsoft Graph API limit is 500 (to + cc + bcc)"
+                f"Microsoft Graph API limit is {MAX_RECIPIENTS_PER_MESSAGE} (to + cc + bcc)"
             )
 
     # --- Process attachments ---
@@ -403,14 +407,14 @@ def send_merge(
 
     if confirm:
         from mail_merge.console import console
-        from mail_merge.template import render
 
         console.print()
         if bcc_blast:
             reserved = 1 + len(cc_list or []) + len(bcc_list or [])
-            blast_batch_count = max(1, (len(recipients) + (500 - reserved) - 1) // (500 - reserved))
+            max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
+            blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
             console.print(f"[bold]Subject:[/bold]  {subject}")
-            console.print(f"[bold]To:[/bold]       {bcc_blast_to}")
+            console.print(f"[bold]To:[/bold]       {blast_to}")
             console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
         else:
             sample = recipients[0]
@@ -448,7 +452,8 @@ def send_merge(
             raise RuntimeError(f"Authentication failed: {exc}") from exc
 
         # Subsequent calls will use silent acquisition (cached refresh token)
-        get_token = lambda: acquire_token(client_id, tenant_id)  # noqa: E731
+        def get_token() -> str:
+            return acquire_token(client_id, tenant_id)
 
         # --- Pre-flight token expiry check ---
         expires = token_expires_at(token)
@@ -475,19 +480,17 @@ def send_merge(
         if bcc_blast:
             logger.info(
                 "📧 BCC blast test: sending to %s via %s",
-                test_email, bcc_blast_to,
+                test_email, blast_to,
             )
             return send_bcc_blast(
-                get_token, [test_email], bcc_blast_to, subject, body_template,  # type: ignore[arg-type]
+                get_token, [test_email], blast_to, subject, body_template,
                 dry_run=False,
                 max_retries=max_retries, importance=importance,
                 cc=cc_list, bcc=bcc_list, html=html,
                 save_to_sent_items=save_to_sent_items,
                 attachments=attachment_list, reply_to=reply_to_list,
-                to_name=bcc_blast_to_name,
+                to_name=blast_to_name,
             )
-
-        from mail_merge.template import render
 
         sample = recipients[0]
         rendered_subject = render(subject, sample)
@@ -511,7 +514,7 @@ def send_merge(
         results = send_bcc_blast(
             get_token=get_token,
             emails=emails,
-            to_email=bcc_blast_to,  # type: ignore[arg-type]  # validated above
+            to_email=blast_to,
             subject=subject,
             body=body_template,
             dry_run=not send,
@@ -523,7 +526,7 @@ def send_merge(
             save_to_sent_items=save_to_sent_items,
             attachments=attachment_list,
             reply_to=reply_to_list,
-            to_name=bcc_blast_to_name,
+            to_name=blast_to_name,
         )
     else:
         results = send_all(

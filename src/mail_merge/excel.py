@@ -19,52 +19,52 @@ def read_recipients(
     """
     path = Path(path)
     max_size = 50 * 1024 * 1024  # 50 MB
-    if path.stat().st_size > max_size:
+    file_size = path.stat().st_size
+    if file_size > max_size:
         raise ValueError(
-            f"Spreadsheet too large: {path.stat().st_size / (1024 * 1024):.0f} MB "
+            f"Spreadsheet too large: {file_size / (1024 * 1024):.0f} MB "
             f"(limit: {max_size // (1024 * 1024)} MB)"
         )
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb[sheet_name] if sheet_name else wb.active
+    try:
+        ws = wb[sheet_name] if sheet_name else wb.active
 
-    rows = ws.iter_rows()
-    header_row = next(rows, None)
-    if header_row is None:
+        rows = ws.iter_rows()
+        header_row = next(rows, None)
+        if header_row is None:
+            raise ValueError("Spreadsheet is empty")
+
+        headers = [str(cell.value).strip() if cell.value is not None else "" for cell in header_row]
+
+        # Find the email column (case-insensitive)
+        email_col_idx = None
+        for i, h in enumerate(headers):
+            if h.lower() == email_column.lower():
+                email_col_idx = i
+                break
+
+        if email_col_idx is None:
+            raise ValueError(
+                f"Email column '{email_column}' not found. "
+                f"Available columns: {', '.join(h for h in headers if h)}"
+            )
+
+        recipients = []
+        for row_num, row in enumerate(rows, start=2):
+            values = [str(cell.value).strip() if cell.value is not None else "" for cell in row]
+            # Pad values if row is shorter than headers
+            while len(values) < len(headers):
+                values.append("")
+
+            # Skip entirely empty rows silently; warn only for partial rows
+            email_value = values[email_col_idx]
+            if not email_value:
+                if any(v for v in values):
+                    logger.warning("Row %d: empty email, skipping", row_num)
+                continue
+
+            record = {headers[i]: values[i] for i in range(len(headers)) if headers[i]}
+            recipients.append(record)
+    finally:
         wb.close()
-        raise ValueError("Spreadsheet is empty")
-
-    headers = [str(cell.value).strip() if cell.value is not None else "" for cell in header_row]
-
-    # Find the email column (case-insensitive)
-    email_col_idx = None
-    for i, h in enumerate(headers):
-        if h.lower() == email_column.lower():
-            email_col_idx = i
-            break
-
-    if email_col_idx is None:
-        wb.close()
-        raise ValueError(
-            f"Email column '{email_column}' not found. "
-            f"Available columns: {', '.join(h for h in headers if h)}"
-        )
-
-    recipients = []
-    for row_num, row in enumerate(rows, start=2):
-        values = [str(cell.value).strip() if cell.value is not None else "" for cell in row]
-        # Pad values if row is shorter than headers
-        while len(values) < len(headers):
-            values.append("")
-
-        # Skip entirely empty rows silently; warn only for partial rows
-        email_value = values[email_col_idx]
-        if not email_value:
-            if any(v for v in values):
-                logger.warning("Row %d: empty email, skipping", row_num)
-            continue
-
-        record = {headers[i]: values[i] for i in range(len(headers)) if headers[i]}
-        recipients.append(record)
-
-    wb.close()
     return recipients
