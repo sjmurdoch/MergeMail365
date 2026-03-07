@@ -200,7 +200,7 @@ def send_merge(
     save_to_sent_items: bool = True,
     attachment: list[str | Path] | None = None,
     reply_to: str | list[str] | None = None,
-    filter: list[str] | None = None,
+    filters: list[str] | None = None,
     confirm: bool = True,
     resume: bool = True,
     batch_size: int | None = None,
@@ -236,7 +236,7 @@ def send_merge(
         save_to_sent_items: If ``False``, skip saving to Sent Items.
         attachment: List of file paths to attach.
         reply_to: Reply-to addresses — comma-separated string or list.
-        filter: Filter expressions to select recipients. Each expression is
+        filters: Filter expressions to select recipients. Each expression is
             ``"column=value"`` (keep matching) or ``"column!=value"`` (exclude
             matching). Multiple filters use AND logic. Case-insensitive.
         confirm: If ``True`` (the default), display a summary and prompt for
@@ -310,12 +310,12 @@ def send_merge(
     recipients = _validate_emails(recipients, email_column)
 
     # --- Apply filters ---
-    if filter:
+    if filters:
         total = len(recipients)
-        recipients = _apply_filters(recipients, filter)
+        recipients = _apply_filters(recipients, filters)
         if not recipients:
             raise ValueError(
-                f"No recipients match the filter(s): {', '.join(filter)}"
+                f"No recipients match the filter(s): {', '.join(filters)}"
             )
         logger.info("📋 Loaded %d recipients (filtered from %d)", len(recipients), total)
     else:
