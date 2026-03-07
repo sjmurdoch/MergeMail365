@@ -163,7 +163,9 @@ def send_bcc_blast(
         if get_token is None:
             raise RuntimeError("get_token is required when not in dry-run mode")
         logger.info("📧 Sending %s", label)
-        bcc_recipients = [{"emailAddress": {"address": a}} for a in batch]
+        bcc_recipients: list[dict[str, object]] = [
+            {"emailAddress": {"address": a}} for a in batch
+        ]
         bcc_all = list(bcc or []) + bcc_recipients
         result = send_one(
             get_token, to_email, subject, body,

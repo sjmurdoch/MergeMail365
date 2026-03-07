@@ -7,12 +7,13 @@ import logging
 import mimetypes
 import os
 from datetime import datetime, timezone
+from email.utils import parseaddr
 from pathlib import Path
 
 from mail_merge import config as _config
 from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
-from mail_merge.template import validate_template
+from mail_merge.template import extract_placeholders, render, validate_template
 from mail_merge.sender import SendResult, send_all, send_bcc_blast, send_one
 from mail_merge.report import print_summary, read_csv, write_csv
 
@@ -33,7 +34,6 @@ def _format_addrs(entries: list[dict[str, object]]) -> str:
 
 def _parse_one_addr(raw: str) -> tuple[str | None, str]:
     """Extract (display_name | None, address) from 'Name <email>' or plain email."""
-    from email.utils import parseaddr
     name, addr = parseaddr(raw.strip())
     return (name or None), (addr or raw.strip())
 
@@ -47,10 +47,11 @@ def _parse_address_entries(
     """
     if value is None:
         return None
-    items = [a.strip() for a in value.split(",") if a.strip()] if isinstance(value, str) else [a.strip() for a in value if a.strip()]
+    parts = value.split(",") if isinstance(value, str) else value
+    items = [s for a in parts if (s := a.strip())]
     if not items:
         return None
-    result = []
+    result: list[dict[str, object]] = []
     for raw in items:
         name, addr = _parse_one_addr(raw)
         entry: dict[str, str] = {"address": addr}
@@ -69,9 +70,10 @@ def _process_attachments(
     max_attachment_size = 3 * 1024 * 1024  # ~3 MB raw ≈ 4 MB base64
     for att_path_raw in paths:
         att_path = Path(att_path_raw)
-        if not att_path.exists():
+        try:
+            content_bytes = att_path.read_bytes()
+        except FileNotFoundError:
             raise FileNotFoundError(f"Attachment not found: {att_path}")
-        content_bytes = att_path.read_bytes()
         if len(content_bytes) > max_attachment_size:
             raise ValueError(
                 f"Attachment too large: {att_path} "
@@ -94,26 +96,17 @@ def _parse_filter(expr: str) -> tuple[str, str, str]:
     Supported forms: ``"column=value"`` and ``"column!=value"``.
     Raises ``ValueError`` for malformed expressions.
     """
-    if "!=" in expr:
-        parts = expr.split("!=", 1)
-        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-            raise ValueError(
-                f"Invalid filter syntax: {expr!r} "
-                f"(expected 'column=value' or 'column!=value')"
-            )
-        return parts[0].strip(), "!=", parts[1].strip()
-    if "=" in expr:
-        parts = expr.split("=", 1)
-        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-            raise ValueError(
-                f"Invalid filter syntax: {expr!r} "
-                f"(expected 'column=value' or 'column!=value')"
-            )
-        return parts[0].strip(), "=", parts[1].strip()
-    raise ValueError(
+    err = (
         f"Invalid filter syntax: {expr!r} "
         f"(expected 'column=value' or 'column!=value')"
     )
+    for op in ("!=", "="):
+        if op in expr:
+            parts = expr.split(op, 1)
+            if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+                raise ValueError(err)
+            return parts[0].strip(), op, parts[1].strip()
+    raise ValueError(err)
 
 
 def _validate_emails(
@@ -160,16 +153,20 @@ def _apply_filters(
                 f"(available: {', '.join(recipients[0].keys())})"
             )
 
+    # Pre-resolve column keys and lowercase filter values once
+    resolved = [
+        (col_lower[col.lower()], op, val.lower()) for col, op, val in parsed
+    ]
+
     result = []
     for row in recipients:
         match = True
-        for col, op, val in parsed:
-            actual_key = col_lower[col.lower()]
+        for actual_key, op, val_lower in resolved:
             cell = str(row.get(actual_key, "")).lower()
-            if op == "=" and cell != val.lower():
+            if op == "=" and cell != val_lower:
                 match = False
                 break
-            if op == "!=" and cell == val.lower():
+            if op == "!=" and cell == val_lower:
                 match = False
                 break
         if match:
@@ -350,13 +347,13 @@ def send_merge(
 
     # --- Read body template ---
     body_path = Path(body)
-    if not body_path.exists():
+    try:
+        body_template = body_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         raise FileNotFoundError(f"Body template not found: {body_path}")
-    body_template = body_path.read_text(encoding="utf-8")
 
     # --- Validate placeholders ---
     if bcc_blast:
-        from mail_merge.template import extract_placeholders
         blast_ph = extract_placeholders(subject) | extract_placeholders(body_template)
         if blast_ph:
             raise ValueError(
@@ -403,7 +400,6 @@ def send_merge(
 
     if confirm:
         from mail_merge.console import console
-        from mail_merge.template import render
 
         console.print()
         if bcc_blast:
@@ -486,8 +482,6 @@ def send_merge(
                 attachments=attachment_list, reply_to=reply_to_list,
                 to_name=bcc_blast_to_name,
             )
-
-        from mail_merge.template import render
 
         sample = recipients[0]
         rendered_subject = render(subject, sample)
