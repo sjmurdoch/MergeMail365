@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import responses
 
-from mail_merge.sender import GRAPH_SEND_URL, SendResult, send_all, send_one
+from mail_merge.sender import GRAPH_SEND_URL, SendResult, send_all, send_bcc_blast, send_one
 
 
 class TestSendOne:
@@ -342,3 +342,62 @@ class TestTokenRefreshOn401:
         assert not result.success
         assert result.status_code == 401
         assert len(responses.calls) == 2
+
+
+class TestSendBccBlast:
+    @responses.activate
+    def test_single_batch_success(self):
+        """A small list fits in one batch; returns one SendResult."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        emails = ["a@x.com", "b@x.com", "c@x.com"]
+        results = send_bcc_blast(
+            lambda: "tok", emails, "noreply@x.com", "Hello", "Body"
+        )
+        assert len(results) == 1
+        assert results[0].success
+        assert "batch 1/1" in results[0].email
+        assert "3 recipients" in results[0].email
+
+    @responses.activate
+    def test_multiple_batches(self):
+        """Recipient list larger than batch capacity is split correctly."""
+        for _ in range(3):
+            responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        # With 1 to + 0 cc + 0 bcc_extra = 1 reserved → 499 per batch
+        # Force small batches by passing many cc addresses to shrink max_per_batch.
+        # Use 498 cc so max_per_batch = 500 - 1 - 498 = 1 → one recipient per batch.
+        cc = [f"cc{i}@x.com" for i in range(498)]
+        emails = ["a@x.com", "b@x.com", "c@x.com"]
+        results = send_bcc_blast(
+            lambda: "tok", emails, "noreply@x.com", "Hi", "Body", cc=cc
+        )
+        assert len(results) == 3
+        assert all(r.success for r in results)
+
+    def test_dry_run_no_http(self):
+        """In dry-run mode no HTTP calls are made; returns one result per batch."""
+        emails = ["a@x.com", "b@x.com"]
+        results = send_bcc_blast(
+            None, emails, "noreply@x.com", "Hi", "Body", dry_run=True
+        )
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].status_code is None
+
+    def test_no_get_token_in_live_mode_raises(self):
+        """Passing get_token=None in live mode raises RuntimeError."""
+        import pytest
+        with pytest.raises(RuntimeError, match="get_token is required"):
+            send_bcc_blast(None, ["a@x.com"], "to@x.com", "Hi", "Body", dry_run=False)
+
+    @responses.activate
+    def test_batch_failure_recorded(self):
+        """A 4xx response is recorded as a failure in the corresponding result."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=400, body="Bad Request")
+        results = send_bcc_blast(
+            lambda: "tok", ["a@x.com"], "noreply@x.com", "Hi", "Body"
+        )
+        assert len(results) == 1
+        assert not results[0].success
+        assert results[0].status_code == 400

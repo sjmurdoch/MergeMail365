@@ -126,6 +126,59 @@ def send_one(
         )
 
 
+def send_bcc_blast(
+    get_token: Callable[[], str] | None,
+    emails: list[str],
+    to_email: str,
+    subject: str,
+    body: str,
+    dry_run: bool = False,
+    max_retries: int = 3,
+    importance: str | None = None,
+    cc: list[str] | None = None,
+    bcc_extra: list[str] | None = None,
+    html: bool = False,
+    save_to_sent_items: bool = True,
+    attachments: list[dict[str, str]] | None = None,
+    reply_to: list[str] | None = None,
+) -> list[SendResult]:
+    """Send a single subject/body to all emails via BCC, in batches of up to 499.
+
+    Recipients within each batch cannot see each other's addresses.
+    Returns one SendResult per batch (not per recipient).
+    """
+    reserved = 1 + len(cc or []) + len(bcc_extra or [])
+    max_per_batch = max(1, 500 - reserved)
+    batches = [emails[i:i + max_per_batch] for i in range(0, len(emails), max_per_batch)]
+    total = len(batches)
+    results = []
+    for i, batch in enumerate(batches):
+        label = f"batch {i + 1}/{total} ({len(batch)} recipients)"
+        if dry_run:
+            logger.info("🔄 DRY RUN %s | Subject: %s", label, subject)
+            results.append(SendResult(email=label, success=True, status_code=None))
+            continue
+        if get_token is None:
+            raise RuntimeError("get_token is required when not in dry-run mode")
+        logger.info("📧 Sending %s", label)
+        bcc_all = list(bcc_extra or []) + batch
+        result = send_one(
+            get_token, to_email, subject, body,
+            max_retries=max_retries, importance=importance,
+            cc=cc, bcc=bcc_all, html=html,
+            save_to_sent_items=save_to_sent_items,
+            attachments=attachments, reply_to=reply_to,
+        )
+        results.append(SendResult(
+            email=label,
+            success=result.success,
+            status_code=result.status_code,
+            error=result.error,
+            throttled=result.throttled,
+        ))
+    return results
+
+
 def send_all(
     get_token: Callable[[], str] | None,
     recipients: list[dict[str, str]],

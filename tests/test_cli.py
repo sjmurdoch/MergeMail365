@@ -584,3 +584,61 @@ class TestUnexpectedException:
             "--email-column", "email",
         ])
         assert exit_code == 1
+
+
+class TestBccBlastCLI:
+    def test_bcc_blast_dry_run(self, sample_xlsx, tmp_path):
+        """--bcc-blast dry run exits with code 0."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Announcement",
+            "--email-column", "email",
+            "--bcc-blast",
+            "--bcc-blast-to", "noreply@x.com",
+        ])
+        assert exit_code == 0
+
+    def test_bcc_blast_missing_to_errors(self, sample_xlsx, tmp_path):
+        """--bcc-blast without --bcc-blast-to exits with code 1."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Announcement",
+            "--email-column", "email",
+            "--bcc-blast",
+        ])
+        assert exit_code == 1
+
+    def test_bcc_blast_with_placeholder_errors(self, sample_xlsx, tmp_path):
+        """--bcc-blast with a {{placeholder}} subject exits with code 1."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Hello {{name}}",
+            "--email-column", "email",
+            "--bcc-blast",
+            "--bcc-blast-to", "noreply@x.com",
+        ])
+        assert exit_code == 1
+
+    def test_bcc_blast_conflicts_with_test_email(self, sample_xlsx, tmp_path):
+        """--bcc-blast and --test-email together exit with code 1."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        exit_code = main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body),
+            "--subject", "Announcement",
+            "--email-column", "email",
+            "--bcc-blast",
+            "--bcc-blast-to", "noreply@x.com",
+            "--test-email", "me@x.com",
+        ])
+        assert exit_code == 1

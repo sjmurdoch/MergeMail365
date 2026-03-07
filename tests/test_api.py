@@ -733,3 +733,124 @@ class TestTokenRefreshFailure:
 
         assert any("Token refresh failed" in msg for msg in caplog.messages)
         assert results[0].success
+
+
+class TestBccBlast:
+    def test_conflict_with_test_email(self, sample_xlsx, body_template_file):
+        """--bcc-blast and --test-email are mutually exclusive."""
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Static subject",
+                email_column="email",
+                bcc_blast=True,
+                bcc_blast_to="noreply@x.com",
+                test_email="someone@x.com",
+            )
+
+    def test_conflict_with_batch_size(self, sample_xlsx, body_template_file):
+        """--bcc-blast and --batch-size are mutually exclusive."""
+        with pytest.raises(ValueError, match="--batch-size is not supported"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Static subject",
+                email_column="email",
+                bcc_blast=True,
+                bcc_blast_to="noreply@x.com",
+                batch_size=10,
+            )
+
+    def test_missing_bcc_blast_to_raises(self, sample_xlsx, body_template_file):
+        """bcc_blast=True without bcc_blast_to raises ValueError."""
+        with pytest.raises(ValueError, match="bcc_blast_to is required"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Static subject",
+                email_column="email",
+                bcc_blast=True,
+            )
+
+    def test_placeholder_in_subject_rejected(self, sample_xlsx, body_template_file):
+        """BCC blast mode rejects subjects that contain {{placeholders}}."""
+        with pytest.raises(ValueError, match="does not support placeholders"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                bcc_blast=True,
+                bcc_blast_to="noreply@x.com",
+            )
+
+    def test_placeholder_in_body_rejected(self, sample_xlsx, tmp_path):
+        """BCC blast mode rejects bodies that contain {{placeholders}}."""
+        body_with_ph = tmp_path / "body.txt"
+        body_with_ph.write_text("Dear {{name}},\nHello.", encoding="utf-8")
+        with pytest.raises(ValueError, match="does not support placeholders"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_with_ph,
+                subject="Static subject",
+                email_column="email",
+                bcc_blast=True,
+                bcc_blast_to="noreply@x.com",
+            )
+
+    @responses.activate
+    def test_dry_run_blast(self, sample_xlsx, tmp_path):
+        """Dry-run BCC blast returns batch results without HTTP calls."""
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            send=False,
+        )
+        # Should have one batch result (2 recipients fit in one batch)
+        assert len(results) == 1
+        assert results[0].success
+        assert "batch 1/1" in results[0].email
+        # No real HTTP calls in dry run
+        assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_live_blast_sends(self, sample_xlsx, tmp_path, monkeypatch):
+        """Live BCC blast authenticates and sends batches via HTTP."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(
+            auth_module, "acquire_token", lambda *a, **kw: "fake-tok"
+        )
+        monkeypatch.setattr(
+            "mail_merge.auth.token_expires_at", lambda tok: None
+        )
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            client_id="fake-client",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            send=True,
+            confirm=False,
+        )
+        assert len(results) == 1
+        assert results[0].success
+        assert len(responses.calls) == 1
+        payload = json.loads(responses.calls[0].request.body)
+        # Recipients should appear as BCC, not To
+        bcc_addrs = [b["emailAddress"]["address"] for b in payload["message"]["bccRecipients"]]
+        assert "alice@example.com" in bcc_addrs
+        assert "bob@example.com" in bcc_addrs
