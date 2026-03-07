@@ -2,6 +2,8 @@
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import msal
 import pytest
 
@@ -108,3 +110,56 @@ class TestSaveCache:
         _save_cache(mock_cache)
 
         assert cache_path.exists()
+
+
+class TestTenantIdValidation:
+    def test_path_traversal_rejected(self):
+        """tenant_id containing path traversal characters raises ValueError."""
+        from mail_merge.auth import acquire_token
+        with pytest.raises(ValueError, match="Invalid tenant_id"):
+            acquire_token("fake-client", tenant_id="common/../../evil.com")
+
+    def test_newline_injection_rejected(self):
+        """tenant_id containing a newline raises ValueError."""
+        from mail_merge.auth import acquire_token
+        with pytest.raises(ValueError, match="Invalid tenant_id"):
+            acquire_token("fake-client", tenant_id="common\nevil")
+
+    def test_common_accepted(self):
+        """'common' is a valid tenant_id and passes validation."""
+        from unittest.mock import patch
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = []
+        mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
+        mock_app.acquire_token_by_device_flow.return_value = {"access_token": "tok"}
+        with patch("msal.PublicClientApplication", return_value=mock_app), \
+             patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
+            from mail_merge.auth import acquire_token
+            token = acquire_token("fake-client", tenant_id="common")
+        assert token == "tok"
+
+    def test_uuid_accepted(self):
+        """A valid UUID tenant_id passes validation."""
+        from unittest.mock import patch
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = []
+        mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
+        mock_app.acquire_token_by_device_flow.return_value = {"access_token": "tok"}
+        with patch("msal.PublicClientApplication", return_value=mock_app), \
+             patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
+            from mail_merge.auth import acquire_token
+            token = acquire_token("fake-client", tenant_id="12345678-1234-1234-1234-123456789abc")
+        assert token == "tok"
+
+    def test_domain_accepted(self):
+        """A domain name tenant_id passes validation."""
+        from unittest.mock import patch
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = []
+        mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
+        mock_app.acquire_token_by_device_flow.return_value = {"access_token": "tok"}
+        with patch("msal.PublicClientApplication", return_value=mock_app), \
+             patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
+            from mail_merge.auth import acquire_token
+            token = acquire_token("fake-client", tenant_id="contoso.onmicrosoft.com")
+        assert token == "tok"

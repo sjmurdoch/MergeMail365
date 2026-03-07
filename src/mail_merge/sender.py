@@ -76,7 +76,7 @@ def send_one(
             retries += 1
             if retries > max_retries:
                 return SendResult(email=to_email, success=False, error=str(exc))
-            wait = 2**retries
+            wait = min(2**retries, 60)
             logger.warning("⚠️ Network error sending to %s, retry %d in %ds: %s", to_email, retries, wait, exc)
             time.sleep(wait)
             continue
@@ -100,7 +100,7 @@ def send_one(
                     error=f"Rate limited {max_rate_limit_retries} times, giving up",
                 )
             try:
-                retry_after = int(resp.headers.get("Retry-After", 10))
+                retry_after = min(int(resp.headers.get("Retry-After", 10)), 120)
             except ValueError:
                 retry_after = 10
             logger.warning("⚠️ Rate limited, waiting %ds before retrying %s", retry_after, to_email)
@@ -114,7 +114,7 @@ def send_one(
                     email=to_email, success=False, status_code=resp.status_code,
                     error=resp.text[:500],
                 )
-            wait = 2**retries
+            wait = min(2**retries, 60)
             logger.warning("⚠️ Server error %d for %s, retry %d in %ds", resp.status_code, to_email, retries, wait)
             time.sleep(wait)
             continue
@@ -165,7 +165,8 @@ def send_all(
             logger.debug("Body:\n%s", rendered_body)
             results.append(SendResult(email=to_email, success=True, status_code=None))
         else:
-            assert get_token is not None
+            if get_token is None:
+                raise RuntimeError("get_token is required when not in dry-run mode")
             logger.info("📧 Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
             result = send_one(
                 get_token, to_email, rendered_subject, rendered_body,

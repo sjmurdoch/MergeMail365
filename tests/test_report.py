@@ -31,6 +31,36 @@ class TestPrintSummary:
         assert "1" in output
 
 
+class TestCsvSanitization:
+    def test_formula_in_email_is_prefixed(self, tmp_path):
+        """Email starting with '=' is prefixed to prevent spreadsheet formula injection."""
+        results = [SendResult(email="=EVIL()", success=True, status_code=202, error="")]
+        path = tmp_path / "report.csv"
+        write_csv(results, path)
+        raw = path.read_text(encoding="utf-8")
+        data_row = raw.splitlines()[1]
+        # The field must start with the tab prefix, not bare '='
+        assert data_row.startswith("\t=EVIL()")
+        assert "\t=EVIL()" in raw
+
+    def test_formula_in_error_is_prefixed(self, tmp_path):
+        """Error message starting with '+' is prefixed to prevent formula injection."""
+        results = [SendResult(email="a@x.com", success=False, status_code=400, error="+CMD")]
+        path = tmp_path / "report.csv"
+        write_csv(results, path)
+        raw = path.read_text(encoding="utf-8")
+        assert "\t+CMD" in raw
+
+    def test_normal_values_are_unchanged(self, tmp_path):
+        """Non-formula values pass through without modification."""
+        results = [SendResult(email="a@x.com", success=True, status_code=202, error="OK")]
+        path = tmp_path / "report.csv"
+        write_csv(results, path)
+        loaded = read_csv(path)
+        assert loaded[0].email == "a@x.com"
+        assert loaded[0].error == "OK"
+
+
 class TestReadCsvRoundTrip:
     def test_round_trip(self, tmp_path):
         results = [

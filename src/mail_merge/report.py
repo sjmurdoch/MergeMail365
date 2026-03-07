@@ -9,6 +9,16 @@ from mail_merge.sender import SendResult
 
 logger = logging.getLogger(__name__)
 
+# Characters that trigger formula execution in spreadsheet applications
+_CSV_FORMULA_PREFIXES = ("=", "+", "@", "-", "\t", "\r")
+
+
+def _sanitize_csv(value: str) -> str:
+    """Prefix values that would be interpreted as spreadsheet formulas with a tab."""
+    if value.startswith(_CSV_FORMULA_PREFIXES):
+        return "\t" + value
+    return value
+
 
 def print_summary(results: list[SendResult]) -> None:
     total = len(results)
@@ -40,7 +50,7 @@ def write_csv(results: list[SendResult], path: str | Path) -> None:
         writer = csv.writer(f)
         writer.writerow(["email", "success", "status_code", "error"])
         for r in results:
-            writer.writerow([r.email, r.success, r.status_code or "", r.error])
+            writer.writerow([_sanitize_csv(r.email), r.success, r.status_code or "", _sanitize_csv(r.error)])
     logger.info("Report written to %s", path)
 
 

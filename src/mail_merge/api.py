@@ -311,6 +311,12 @@ def send_merge(
             f"(available columns: {', '.join(columns)})"
         )
 
+    # --- Validate importance ---
+    if importance is not None and importance not in ("low", "normal", "high"):
+        raise ValueError(
+            f"Invalid importance {importance!r}; expected 'low', 'normal', or 'high'"
+        )
+
     # --- Parse CC / BCC / reply-to ---
     cc_list = _parse_address_list(cc)
     bcc_list = _parse_address_list(bcc)
@@ -402,7 +408,8 @@ def send_merge(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
         )
-        assert get_token is not None
+        if get_token is None:
+            raise RuntimeError("Authentication is required to send a test email")
         result = send_one(
             get_token, test_email, rendered_subject, rendered_body,
             max_retries=max_retries, importance=importance,

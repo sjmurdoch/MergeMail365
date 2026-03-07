@@ -137,6 +137,27 @@ class TestValidationErrors:
                     cc=cc_list,
             )
 
+    def test_invalid_importance_raises(self, sample_xlsx, body_template_file):
+        with pytest.raises(ValueError, match="Invalid importance"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                importance="urgent",
+            )
+
+    def test_valid_importance_accepted(self, sample_xlsx, body_template_file):
+        for level in ("low", "normal", "high"):
+            results = send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                importance=level,
+            )
+            assert all(r.success for r in results)
+
 
 class TestEmailValidation:
     def test_non_ascii_email_skipped_with_warning(self, tmp_path, body_template_file, caplog):

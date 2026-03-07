@@ -35,3 +35,17 @@ class TestReadRecipients:
 
         with pytest.raises(ValueError, match="empty"):
             read_recipients(path, "email")
+
+    def test_oversized_file_rejected(self, tmp_path, monkeypatch):
+        """Files larger than 50 MB are rejected before loading."""
+        import openpyxl
+        path = tmp_path / "big.xlsx"
+        wb = openpyxl.Workbook()
+        wb.active.append(["email"])
+        wb.save(path)
+
+        # Fake a large file size without writing 50 MB of data
+        monkeypatch.setattr("pathlib.Path.stat", lambda self: type("S", (), {"st_size": 51 * 1024 * 1024})())
+
+        with pytest.raises(ValueError, match="too large"):
+            read_recipients(path, "email")

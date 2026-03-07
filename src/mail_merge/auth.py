@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ["Mail.Send"]
 AUTHORITY_BASE = "https://login.microsoftonline.com"
+
+# Allowlist for tenant_id: UUIDs, "common", "organizations", "consumers",
+# and domain names (e.g. "contoso.com"). Rejects path-traversal sequences.
+_TENANT_ID_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 
 if sys.platform == "win32":
     CACHE_PATH = data_dir() / "token-cache.json"
@@ -32,6 +37,8 @@ def _load_cache() -> msal.SerializableTokenCache:
 def _save_cache(cache: msal.SerializableTokenCache) -> None:
     if cache.has_state_changed:
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if sys.platform != "win32":
+            CACHE_PATH.parent.chmod(0o700)
         CACHE_PATH.write_text(cache.serialize(), encoding="utf-8")
         if sys.platform != "win32":
             CACHE_PATH.chmod(0o600)
@@ -45,6 +52,11 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
 
     Returns the access token string.
     """
+    if not _TENANT_ID_RE.match(tenant_id):
+        raise ValueError(
+            f"Invalid tenant_id {tenant_id!r}: must be a UUID, 'common', "
+            f"'organizations', 'consumers', or a domain name"
+        )
     authority = f"{AUTHORITY_BASE}/{tenant_id}"
     cache = _load_cache()
     app = msal.PublicClientApplication(
