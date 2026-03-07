@@ -280,7 +280,8 @@ def send_merge(
         )
 
     # --- BCC blast conflict checks and To address parsing ---
-    bcc_blast_to_name: str | None = None
+    blast_to: str = ""
+    blast_to_name: str | None = None
     if bcc_blast:
         if batch_size is not None:
             raise ValueError(
@@ -290,7 +291,7 @@ def send_merge(
         if not bcc_blast_to:
             raise ValueError("bcc_blast_to is required when bcc_blast=True")
         # Support "Display Name <email>" format (RFC 2822)
-        bcc_blast_to_name, bcc_blast_to = _parse_one_addr(bcc_blast_to)
+        blast_to_name, blast_to = _parse_one_addr(bcc_blast_to)
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -413,7 +414,7 @@ def send_merge(
             max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
             blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
             console.print(f"[bold]Subject:[/bold]  {subject}")
-            console.print(f"[bold]To:[/bold]       {bcc_blast_to}")
+            console.print(f"[bold]To:[/bold]       {blast_to}")
             console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
         else:
             sample = recipients[0]
@@ -479,16 +480,16 @@ def send_merge(
         if bcc_blast:
             logger.info(
                 "📧 BCC blast test: sending to %s via %s",
-                test_email, bcc_blast_to,
+                test_email, blast_to,
             )
             return send_bcc_blast(
-                get_token, [test_email], bcc_blast_to, subject, body_template,  # type: ignore[arg-type]
+                get_token, [test_email], blast_to, subject, body_template,
                 dry_run=False,
                 max_retries=max_retries, importance=importance,
                 cc=cc_list, bcc=bcc_list, html=html,
                 save_to_sent_items=save_to_sent_items,
                 attachments=attachment_list, reply_to=reply_to_list,
-                to_name=bcc_blast_to_name,
+                to_name=blast_to_name,
             )
 
         sample = recipients[0]
@@ -513,7 +514,7 @@ def send_merge(
         results = send_bcc_blast(
             get_token=get_token,
             emails=emails,
-            to_email=bcc_blast_to,  # type: ignore[arg-type]  # validated above
+            to_email=blast_to,
             subject=subject,
             body=body_template,
             dry_run=not send,
@@ -525,7 +526,7 @@ def send_merge(
             save_to_sent_items=save_to_sent_items,
             attachments=attachment_list,
             reply_to=reply_to_list,
-            to_name=bcc_blast_to_name,
+            to_name=blast_to_name,
         )
     else:
         results = send_all(
