@@ -6,6 +6,7 @@ import responses
 from mail_merge.sender import (
     GRAPH_SEND_URL,
     MAX_RECIPIENTS_PER_MESSAGE,
+    MessageOptions,
     SendResult,
     send_all,
     send_bcc_blast,
@@ -34,7 +35,7 @@ class TestSendOne:
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", max_retries=3)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(max_retries=3))
         assert result.success
         assert len(responses.calls) == 3
 
@@ -42,7 +43,7 @@ class TestSendOne:
     def test_server_error_exhausts_retries(self):
         for _ in range(4):
             responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", max_retries=3)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(max_retries=3))
         assert not result.success
         assert result.status_code == 500
 
@@ -80,7 +81,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_html_sets_content_type(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "<b>Body</b>", html=True)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "<b>Body</b>", opts=MessageOptions(html=True))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -97,7 +98,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_save_to_sent_items_false(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=False)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(save_to_sent_items=False))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -106,7 +107,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_save_to_sent_items_true_omitted(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", save_to_sent_items=True)
+        send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(save_to_sent_items=True))
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert "saveToSentItems" not in payload
@@ -120,7 +121,7 @@ class TestSendOneNewFeatures:
             "contentType": "text/plain",
             "contentBytes": "SGVsbG8=",
         }]
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", attachments=attachments)
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(attachments=attachments))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -131,7 +132,7 @@ class TestSendOneNewFeatures:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one(
             lambda: "fake-token", "test@example.com", "Subject", "Body",
-            reply_to=[{"emailAddress": {"address": "reply@example.com"}}],
+            opts=MessageOptions(reply_to=[{"emailAddress": {"address": "reply@example.com"}}]),
         )
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
@@ -144,7 +145,7 @@ class TestSendOneOptionalFields:
     @responses.activate
     def test_importance_included_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", importance="high")
+        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(importance="high"))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -155,8 +156,10 @@ class TestSendOneOptionalFields:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one(
             lambda: "fake-token", "test@example.com", "Subject", "Body",
-            cc=[{"emailAddress": {"address": "a@x.com"}}, {"emailAddress": {"address": "b@x.com"}}],
-            bcc=[{"emailAddress": {"address": "c@x.com"}}],
+            opts=MessageOptions(
+                cc=[{"emailAddress": {"address": "a@x.com"}}, {"emailAddress": {"address": "b@x.com"}}],
+                bcc=[{"emailAddress": {"address": "c@x.com"}}],
+            ),
         )
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
@@ -260,7 +263,7 @@ class TestNetworkErrors:
              patch("requests.post", side_effect=req_module.exceptions.ConnectionError("refused")):
             result = send_one(
                 lambda: "fake-token", "test@example.com", "Subject", "Body",
-                max_retries=2,
+                opts=MessageOptions(max_retries=2),
             )
 
         assert not result.success
@@ -286,7 +289,7 @@ class TestNetworkErrors:
              patch("requests.post", side_effect=flaky_post):
             result = send_one(
                 lambda: "fake-token", "test@example.com", "Subject", "Body",
-                max_retries=2,
+                opts=MessageOptions(max_retries=2),
             )
 
         assert result.success
@@ -378,7 +381,8 @@ class TestSendBccBlast:
         cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
-            lambda: "tok", emails, "noreply@x.com", "Hi", "Body", cc=cc
+            lambda: "tok", emails, "noreply@x.com", "Hi", "Body",
+            opts=MessageOptions(cc=cc),
         )
         assert len(results) == 3
         assert all(r.success for r in results)
@@ -428,7 +432,7 @@ class TestSendBccBlast:
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
             lambda: "tok", emails, "noreply@x.com", "Hi", "Body",
-            cc=cc, max_retries=3,
+            opts=MessageOptions(cc=cc, max_retries=3),
         )
         assert len(results) == 3
         assert results[0].success

@@ -16,6 +16,7 @@ from mail_merge.excel import read_recipients
 from mail_merge.template import extract_placeholders, render, validate_template
 from mail_merge.sender import (
     MAX_RECIPIENTS_PER_MESSAGE,
+    MessageOptions,
     SendResult,
     send_all,
     send_bcc_blast,
@@ -389,17 +390,30 @@ def send_merge(
     bcc_list = _parse_address_entries(bcc)
     reply_to_list = _parse_address_entries(reply_to)
 
+    # --- Process attachments ---
+    attachment_list = _process_attachments(attachment)
+
+    # --- Bundle message options ---
+    msg_opts = MessageOptions(
+        max_retries=max_retries,
+        importance=importance,
+        cc=cc_list,
+        bcc=bcc_list,
+        html=html,
+        save_to_sent_items=save_to_sent_items,
+        attachments=attachment_list,
+        reply_to=reply_to_list,
+        to_name=blast_to_name if bcc_blast else None,
+    )
+
     # --- Validate recipient count (skip for blast; each batch is validated internally) ---
     if not bcc_blast:
-        recipient_count = 1 + len(cc_list or []) + len(bcc_list or [])
+        recipient_count = 1 + len(msg_opts.cc or []) + len(msg_opts.bcc or [])
         if recipient_count > MAX_RECIPIENTS_PER_MESSAGE:
             raise ValueError(
                 f"Too many recipients per message ({recipient_count}); "
                 f"Microsoft Graph API limit is {MAX_RECIPIENTS_PER_MESSAGE} (to + cc + bcc)"
             )
-
-    # --- Process attachments ---
-    attachment_list = _process_attachments(attachment)
 
     # --- Confirm before sending ---
     if not send or test_email:
@@ -410,7 +424,7 @@ def send_merge(
 
         console.print()
         if bcc_blast:
-            reserved = 1 + len(cc_list or []) + len(bcc_list or [])
+            reserved = 1 + len(msg_opts.cc or []) + len(msg_opts.bcc or [])
             max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
             blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
             console.print(f"[bold]Subject:[/bold]  {subject}")
@@ -420,10 +434,10 @@ def send_merge(
             sample = recipients[0]
             console.print(f"[bold]Subject:[/bold]  {render(subject, sample)}")
             console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
-        if cc_list:
-            console.print(f"[bold]CC:[/bold]       {_format_addrs(cc_list)}")
-        if not bcc_blast and bcc_list:
-            console.print(f"[bold]BCC:[/bold]      {_format_addrs(bcc_list)}")
+        if msg_opts.cc:
+            console.print(f"[bold]CC:[/bold]       {_format_addrs(msg_opts.cc)}")
+        if not bcc_blast and msg_opts.bcc:
+            console.print(f"[bold]BCC:[/bold]      {_format_addrs(msg_opts.bcc)}")
         if attachment:
             names = [Path(a).name for a in attachment]
             console.print(f"[bold]Attach:[/bold]   {', '.join(names)}")
@@ -484,12 +498,7 @@ def send_merge(
             )
             return send_bcc_blast(
                 get_token, [test_email], blast_to, subject, body_template,
-                dry_run=False,
-                max_retries=max_retries, importance=importance,
-                cc=cc_list, bcc=bcc_list, html=html,
-                save_to_sent_items=save_to_sent_items,
-                attachments=attachment_list, reply_to=reply_to_list,
-                to_name=blast_to_name,
+                dry_run=False, opts=msg_opts,
             )
 
         sample = recipients[0]
@@ -500,11 +509,7 @@ def send_merge(
             test_email, sample.get(email_column, "?"),
         )
         result = send_one(
-            get_token, test_email, rendered_subject, rendered_body,
-            max_retries=max_retries, importance=importance,
-            cc=cc_list, bcc=bcc_list, html=html,
-            save_to_sent_items=save_to_sent_items,
-            attachments=attachment_list, reply_to=reply_to_list,
+            get_token, test_email, rendered_subject, rendered_body, opts=msg_opts,
         )
         return [result]
 
@@ -518,15 +523,7 @@ def send_merge(
             subject=subject,
             body=body_template,
             dry_run=not send,
-            max_retries=max_retries,
-            importance=importance,
-            cc=cc_list,
-            bcc=bcc_list,
-            html=html,
-            save_to_sent_items=save_to_sent_items,
-            attachments=attachment_list,
-            reply_to=reply_to_list,
-            to_name=blast_to_name,
+            opts=msg_opts,
         )
     else:
         results = send_all(
@@ -537,14 +534,7 @@ def send_merge(
             body_template=body_template,
             dry_run=not send,
             delay=delay,
-            max_retries=max_retries,
-            importance=importance,
-            cc=cc_list,
-            bcc=bcc_list,
-            html=html,
-            save_to_sent_items=save_to_sent_items,
-            attachments=attachment_list,
-            reply_to=reply_to_list,
+            opts=msg_opts,
         )
 
     # --- Merge with previous results when resuming ---
