@@ -537,7 +537,7 @@ results = send_merge(
     subject="Hello {{name}}",
     email_column="email",
     send=True,
-    filter=["company=Acme Corp"],
+    filters=["company=Acme Corp"],
     output="report.csv",
     batch_size=50,
 )
@@ -566,7 +566,7 @@ Key differences from the CLI:
 - **`cc`/`bcc`/`reply_to`** accept a Python list or a comma-separated string.
 - **`save_to_sent_items`** is `True` by default (the CLI uses the `--no-save-to-sent` flag to set it to `False`).
 - **`attachment`** takes a list of file paths (strings or `Path` objects).
-- **`filter`** takes a list of filter expressions (e.g., `["company=Acme"]`).
+- **`filters`** takes a list of filter expressions (e.g., `["company=Acme"]`).
 - **Safe defaults** — `send` is `False`, `confirm` and `resume` are `True` by default. Pass `send=True` to actually send.
 - **`test_email`** always sends (authenticates and delivers) regardless of `send`. Resume and batch size are ignored.
 - **`confirm`** is automatically disabled when `send=False` or `test_email` is set.
@@ -578,15 +578,44 @@ See `examples/send_merge.py` for a complete example.
 
 The following features are not yet implemented but are under consideration:
 
-- **Send-as / shared mailbox** — send from a different address or shared mailbox (requires `Mail.Send.Shared` permission and Exchange Online mailbox permissions)
-- **Scheduling** — queue emails to send at a specific time (e.g. 9am Monday) to avoid the "why are you emailing at 2am" problem
-- **Blocklist** (`--exclude emails.txt`) — skip addresses in a blocklist (people who've already replied, opted out, etc.)
-- **Group-by** — send one email per unique value in a column, with a `{{members}}` placeholder listing all rows in that group (e.g. one email per research group)
-- **Dynamic body** — per-recipient body template selection via `--body-column`, for when different people need entirely different content
-- **Signatures** — append a separate signature file to the body template
+### Input and templating
+
+- **CSV/TSV input** — accept `.csv` and `.tsv` recipient files in addition to `.xlsx`, since many users already have recipient lists in these formats
+- **Subject file** (`--subject-file`) — read the subject from a file instead of the command line, avoiding shell quoting issues with special characters and supporting long subjects
 - **Markdown support** — write the body in Markdown and have it auto-converted to HTML
+- **Signatures** — append a separate signature file to the body template
+- **Dynamic body** — per-recipient body template selection via `--body-column`, for when different people need entirely different content
+- **Per-recipient attachments** (`--attachment-column`) — a spreadsheet column containing file paths, so different recipients get different attachments (e.g. personalised invoices, certificates)
+
+### Sending and delivery
+
+- **Send-as / shared mailbox** — send from a different address or shared mailbox using `/users/{id}/sendMail` instead of `/me/sendMail` (requires `Mail.Send.Shared` permission and Exchange Online mailbox permissions)
+- **Scheduling** — queue emails to send at a specific time (e.g. 9am Monday) to avoid the "why are you emailing at 2am" problem
+- **Unsubscribe headers** (`--unsubscribe-url`) — add `List-Unsubscribe` and `List-Unsubscribe-Post` headers per RFC 8058, required by Gmail and Yahoo for bulk senders (>5000/day)
+- **Connection pooling** — use a `requests.Session` to reuse TCP connections across sends, improving throughput for large recipient lists
+- **Progress bar** — replace `[i/n]` log lines with a `rich` progress bar showing ETA and throughput (the `rich` dependency is already present)
+
+### Workflow and review
+
+- **Preview mode** (`--preview N`) — render and display the first N emails in the terminal for visual review before confirming the full send
+- **Dry-run output** (`--dry-run-output DIR`) — write each rendered email to a file in a directory during dry run, allowing offline review of exact content before committing to send
+- **Blocklist** (`--exclude emails.txt`) — skip addresses in a blocklist (people who've already replied, opted out, etc.)
+
+### BCC blast enhancements
+
+- **Resume for BCC blast** — track which batch indices succeeded and resume from the first failed batch on re-run; batches are deterministic given the same spreadsheet order and batch size, and the output CSV already contains batch labels like `"batch 2/5 (499 recipients)"` that could be parsed on re-run
+- **Inter-batch delay** — add a configurable delay between batches to avoid rate limits on large blasts; currently batches fire back-to-back with no pause, and the `--delay` parameter is accepted but has no effect in blast mode; could also reuse the adaptive throttling logic from individual sends
+- **Per-recipient result tracking** — store the individual email addresses covered by each batch in the CSV or `SendResult`, so that when batch 3/5 fails you know exactly which 499 people need to be retried without recalculating batch boundaries
+- **Partial placeholder support** — allow `{{placeholders}}` that resolve to the same value for all recipients after filtering (e.g. `{{company}}` when all recipients share the same company); the tool would check that every row produces the same rendered output and proceed if so
+- **Confirmation recipient sample** — show the first and last few email addresses in the confirmation prompt (e.g. "alice@..., bob@..., ... and 497 more") to help catch wrong-spreadsheet mistakes before sending
+- **Configurable BCC batch size** (`--bcc-batch-size N`) — override the default batch size of 499 for organisations with lower per-message limits, separate from the existing `--batch-size` flag which controls per-invocation recipient count
+- **Shuffle recipients across batches** (`--shuffle`) — randomise recipient order before batching to distribute domains across batches; without this, a spreadsheet sorted by domain puts all `@example.com` addresses in the same batch, which could trigger per-domain rate limits on the receiving side
+- **To-address validation** — preflight check via Graph API (e.g. `/me/mailboxSettings`) to warn if the `--bcc-blast-to` address doesn't belong to the authenticated sender, catching typos before emails are sent to an unmonitored address
+
+### Advanced
+
+- **Group-by** — send one email per unique value in a column, with a `{{members}}` placeholder listing all rows in that group (e.g. one email per research group)
 - **Follow-up emails** — re-send (with modified subject/body) to recipients who haven't replied after N days
-- **Preview mode** — render and display the first N emails in the terminal for visual review before confirming the full send
 - **Calendar-aware sending** — check recipients' free/busy status and send during their working hours
 - **Read receipts** — request read receipts and track them via the Graph API
 - **Teams fallback** — if an email bounces, optionally send a message via Teams chat instead
