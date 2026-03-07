@@ -321,9 +321,9 @@ def send_merge(
     else:
         logger.info("📋 Loaded %d recipients", len(recipients))
 
-    # --- Resume and batch size (skip for test emails and bcc blast) ---
+    # --- Resume and batch size (skip for test emails) ---
     previous_results: list[SendResult] = []
-    if not test_email and not bcc_blast:
+    if not test_email:
         if resume and output:
             output_path = Path(output)
             if output_path.exists():

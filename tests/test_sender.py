@@ -351,16 +351,15 @@ class TestTokenRefreshOn401:
 class TestSendBccBlast:
     @responses.activate
     def test_single_batch_success(self):
-        """A small list fits in one batch; returns one SendResult."""
+        """A small list fits in one batch; returns one SendResult per recipient."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
             lambda: "tok", emails, "noreply@x.com", "Hello", "Body"
         )
-        assert len(results) == 1
-        assert results[0].success
-        assert "batch 1/1" in results[0].email
-        assert "3 recipients" in results[0].email
+        assert len(results) == 3
+        assert all(r.success for r in results)
+        assert [r.email for r in results] == emails
 
     @responses.activate
     def test_multiple_batches(self):
@@ -378,16 +377,18 @@ class TestSendBccBlast:
         )
         assert len(results) == 3
         assert all(r.success for r in results)
+        assert [r.email for r in results] == emails
 
     def test_dry_run_no_http(self):
-        """In dry-run mode no HTTP calls are made; returns one result per batch."""
+        """In dry-run mode no HTTP calls are made; returns one result per recipient."""
         emails = ["a@x.com", "b@x.com"]
         results = send_bcc_blast(
             None, emails, "noreply@x.com", "Hi", "Body", dry_run=True
         )
-        assert len(results) == 1
-        assert results[0].success
-        assert results[0].status_code is None
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        assert all(r.status_code is None for r in results)
+        assert [r.email for r in results] == emails
 
     def test_no_get_token_in_live_mode_raises(self):
         """Passing get_token=None in live mode raises RuntimeError."""
@@ -396,12 +397,38 @@ class TestSendBccBlast:
             send_bcc_blast(None, ["a@x.com"], "to@x.com", "Hi", "Body", dry_run=False)
 
     @responses.activate
-    def test_batch_failure_recorded(self):
-        """A 4xx response is recorded as a failure in the corresponding result."""
+    def test_batch_failure_recorded_per_recipient(self):
+        """A 4xx response is recorded as a failure for every recipient in that batch."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=400, body="Bad Request")
+        emails = ["a@x.com", "b@x.com"]
         results = send_bcc_blast(
-            lambda: "tok", ["a@x.com"], "noreply@x.com", "Hi", "Body"
+            lambda: "tok", emails, "noreply@x.com", "Hi", "Body"
         )
-        assert len(results) == 1
-        assert not results[0].success
-        assert results[0].status_code == 400
+        assert len(results) == 2
+        assert all(not r.success for r in results)
+        assert all(r.status_code == 400 for r in results)
+        assert [r.email for r in results] == emails
+
+    @responses.activate
+    def test_partial_batch_failure(self):
+        """When one batch fails and another succeeds, results reflect per-recipient status."""
+        # Force 1 recipient per batch via 498 cc addresses
+        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(498)]
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")
+        responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")
+        responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")
+        responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        emails = ["a@x.com", "b@x.com", "c@x.com"]
+        results = send_bcc_blast(
+            lambda: "tok", emails, "noreply@x.com", "Hi", "Body",
+            cc=cc, max_retries=3,
+        )
+        assert len(results) == 3
+        assert results[0].success
+        assert results[0].email == "a@x.com"
+        assert not results[1].success
+        assert results[1].email == "b@x.com"
+        assert results[2].success
+        assert results[2].email == "c@x.com"

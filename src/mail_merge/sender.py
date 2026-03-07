@@ -148,18 +148,22 @@ def send_bcc_blast(
     """Send a single subject/body to all emails via BCC, in batches of up to 499.
 
     Recipients within each batch cannot see each other's addresses.
-    Returns one SendResult per batch (not per recipient).
+    Returns one SendResult per recipient email: when a batch succeeds or
+    fails, every recipient in that batch receives the same result.
     """
     reserved = 1 + len(cc or []) + len(bcc or [])
     max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
     batches = [emails[i:i + max_per_batch] for i in range(0, len(emails), max_per_batch)]
     total = len(batches)
-    results = []
+    results: list[SendResult] = []
     for i, batch in enumerate(batches):
         label = f"batch {i + 1}/{total} ({len(batch)} recipients)"
         if dry_run:
             logger.info("🔄 DRY RUN %s | Subject: %s", label, subject)
-            results.append(SendResult(email=label, success=True, status_code=None))
+            results.extend(
+                SendResult(email=addr, success=True, status_code=None)
+                for addr in batch
+            )
             continue
         if get_token is None:
             raise RuntimeError("get_token is required when not in dry-run mode")
@@ -176,13 +180,16 @@ def send_bcc_blast(
             attachments=attachments, reply_to=reply_to,
             to_name=to_name,
         )
-        results.append(SendResult(
-            email=label,
-            success=result.success,
-            status_code=result.status_code,
-            error=result.error,
-            throttled=result.throttled,
-        ))
+        results.extend(
+            SendResult(
+                email=addr,
+                success=result.success,
+                status_code=result.status_code,
+                error=result.error,
+                throttled=result.throttled,
+            )
+            for addr in batch
+        )
     return results
 
 

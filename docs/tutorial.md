@@ -333,11 +333,10 @@ When every recipient should receive the same email and must not be able to see o
 
 **Flags that are accepted but have no effect:**
 - `--delay` — BCC blast sends batches one after another with no configurable inter-batch delay (this is not a concern in practice: a 50,000-recipient list becomes ~100 API calls, well within rate limits)
-- `--no-resume` — resume is already bypassed in BCC blast mode regardless
 
 **Flags that work with modified semantics:**
 - `--bcc` — the specified addresses are added as static extra BCC recipients on every batch, in addition to the blast recipients. They are not shown in the confirmation prompt (only the blast recipient count is shown).
-- `--output` — a results CSV is written, but rows use batch labels (`"batch 1/5 (499 recipients)"`) not individual email addresses, so the CSV serves as a run log only. On re-run, the CSV is **not** read for resume (resume is bypassed).
+- `--output` — a results CSV is written with one row per recipient email address (not per batch). When combined with resume (the default), re-running the same command skips already-successful recipients — the same behaviour as individual sends.
 
 **Basic usage:**
 
@@ -447,30 +446,40 @@ The confirmation prompt shows the `To:` address, the total recipient count, and 
 
 #### Error recovery in BCC blast mode
 
-If a batch fails (network error, 5xx, or rate limit exhaustion), the tool logs the failure and moves on to the next batch. After the run, inspect the console output or exit code:
+If a batch fails (network error, 5xx, or rate limit exhaustion), the tool logs the failure and moves on to the next batch. Every recipient in that batch is marked as failed. After the run, inspect the console output or exit code:
 
 - **Exit code 0** — all batches succeeded
 - **Exit code 1** — one or more batches failed
 
-Results in BCC blast mode are labelled by batch (e.g. `"batch 2/5 (499 recipients)"`) rather than by individual email address. If you pass `--output`, the CSV is written with those batch labels — useful as a run log — but re-running the same command will **not** skip already-sent batches (resume is bypassed in blast mode). If a run fails partway through, re-run with a trimmed spreadsheet that excludes the addresses already covered by successful batches.
+Results in BCC blast mode are tracked per recipient email address (the same as individual sends). When a batch succeeds, every recipient in that batch is recorded as successful; when a batch fails, every recipient in that batch is recorded as failed with the same error.
 
-A practical approach for large lists:
+If you pass `--output`, the CSV contains one row per recipient. On re-run, resume automatically skips already-successful recipients and only re-sends the failed ones — just like individual sends:
 
 ```bash
-# Split recipients.xlsx into chunks of ~490 rows using your spreadsheet tool,
-# then send each chunk individually:
+# First run — might fail partway through
 uv run mail-merge \
-  --spreadsheet recipients-chunk-1.xlsx \
+  --spreadsheet recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
   --email-column email \
   --bcc-blast \
   --bcc-blast-to noreply@example.com \
-  --send \
-  --yes
+  --output report.csv \
+  --send
+
+# Just re-run — successes are skipped, failures are retried
+uv run mail-merge \
+  --spreadsheet recipients.xlsx \
+  --body announcement.txt \
+  --subject "Upcoming event on Friday" \
+  --email-column email \
+  --bcc-blast \
+  --bcc-blast-to noreply@example.com \
+  --output report.csv \
+  --send
 ```
 
-This keeps each invocation self-contained and makes it easy to identify exactly which addresses were covered if you need to retry.
+When all recipients have succeeded, the tool logs "All emails already sent" and exits 0.
 
 ### Specific sheet
 
@@ -499,8 +508,8 @@ By default, the first sheet is used.
 2. **Test email** — `--test-email you@example.com` sends the blast to only your address
 3. **Check your inbox** — verify subject, body, `To:` address, and any CC/attachments
 4. **Full send** — add `--send` (confirmation prompt shows recipient and batch count)
-5. **Review exit code** — exit 0 means all batches succeeded, 1 means at least one failed
-6. **Retry failures** — re-run with a trimmed spreadsheet covering only the failed range
+5. **Review report** — check console summary or `--output report.csv`
+6. **Resume if needed** — re-run the same command (resume is automatic with `--output`)
 
 ## 10. Python API
 
@@ -570,7 +579,7 @@ Key differences from the CLI:
 - **Safe defaults** — `send` is `False`, `confirm` and `resume` are `True` by default. Pass `send=True` to actually send.
 - **`test_email`** always sends (authenticates and delivers) regardless of `send`. Resume and batch size are ignored.
 - **`confirm`** is automatically disabled when `send=False` or `test_email` is set.
-- **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `batch_size` or templates containing `{{placeholders}}`. When `test_email` is set, the blast is sent to only that address instead of the full list. `delay` is accepted but silently ignored. `bcc` works as extra static BCC addresses added to every batch. `output` writes a results CSV with batch labels but does not enable resume.
+- **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `batch_size` or templates containing `{{placeholders}}`. When `test_email` is set, the blast is sent to only that address instead of the full list. `delay` is accepted but silently ignored. `bcc` works as extra static BCC addresses added to every batch. Results are tracked per recipient (not per batch), so `output` + `resume` work the same as individual sends.
 
 See `examples/send_merge.py` for a complete example.
 
@@ -603,9 +612,7 @@ The following features are not yet implemented but are under consideration:
 
 ### BCC blast enhancements
 
-- **Resume for BCC blast** — track which batch indices succeeded and resume from the first failed batch on re-run; batches are deterministic given the same spreadsheet order and batch size, and the output CSV already contains batch labels like `"batch 2/5 (499 recipients)"` that could be parsed on re-run
 - **Inter-batch delay** — add a configurable delay between batches to avoid rate limits on large blasts; currently batches fire back-to-back with no pause, and the `--delay` parameter is accepted but has no effect in blast mode; could also reuse the adaptive throttling logic from individual sends
-- **Per-recipient result tracking** — store the individual email addresses covered by each batch in the CSV or `SendResult`, so that when batch 3/5 fails you know exactly which 499 people need to be retried without recalculating batch boundaries
 - **Partial placeholder support** — allow `{{placeholders}}` that resolve to the same value for all recipients after filtering (e.g. `{{company}}` when all recipients share the same company); the tool would check that every row produces the same rendered output and proceed if so
 - **Confirmation recipient sample** — show the first and last few email addresses in the confirmation prompt (e.g. "alice@..., bob@..., ... and 497 more") to help catch wrong-spreadsheet mistakes before sending
 - **Configurable BCC batch size** (`--bcc-batch-size N`) — override the default batch size of 499 for organisations with lower per-message limits, separate from the existing `--batch-size` flag which controls per-invocation recipient count

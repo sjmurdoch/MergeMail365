@@ -109,13 +109,23 @@ results = send_merge(
     confirm=True,                              # prompts before sending (the default)
 )
 
-# 5d. Recover from errors — check batch results and re-send failures
+# 5d. Recover from errors — use output + resume (same as individual sends)
+results = send_merge(
+    spreadsheet="recipients.xlsx",
+    body="announcement.txt",
+    subject="Important announcement",
+    email_column="email",
+    client_id="YOUR_CLIENT_ID",
+    bcc_blast=True,
+    bcc_blast_to="noreply@example.com",
+    send=True,
+    output="blast_report.csv",              # tracks per-recipient results
+)
+# If a batch fails, all recipients in that batch are marked as failed.
+# Just re-run the same call — resume skips already-successful recipients.
 for r in results:
     if not r.success:
-        print(f"Batch failed: {r.email} — {r.status_code}: {r.error}")
-        # Fix the issue (e.g. auth, rate limit) and re-run the same call.
-        # BCC blast does not support --output/resume, so you may need to
-        # manually remove already-notified recipients from the spreadsheet.
+        print(f"Failed: {r.email} — {r.status_code}: {r.error}")
 
 # --- 6. Inspect results ---
 

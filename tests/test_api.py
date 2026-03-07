@@ -757,9 +757,10 @@ class TestBccBlast:
             bcc_blast_to="noreply@x.com",
             test_email="tester@x.com",
         )
-        # One batch result, one HTTP call
+        # One per-recipient result for the test address, one HTTP call
         assert len(results) == 1
         assert results[0].success
+        assert results[0].email == "tester@x.com"
         assert len(responses.calls) == 1
         payload = json.loads(responses.calls[0].request.body)
         bcc_addrs = [b["emailAddress"]["address"] for b in payload["message"]["bccRecipients"]]
@@ -819,7 +820,7 @@ class TestBccBlast:
 
     @responses.activate
     def test_dry_run_blast(self, sample_xlsx, tmp_path):
-        """Dry-run BCC blast returns batch results without HTTP calls."""
+        """Dry-run BCC blast returns per-recipient results without HTTP calls."""
         body = tmp_path / "body.txt"
         body.write_text("Hello everyone.", encoding="utf-8")
         results = send_merge(
@@ -831,10 +832,12 @@ class TestBccBlast:
             bcc_blast_to="noreply@x.com",
             send=False,
         )
-        # Should have one batch result (2 recipients fit in one batch)
-        assert len(results) == 1
-        assert results[0].success
-        assert "batch 1/1" in results[0].email
+        # Should have one result per recipient (2 recipients fit in one batch)
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        emails = {r.email for r in results}
+        assert "alice@example.com" in emails
+        assert "bob@example.com" in emails
         # No real HTTP calls in dry run
         assert len(responses.calls) == 0
 
@@ -864,8 +867,9 @@ class TestBccBlast:
             send=True,
             confirm=False,
         )
-        assert len(results) == 1
-        assert results[0].success
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        assert {r.email for r in results} == {"alice@example.com", "bob@example.com"}
         assert len(responses.calls) == 1
         payload = json.loads(responses.calls[0].request.body)
         # Recipients should appear as BCC, not To
@@ -928,6 +932,143 @@ class TestBccBlast:
         to_field = payload["message"]["toRecipients"][0]["emailAddress"]
         assert to_field["address"] == "noreply@x.com"
         assert "name" not in to_field
+
+
+class TestBccBlastResume:
+    """BCC blast supports resume via --output, skipping already-successful recipients."""
+
+    def test_resume_skips_successful_recipients(self, sample_xlsx, tmp_path):
+        """Resume skips recipients that previously succeeded in a BCC blast."""
+        from mail_merge.report import write_csv
+        from mail_merge.sender import SendResult
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        output = tmp_path / "report.csv"
+
+        # Alice succeeded previously
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            output=output,
+            resume=True,
+        )
+        # Should have Alice (previous) + Bob (this run)
+        emails = {r.email for r in results}
+        assert "alice@example.com" in emails
+        assert "bob@example.com" in emails
+        bob = next(r for r in results if r.email == "bob@example.com")
+        assert bob.success
+
+    def test_resume_retries_failed_recipients(self, sample_xlsx, tmp_path):
+        """Resume retries recipients that previously failed in a BCC blast."""
+        from mail_merge.report import write_csv
+        from mail_merge.sender import SendResult
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        output = tmp_path / "report.csv"
+
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="bob@example.com", success=False, status_code=500, error="Server error"),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            output=output,
+            resume=True,
+        )
+        bob = next(r for r in results if r.email == "bob@example.com")
+        assert bob.success  # dry run always succeeds
+
+    def test_resume_all_sent_returns_previous(self, sample_xlsx, tmp_path):
+        """When all recipients already succeeded, return previous results."""
+        from mail_merge.report import write_csv
+        from mail_merge.sender import SendResult
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        output = tmp_path / "report.csv"
+
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="bob@example.com", success=True, status_code=202),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            output=output,
+            resume=True,
+        )
+        assert len(results) == 2
+        assert all(r.success for r in results)
+
+    @responses.activate
+    def test_resume_csv_round_trip(self, sample_xlsx, tmp_path, monkeypatch):
+        """Full round trip: first send writes CSV, re-run skips successes."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        body = tmp_path / "body.txt"
+        body.write_text("Hello everyone.", encoding="utf-8")
+        output = tmp_path / "report.csv"
+
+        # First run: sends to both recipients
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            client_id="fake-client",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            send=True,
+            confirm=False,
+            output=output,
+        )
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        assert output.exists()
+
+        # Second run: resume skips all (already succeeded)
+        results2 = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body,
+            subject="Announcement",
+            email_column="email",
+            client_id="fake-client",
+            bcc_blast=True,
+            bcc_blast_to="noreply@x.com",
+            send=True,
+            confirm=False,
+            output=output,
+        )
+        assert len(results2) == 2
+        assert all(r.success for r in results2)
+        # No additional HTTP calls — everything was already sent
+        assert len(responses.calls) == 1  # only the first run's single batch
 
 
 class TestAddressDisplayNames:
