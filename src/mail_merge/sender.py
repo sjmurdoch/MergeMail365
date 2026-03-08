@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -81,6 +82,9 @@ def send_one(
     was_throttled = False
     while True:
         try:
+            logger.debug("POST to %s with headers %s and payload: %s",
+                         GRAPH_SEND_URL, 
+                         json.dumps(headers, indent=2), json.dumps(payload, indent=2))
             resp = requests.post(GRAPH_SEND_URL, json=payload, headers=headers, timeout=30)
         except requests.RequestException as exc:
             retries += 1
