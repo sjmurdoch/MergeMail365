@@ -26,6 +26,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Azure AD tenant ID (or set MAIL_MERGE_TENANT_ID env var, or config file; default: 'common')",
     )
     parser.add_argument("--sheet", default=None, help="Sheet name (default: first sheet)")
+    parser.add_argument("--name-column", default=None, help="Column name containing recipient display names (included in the To: header)")
     parser.add_argument("--test-email", default=None, help="Send a single test email to this address using the first recipient's data, then exit")
     parser.add_argument("--send", action="store_true", help="Actually send emails (default is dry-run)")
     parser.add_argument("--output", default=None, help="Path to write CSV report")
@@ -89,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             batch_size=args.batch_size,
             bcc_blast=args.bcc_blast,
             bcc_blast_to=args.bcc_blast_to,
+            name_column=args.name_column,
         )
     except KeyboardInterrupt:
         logger.info("Aborted")

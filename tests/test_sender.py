@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import responses
 
 from mail_merge.sender import (
+    EmailAddress,
     GRAPH_SEND_URL,
     MAX_RECIPIENTS_PER_MESSAGE,
     MessageOptions,
@@ -18,14 +19,14 @@ class TestSendOne:
     @responses.activate
     def test_success(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
         assert result.success
         assert result.status_code == 202
 
     @responses.activate
     def test_client_error_no_retry(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=400, body="Bad Request")
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
         assert not result.success
         assert result.status_code == 400
         assert len(responses.calls) == 1  # no retry
@@ -35,7 +36,7 @@ class TestSendOne:
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(max_retries=3))
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body", opts=MessageOptions(max_retries=3))
         assert result.success
         assert len(responses.calls) == 3
 
@@ -43,7 +44,7 @@ class TestSendOne:
     def test_server_error_exhausts_retries(self):
         for _ in range(4):
             responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Server Error")
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(max_retries=3))
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body", opts=MessageOptions(max_retries=3))
         assert not result.success
         assert result.status_code == 500
 
@@ -54,14 +55,14 @@ class TestSendOne:
             headers={"Retry-After": "0"},
         )
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
         assert result.success
         assert len(responses.calls) == 2
 
     @responses.activate
     def test_throttled_false_on_clean_send(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
         assert result.success
         assert result.throttled is False
 
@@ -72,7 +73,7 @@ class TestSendOne:
             headers={"Retry-After": "0"},
         )
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
         assert result.success
         assert result.throttled is True
 
@@ -81,7 +82,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_html_sets_content_type(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "<b>Body</b>", opts=MessageOptions(html=True))
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "<b>Body</b>", opts=MessageOptions(html=True))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -90,7 +91,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_plain_text_default(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+        send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert payload["message"]["body"]["contentType"] == "Text"
@@ -98,7 +99,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_save_to_sent_items_false(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(save_to_sent_items=False))
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body", opts=MessageOptions(save_to_sent_items=False))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -107,7 +108,7 @@ class TestSendOneNewFeatures:
     @responses.activate
     def test_save_to_sent_items_true_omitted(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(save_to_sent_items=True))
+        send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body", opts=MessageOptions(save_to_sent_items=True))
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert "saveToSentItems" not in payload
@@ -121,7 +122,7 @@ class TestSendOneNewFeatures:
             "contentType": "text/plain",
             "contentBytes": "SGVsbG8=",
         }]
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(attachments=attachments))
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body", opts=MessageOptions(attachments=attachments))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -131,8 +132,8 @@ class TestSendOneNewFeatures:
     def test_reply_to_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one(
-            lambda: "fake-token", "test@example.com", "Subject", "Body",
-            opts=MessageOptions(reply_to=[{"emailAddress": {"address": "reply@example.com"}}]),
+            lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body",
+            opts=MessageOptions(reply_to=[EmailAddress(address="reply@example.com")]),
         )
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
@@ -145,7 +146,7 @@ class TestSendOneOptionalFields:
     @responses.activate
     def test_importance_included_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body", opts=MessageOptions(importance="high"))
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body", opts=MessageOptions(importance="high"))
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
@@ -155,10 +156,10 @@ class TestSendOneOptionalFields:
     def test_cc_and_bcc_included_in_payload(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         result = send_one(
-            lambda: "fake-token", "test@example.com", "Subject", "Body",
+            lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body",
             opts=MessageOptions(
-                cc=[{"emailAddress": {"address": "a@x.com"}}, {"emailAddress": {"address": "b@x.com"}}],
-                bcc=[{"emailAddress": {"address": "c@x.com"}}],
+                cc=[EmailAddress(address="a@x.com"), EmailAddress(address="b@x.com")],
+                bcc=[EmailAddress(address="c@x.com")],
             ),
         )
         assert result.success
@@ -172,13 +173,34 @@ class TestSendOneOptionalFields:
     @responses.activate
     def test_optional_fields_absent_by_default(self):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
-        result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
         assert result.success
         assert isinstance(responses.calls[0].request.body, (str, bytes))
         payload = json.loads(responses.calls[0].request.body)
         assert "importance" not in payload["message"]
         assert "ccRecipients" not in payload["message"]
         assert "bccRecipients" not in payload["message"]
+
+    @responses.activate
+    def test_to_name_included_in_payload(self):
+        """When to_name is passed, the To: recipient includes a display name."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com", name="Alice"), "Subject", "Body")
+        assert result.success
+        payload = json.loads(responses.calls[0].request.body)
+        to_addr = payload["message"]["toRecipients"][0]["emailAddress"]
+        assert to_addr["address"] == "test@example.com"
+        assert to_addr["name"] == "Alice"
+
+    @responses.activate
+    def test_to_name_none_omits_name(self):
+        """When to_name is None, the To: recipient has no name field."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
+        payload = json.loads(responses.calls[0].request.body)
+        to_addr = payload["message"]["toRecipients"][0]["emailAddress"]
+        assert to_addr["address"] == "test@example.com"
+        assert "name" not in to_addr
 
 
 class TestSendAll:
@@ -254,6 +276,60 @@ class TestSendAll:
         assert sleep_values[-1] == 2.0
 
 
+class TestSendAllNameColumn:
+    @responses.activate
+    def test_name_column_includes_name_in_to_header(self):
+        """When name_column is set, the To: header includes the display name."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        recipients = [{"name": "Alice", "email": "alice@example.com"}]
+        send_all(
+            get_token=lambda: "fake",
+            recipients=recipients,
+            email_column="email",
+            subject_template="Hi",
+            body_template="Hello",
+            name_column="name",
+        )
+        payload = json.loads(responses.calls[0].request.body)
+        to_addr = payload["message"]["toRecipients"][0]["emailAddress"]
+        assert to_addr["address"] == "alice@example.com"
+        assert to_addr["name"] == "Alice"
+
+    @responses.activate
+    def test_no_name_column_omits_name(self):
+        """Without name_column, the To: header has no display name."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        recipients = [{"name": "Alice", "email": "alice@example.com"}]
+        send_all(
+            get_token=lambda: "fake",
+            recipients=recipients,
+            email_column="email",
+            subject_template="Hi",
+            body_template="Hello",
+        )
+        payload = json.loads(responses.calls[0].request.body)
+        to_addr = payload["message"]["toRecipients"][0]["emailAddress"]
+        assert to_addr["address"] == "alice@example.com"
+        assert "name" not in to_addr
+
+    @responses.activate
+    def test_empty_name_omits_name(self):
+        """When name_column value is empty, the name is omitted."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        recipients = [{"name": "", "email": "alice@example.com"}]
+        send_all(
+            get_token=lambda: "fake",
+            recipients=recipients,
+            email_column="email",
+            subject_template="Hi",
+            body_template="Hello",
+            name_column="name",
+        )
+        payload = json.loads(responses.calls[0].request.body)
+        to_addr = payload["message"]["toRecipients"][0]["emailAddress"]
+        assert "name" not in to_addr
+
+
 class TestNetworkErrors:
     def test_request_exception_exhausts_retries(self):
         """RequestException triggers exponential backoff; exhausting max_retries returns failure."""
@@ -262,7 +338,7 @@ class TestNetworkErrors:
         with patch("mail_merge.sender.time.sleep"), \
              patch("requests.post", side_effect=req_module.exceptions.ConnectionError("refused")):
             result = send_one(
-                lambda: "fake-token", "test@example.com", "Subject", "Body",
+                lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body",
                 opts=MessageOptions(max_retries=2),
             )
 
@@ -288,7 +364,7 @@ class TestNetworkErrors:
         with patch("mail_merge.sender.time.sleep"), \
              patch("requests.post", side_effect=flaky_post):
             result = send_one(
-                lambda: "fake-token", "test@example.com", "Subject", "Body",
+                lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body",
                 opts=MessageOptions(max_retries=2),
             )
 
@@ -308,7 +384,7 @@ class TestRateLimitEdgeCases:
 
         sleep_values = []
         with patch("mail_merge.sender.time.sleep", side_effect=lambda s: sleep_values.append(s)):
-            result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+            result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
 
         assert result.success
         assert 10 in sleep_values
@@ -323,7 +399,7 @@ class TestRateLimitEdgeCases:
             )
 
         with patch("mail_merge.sender.time.sleep"):
-            result = send_one(lambda: "fake-token", "test@example.com", "Subject", "Body")
+            result = send_one(lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body")
 
         assert not result.success
         assert result.status_code == 429
@@ -338,7 +414,7 @@ class TestTokenRefreshOn401:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
 
         tokens = iter(["old-token", "new-token"])
-        result = send_one(lambda: next(tokens), "test@example.com", "Subject", "Body")
+        result = send_one(lambda: next(tokens), EmailAddress(address="test@example.com"), "Subject", "Body")
         assert result.success
         assert len(responses.calls) == 2
         # First request used old token, second used new token
@@ -352,7 +428,7 @@ class TestTokenRefreshOn401:
         responses.add(responses.POST, GRAPH_SEND_URL, status=401, body="Unauthorized")
 
         tokens = iter(["old-token", "new-token"])
-        result = send_one(lambda: next(tokens), "test@example.com", "Subject", "Body")
+        result = send_one(lambda: next(tokens), EmailAddress(address="test@example.com"), "Subject", "Body")
         assert not result.success
         assert result.status_code == 401
         assert len(responses.calls) == 2
@@ -365,7 +441,7 @@ class TestSendBccBlast:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
-            lambda: "tok", emails, "noreply@x.com", "Hello", "Body"
+            lambda: "tok", emails, EmailAddress(address="noreply@x.com"), "Hello", "Body"
         )
         assert len(results) == 3
         assert all(r.success for r in results)
@@ -378,10 +454,10 @@ class TestSendBccBlast:
             responses.add(responses.POST, GRAPH_SEND_URL, status=202)
 
         # Force 1 recipient per batch: reserved = 1 (to) + N (cc) must leave max_per_batch = 1
-        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
+        cc = [EmailAddress(address=f"cc{i}@x.com") for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
-            lambda: "tok", emails, "noreply@x.com", "Hi", "Body",
+            lambda: "tok", emails, EmailAddress(address="noreply@x.com"), "Hi", "Body",
             opts=MessageOptions(cc=cc),
         )
         assert len(results) == 3
@@ -392,7 +468,7 @@ class TestSendBccBlast:
         """In dry-run mode no HTTP calls are made; returns one result per recipient."""
         emails = ["a@x.com", "b@x.com"]
         results = send_bcc_blast(
-            None, emails, "noreply@x.com", "Hi", "Body", dry_run=True
+            None, emails, EmailAddress(address="noreply@x.com"), "Hi", "Body", dry_run=True
         )
         assert len(results) == 2
         assert all(r.success for r in results)
@@ -403,7 +479,7 @@ class TestSendBccBlast:
         """Passing get_token=None in live mode raises RuntimeError."""
         import pytest
         with pytest.raises(RuntimeError, match="get_token is required"):
-            send_bcc_blast(None, ["a@x.com"], "to@x.com", "Hi", "Body", dry_run=False)
+            send_bcc_blast(None, ["a@x.com"], EmailAddress(address="to@x.com"), "Hi", "Body", dry_run=False)
 
     @responses.activate
     def test_batch_failure_recorded_per_recipient(self):
@@ -411,7 +487,7 @@ class TestSendBccBlast:
         responses.add(responses.POST, GRAPH_SEND_URL, status=400, body="Bad Request")
         emails = ["a@x.com", "b@x.com"]
         results = send_bcc_blast(
-            lambda: "tok", emails, "noreply@x.com", "Hi", "Body"
+            lambda: "tok", emails, EmailAddress(address="noreply@x.com"), "Hi", "Body"
         )
         assert len(results) == 2
         assert all(not r.success for r in results)
@@ -422,7 +498,7 @@ class TestSendBccBlast:
     def test_partial_batch_failure(self):
         """When one batch fails and another succeeds, results reflect per-recipient status."""
         # Force 1 recipient per batch: reserved = 1 (to) + N (cc) must leave max_per_batch = 1
-        cc = [{"emailAddress": {"address": f"cc{i}@x.com"}} for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
+        cc = [EmailAddress(address=f"cc{i}@x.com") for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")
         responses.add(responses.POST, GRAPH_SEND_URL, status=500, body="Error")
@@ -431,7 +507,7 @@ class TestSendBccBlast:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         emails = ["a@x.com", "b@x.com", "c@x.com"]
         results = send_bcc_blast(
-            lambda: "tok", emails, "noreply@x.com", "Hi", "Body",
+            lambda: "tok", emails, EmailAddress(address="noreply@x.com"), "Hi", "Body",
             opts=MessageOptions(cc=cc, max_retries=3),
         )
         assert len(results) == 3

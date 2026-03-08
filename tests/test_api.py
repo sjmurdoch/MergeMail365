@@ -1161,3 +1161,62 @@ class TestAddressDisplayNames:
         assert "name" not in cc_fields[0]
         assert cc_fields[1]["address"] == "named@example.com"
         assert cc_fields[1]["name"] == "Named Person"
+
+
+class TestNameColumn:
+    """--name-column includes recipient display names in the To: header."""
+
+    @responses.activate
+    def test_name_column_sets_to_name(self, sample_xlsx, body_template_file, monkeypatch):
+        """With name_column, each recipient's To: header includes their name."""
+        import mail_merge.auth as auth_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
+
+        send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hi {{name}}",
+            email_column="email",
+            client_id="fake-client",
+            send=True,
+            confirm=False,
+            name_column="name",
+        )
+        # First recipient: Alice
+        payload1 = json.loads(responses.calls[0].request.body)
+        to1 = payload1["message"]["toRecipients"][0]["emailAddress"]
+        assert to1["address"] == "alice@example.com"
+        assert to1["name"] == "Alice"
+        # Second recipient: Bob
+        payload2 = json.loads(responses.calls[1].request.body)
+        to2 = payload2["message"]["toRecipients"][0]["emailAddress"]
+        assert to2["address"] == "bob@example.com"
+        assert to2["name"] == "Bob"
+
+    def test_no_name_column_omits_name(self, sample_xlsx, body_template_file):
+        """Without name_column, no display name in To: header (dry run)."""
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hi {{name}}",
+            email_column="email",
+        )
+        assert len(results) == 2
+        assert all(r.success for r in results)
+
+    def test_invalid_name_column_raises(self, sample_xlsx, body_template_file):
+        """An invalid name_column raises ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="not found"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hi {{name}}",
+                email_column="email",
+                name_column="nonexistent",
+            )

@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import requests
 
@@ -13,17 +13,33 @@ MAX_RECIPIENTS_PER_MESSAGE = 500
 
 
 @dataclass
+class EmailAddress:
+    """An email address with an optional display name."""
+    address: str
+    name: str | None = None
+
+    def __str__(self) -> str:
+        return f"{self.name} <{self.address}>" if self.name else self.address
+
+    def to_graph(self) -> dict[str, object]:
+        """Convert to Microsoft Graph API emailAddress format."""
+        entry: dict[str, str] = {"address": self.address}
+        if self.name:
+            entry["name"] = self.name
+        return {"emailAddress": entry}
+
+
+@dataclass
 class MessageOptions:
     """Shared message-formatting options passed through sender functions."""
     max_retries: int = 3
     importance: str | None = None
-    cc: list[dict[str, object]] | None = None
-    bcc: list[dict[str, object]] | None = None
+    cc: list[EmailAddress] | None = None
+    bcc: list[EmailAddress] | None = None
     html: bool = False
     save_to_sent_items: bool = True
     attachments: list[dict[str, str]] | None = None
-    reply_to: list[dict[str, object]] | None = None
-    to_name: str | None = None
+    reply_to: list[EmailAddress] | None = None
 
 
 @dataclass
@@ -37,7 +53,7 @@ class SendResult:
 
 def send_one(
     get_token: Callable[[], str],
-    to_email: str,
+    to: EmailAddress,
     subject: str,
     body: str,
     opts: MessageOptions | None = None,
@@ -60,18 +76,18 @@ def send_one(
     message: dict[str, object] = {
         "subject": subject,
         "body": {"contentType": content_type, "content": body},
-        "toRecipients": [{"emailAddress": {k: v for k, v in (("address", to_email), ("name", opts.to_name)) if v}}],
+        "toRecipients": [to.to_graph()],
     }
     if opts.importance:
         message["importance"] = opts.importance
     if opts.cc:
-        message["ccRecipients"] = opts.cc
+        message["ccRecipients"] = [a.to_graph() for a in opts.cc]
     if opts.bcc:
-        message["bccRecipients"] = opts.bcc
+        message["bccRecipients"] = [a.to_graph() for a in opts.bcc]
     if opts.attachments:
         message["attachments"] = opts.attachments
     if opts.reply_to:
-        message["replyTo"] = opts.reply_to
+        message["replyTo"] = [a.to_graph() for a in opts.reply_to]
     payload: dict[str, object] = {"message": message}
     if not opts.save_to_sent_items:
         payload["saveToSentItems"] = False
@@ -89,14 +105,14 @@ def send_one(
         except requests.RequestException as exc:
             retries += 1
             if retries > opts.max_retries:
-                return SendResult(email=to_email, success=False, error=str(exc))
+                return SendResult(email=to.address, success=False, error=str(exc))
             wait = min(2**retries, 60)
-            logger.warning("⚠️ Network error sending to %s, retry %d in %ds: %s", to_email, retries, wait, exc)
+            logger.warning("⚠️ Network error sending to %s, retry %d in %ds: %s", to.address, retries, wait, exc)
             time.sleep(wait)
             continue
 
         if resp.status_code == 202:
-            return SendResult(email=to_email, success=True, status_code=202, throttled=was_throttled)
+            return SendResult(email=to.address, success=True, status_code=202, throttled=was_throttled)
 
         if resp.status_code == 401 and not token_refreshed:
             logger.warning("Token expired, refreshing...")
@@ -110,14 +126,14 @@ def send_one(
             rate_limit_retries += 1
             if rate_limit_retries > max_rate_limit_retries:
                 return SendResult(
-                    email=to_email, success=False, status_code=429,
+                    email=to.address, success=False, status_code=429,
                     error=f"Rate limited {max_rate_limit_retries} times, giving up",
                 )
             try:
                 retry_after = min(int(resp.headers.get("Retry-After", 10)), 120)
             except ValueError:
                 retry_after = 10
-            logger.warning("⚠️ Rate limited, waiting %ds before retrying %s", retry_after, to_email)
+            logger.warning("⚠️ Rate limited, waiting %ds before retrying %s", retry_after, to.address)
             time.sleep(retry_after)
             continue
 
@@ -125,17 +141,17 @@ def send_one(
             retries += 1
             if retries > opts.max_retries:
                 return SendResult(
-                    email=to_email, success=False, status_code=resp.status_code,
+                    email=to.address, success=False, status_code=resp.status_code,
                     error=resp.text[:500],
                 )
             wait = min(2**retries, 60)
-            logger.warning("⚠️ Server error %d for %s, retry %d in %ds", resp.status_code, to_email, retries, wait)
+            logger.warning("⚠️ Server error %d for %s, retry %d in %ds", resp.status_code, to.address, retries, wait)
             time.sleep(wait)
             continue
 
         # 4xx (non-429) — no retry
         return SendResult(
-            email=to_email, success=False, status_code=resp.status_code,
+            email=to.address, success=False, status_code=resp.status_code,
             error=resp.text[:500],
         )
 
@@ -143,7 +159,7 @@ def send_one(
 def send_bcc_blast(
     get_token: Callable[[], str] | None,
     emails: list[str],
-    to_email: str,
+    to: EmailAddress,
     subject: str,
     body: str,
     dry_run: bool = False,
@@ -175,18 +191,10 @@ def send_bcc_blast(
         if get_token is None:
             raise RuntimeError("get_token is required when not in dry-run mode")
         logger.info("📧 Sending %s", label)
-        bcc_recipients: list[dict[str, object]] = [
-            {"emailAddress": {"address": a}} for a in batch
-        ]
+        bcc_recipients = [EmailAddress(address=a) for a in batch]
         bcc_all = bcc_extra + bcc_recipients
-        batch_opts = MessageOptions(
-            max_retries=opts.max_retries, importance=opts.importance,
-            cc=opts.cc, bcc=bcc_all, html=opts.html,
-            save_to_sent_items=opts.save_to_sent_items,
-            attachments=opts.attachments, reply_to=opts.reply_to,
-            to_name=opts.to_name,
-        )
-        result = send_one(get_token, to_email, subject, body, opts=batch_opts)
+        batch_opts = replace(opts, bcc=bcc_all)
+        result = send_one(get_token, to, subject, body, opts=batch_opts)
         results.extend(
             SendResult(
                 email=addr,
@@ -206,6 +214,7 @@ def send_all(
     email_column: str,
     subject_template: str,
     body_template: str,
+    name_column: str | None = None,
     dry_run: bool = False,
     delay: float = 0.0,
     opts: MessageOptions | None = None,
@@ -213,6 +222,8 @@ def send_all(
     """Send personalised emails to all recipients.
 
     In dry-run mode, renders and logs each email without sending.
+    If ``name_column`` is set, the recipient's display name is included
+    in the ``To:`` header (e.g. ``"Alice <alice@example.com>"``).
     """
     from mail_merge.template import render
 
@@ -222,27 +233,28 @@ def send_all(
     current_delay = delay
     max_delay = 30.0
     for i, recipient in enumerate(recipients):
-        to_email = recipient[email_column]
+        to_name = recipient.get(name_column, "").strip() or None if name_column else None
+        to = EmailAddress(address=recipient[email_column], name=to_name)
         rendered_subject = render(subject_template, recipient)
         rendered_body = render(body_template, recipient)
 
         if dry_run:
             logger.info(
                 "🔄 DRY RUN [%d/%d] To: %s | Subject: %s",
-                i + 1, len(recipients), to_email, rendered_subject,
+                i + 1, len(recipients), to.address, rendered_subject,
             )
             logger.debug("Body:\n%s", rendered_body)
-            results.append(SendResult(email=to_email, success=True, status_code=None))
+            results.append(SendResult(email=to.address, success=True, status_code=None))
         else:
             if get_token is None:
                 raise RuntimeError("get_token is required when not in dry-run mode")
-            logger.info("📧 Sending [%d/%d] to %s", i + 1, len(recipients), to_email)
+            logger.info("📧 Sending [%d/%d] to %s", i + 1, len(recipients), to.address)
             result = send_one(
-                get_token, to_email, rendered_subject, rendered_body, opts=opts,
+                get_token, to, rendered_subject, rendered_body, opts=opts,
             )
             results.append(result)
             if not result.success:
-                logger.error("❌ Failed to send to %s: %s", to_email, result.error)
+                logger.error("❌ Failed to send to %s: %s", to.address, result.error)
 
             # Adaptive delay: back off on throttling, recover when clear
             if result.throttled:

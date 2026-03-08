@@ -15,6 +15,7 @@ from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
 from mail_merge.template import extract_placeholders, render, validate_template
 from mail_merge.sender import (
+    EmailAddress,
     MAX_RECIPIENTS_PER_MESSAGE,
     MessageOptions,
     SendResult,
@@ -27,28 +28,21 @@ from mail_merge.report import print_summary, read_csv, write_csv
 logger = logging.getLogger(__name__)
 
 
-def _format_addrs(entries: list[dict[str, object]]) -> str:
-    """Format a list of Graph API emailAddress dicts for human-readable display."""
-    parts = []
-    for e in entries:
-        ea = e.get("emailAddress", {})
-        if isinstance(ea, dict):
-            name = ea.get("name")
-            addr = ea.get("address", "")
-            parts.append(f"{name} <{addr}>" if name else str(addr))
-    return ", ".join(parts)
+def _format_addrs(entries: list[EmailAddress]) -> str:
+    """Format a list of EmailAddress objects for human-readable display."""
+    return ", ".join(str(e) for e in entries)
 
 
-def _parse_one_addr(raw: str) -> tuple[str | None, str]:
-    """Extract (display_name | None, address) from 'Name <email>' or plain email."""
+def _parse_one_addr(raw: str) -> EmailAddress:
+    """Parse 'Display Name <email>' or plain email into an EmailAddress."""
     name, addr = parseaddr(raw.strip())
-    return (name or None), (addr or raw.strip())
+    return EmailAddress(address=addr or raw.strip(), name=name or None)
 
 
 def _parse_address_entries(
     value: str | list[str] | None,
-) -> list[dict[str, object]] | None:
-    """Parse addresses (supporting 'Display Name <email>' format) into Graph API dicts.
+) -> list[EmailAddress] | None:
+    """Parse addresses (supporting 'Display Name <email>' format) into EmailAddress objects.
 
     Accepts a comma-separated string or list. Returns ``None`` when empty.
     """
@@ -58,14 +52,23 @@ def _parse_address_entries(
     items = [s for a in parts if (s := a.strip())]
     if not items:
         return None
-    result: list[dict[str, object]] = []
-    for raw in items:
-        name, addr = _parse_one_addr(raw)
-        entry: dict[str, str] = {"address": addr}
-        if name:
-            entry["name"] = name
-        result.append({"emailAddress": entry})
-    return result
+    return [_parse_one_addr(raw) for raw in items]
+
+
+def _normalize_column(
+    column: str, recipients: list[dict[str, str]], label: str,
+) -> str:
+    """Resolve a column name case-insensitively against recipient headers.
+
+    Raises ``ValueError`` if the column is not found.
+    """
+    match = next((k for k in recipients[0] if k.lower() == column.lower()), None)
+    if match is None:
+        raise ValueError(
+            f"{label} {column!r} not found "
+            f"(available: {', '.join(recipients[0].keys())})"
+        )
+    return match
 
 
 def _process_attachments(
@@ -207,6 +210,7 @@ def send_merge(
     batch_size: int | None = None,
     bcc_blast: bool = False,
     bcc_blast_to: str | None = None,
+    name_column: str | None = None,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -255,7 +259,11 @@ def send_merge(
             ``{{placeholders}}``. When combined with ``test_email``, sends
             the blast to only that address instead of the full recipient list.
         bcc_blast_to: The ``To:`` address used in BCC blast mode. Required
-            when ``bcc_blast=True``.
+            when ``bcc_blast=True``. Supports ``"Display Name <email>"`` format.
+        name_column: Column name containing recipient display names. When set,
+            each email's ``To:`` header includes the name (e.g.
+            ``"Alice <alice@example.com>"``). In BCC blast mode this is
+            ignored (use ``bcc_blast_to`` with display name format instead).
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -281,8 +289,7 @@ def send_merge(
         )
 
     # --- BCC blast conflict checks and To address parsing ---
-    blast_to: str = ""
-    blast_to_name: str | None = None
+    blast_to: EmailAddress | None = None
     if bcc_blast:
         if batch_size is not None:
             raise ValueError(
@@ -292,7 +299,7 @@ def send_merge(
         if not bcc_blast_to:
             raise ValueError("bcc_blast_to is required when bcc_blast=True")
         # Support "Display Name <email>" format (RFC 2822)
-        blast_to_name, blast_to = _parse_one_addr(bcc_blast_to)
+        blast_to = _parse_one_addr(bcc_blast_to)
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -303,9 +310,11 @@ def send_merge(
     if not recipients:
         raise ValueError("No recipients found in spreadsheet")
 
-    # Normalise email_column to match the actual header key (read_recipients
+    # Normalise column names to match the actual header keys (read_recipients
     # uses case-insensitive matching, so the dict key may differ in case).
-    email_column = next(k for k in recipients[0] if k.lower() == email_column.lower())
+    email_column = _normalize_column(email_column, recipients, "Email column")
+    if name_column:
+        name_column = _normalize_column(name_column, recipients, "Name column")
 
     # --- Validate email addresses ---
     recipients = _validate_emails(recipients, email_column)
@@ -403,7 +412,6 @@ def send_merge(
         save_to_sent_items=save_to_sent_items,
         attachments=attachment_list,
         reply_to=reply_to_list,
-        to_name=blast_to_name if bcc_blast else None,
     )
 
     # --- Validate recipient count (skip for blast; each batch is validated internally) ---
@@ -424,11 +432,12 @@ def send_merge(
 
         console.print()
         if bcc_blast:
+            assert blast_to is not None
             reserved = 1 + len(msg_opts.cc or []) + len(msg_opts.bcc or [])
             max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
             blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
             console.print(f"[bold]Subject:[/bold]  {subject}")
-            console.print(f"[bold]To:[/bold]       {blast_to}")
+            console.print(f"[bold]To:[/bold]       {blast_to.address}")
             console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
         else:
             sample = recipients[0]
@@ -492,9 +501,10 @@ def send_merge(
         if get_token is None:
             raise RuntimeError("Authentication is required to send a test email")
         if bcc_blast:
+            assert blast_to is not None
             logger.info(
                 "📧 BCC blast test: sending to %s via %s",
-                test_email, blast_to,
+                test_email, blast_to.address,
             )
             return send_bcc_blast(
                 get_token, [test_email], blast_to, subject, body_template,
@@ -504,22 +514,25 @@ def send_merge(
         sample = recipients[0]
         rendered_subject = render(subject, sample)
         rendered_body = render(body_template, sample)
+        test_to_name = sample.get(name_column, "").strip() or None if name_column else None
+        test_to = EmailAddress(address=test_email, name=test_to_name)
         logger.info(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
         )
         result = send_one(
-            get_token, test_email, rendered_subject, rendered_body, opts=msg_opts,
+            get_token, test_to, rendered_subject, rendered_body, opts=msg_opts,
         )
         return [result]
 
     # --- Send emails ---
     if bcc_blast:
+        assert blast_to is not None
         emails = [r[email_column] for r in recipients]
         results = send_bcc_blast(
             get_token=get_token,
             emails=emails,
-            to_email=blast_to,
+            to=blast_to,
             subject=subject,
             body=body_template,
             dry_run=not send,
@@ -532,6 +545,7 @@ def send_merge(
             email_column=email_column,
             subject_template=subject,
             body_template=body_template,
+            name_column=name_column,
             dry_run=not send,
             delay=delay,
             opts=msg_opts,
