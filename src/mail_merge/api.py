@@ -151,21 +151,13 @@ def _apply_filters(
     """
     parsed = [_parse_filter(f) for f in filters]
 
-    # Build a case-insensitive column lookup from the first recipient
     if not recipients:
         return recipients
-    col_lower = {k.lower(): k for k in recipients[0]}
 
-    for col, _op, _val in parsed:
-        if col.lower() not in col_lower:
-            raise ValueError(
-                f"Filter column {col!r} not found "
-                f"(available: {', '.join(recipients[0].keys())})"
-            )
-
-    # Pre-resolve column keys and lowercase filter values once
+    # Validate and resolve column names once
     resolved = [
-        (col_lower[col.lower()], op, val.lower()) for col, op, val in parsed
+        (_normalize_column(col, recipients, "Filter column"), op, val.lower())
+        for col, op, val in parsed
     ]
 
     result = []
