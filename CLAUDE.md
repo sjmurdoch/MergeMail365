@@ -63,6 +63,24 @@ Key design decisions:
 - **`--name-column`** specifies a spreadsheet column containing recipient display names; each email's `To:` header includes the name (e.g. `"Alice <alice@example.com>"`). In BCC blast mode, use `--bcc-blast-to "Display Name <email>"` instead.
 - Recipient count validation: errors if to + cc + bcc exceeds the Graph API limit of 500
 
+## Email address pipeline
+
+Addresses enter the system in different forms and are normalised into `EmailAddress` before being serialised for the Graph API.
+
+**Input sources:**
+- **Primary recipients** (`--email-column`): bare addresses from the spreadsheet. Display name comes from a separate `--name-column` (if set); empty/whitespace cells yield `name=None`.
+- **CC / BCC / reply-to / bcc-blast-to**: accept RFC 2822 `"Display Name <email>"` or bare `email@example.com`. CC/BCC/reply-to are comma-separated (CLI) or `str | list[str]` (Python API).
+- **Test email** (`--test-email`): bare address; display name taken from the first row's `name_column` if set.
+- **BCC blast batch recipients**: constructed with `name=None` (bare addresses only).
+
+**Parsing** (`api.py`): `_parse_one_addr()` uses `email.utils.parseaddr` to split name and address; empty name becomes `None`, empty address falls back to the raw string. `_parse_address_entries()` splits comma-separated strings and calls `_parse_one_addr` on each.
+
+**Construction in `send_all`** (`sender.py`): `EmailAddress` is built directly from the spreadsheet row — `name` is looked up via `name_column` and set to `None` if the column isn't specified or the cell is blank.
+
+**`to_graph()` serialisation** (`sender.py`): produces `{"emailAddress": {"address": "..."}}`. The `"name"` key is **only included when `name` is not `None`** — omitting it entirely when there is no display name. This applies uniformly to `toRecipients`, `ccRecipients`, `bccRecipients`, and `replyTo`.
+
+**`__str__` display**: with name → `"Alice <alice@example.com>"`; without → `"alice@example.com"`. Used in logging and confirmation prompts.
+
 ## Graph API quirks
 
 Tested empirically via `examples/test_empty_to.py` (results in `out.txt`):
