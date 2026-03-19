@@ -39,7 +39,7 @@
             <div class="grid">
                 <div>
                     <label for="client-id">Client ID</label>
-                    <input type="text" id="client-id" placeholder="Azure AD Application (Client) ID">
+                    <input type="text" id="client-id" placeholder="Azure AD application (client) ID">
                     <small id="config-badge" class="hidden">Loaded from config file</small>
                 </div>
                 <div>
@@ -49,8 +49,8 @@
                 </div>
             </div>
             <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                <button type="button" id="btn-sign-in" class="outline">Sign In with Microsoft</button>
-                <button type="button" id="btn-test-connection" class="outline secondary">Test Connection</button>
+                <button type="button" id="btn-sign-in" class="outline">Sign in with Microsoft</button>
+                <button type="button" id="btn-test-connection" class="outline secondary">Test connection</button>
             </div>
             <div id="auth-diagnostics" class="hidden" style="margin-top:0.75rem;">
                 <pre id="auth-diag-content" style="font-size:0.8rem;max-height:200px;overflow:auto;"></pre>
@@ -66,11 +66,11 @@
                 <p id="spreadsheet-summary"></p>
                 <div class="grid">
                     <div>
-                        <label for="email-column">Email Column</label>
+                        <label for="email-column">Email column</label>
                         <select id="email-column"><option value="">-- select --</option></select>
                     </div>
                     <div>
-                        <label for="name-column">Name Column <small>(optional)</small></label>
+                        <label for="name-column">Name column <small>(optional)</small></label>
                         <select id="name-column"><option value="">-- none --</option></select>
                     </div>
                     <div>
@@ -122,7 +122,7 @@
 
         <!-- Options (collapsible) -->
         <details>
-            <summary>Additional Options</summary>
+            <summary>Additional options</summary>
             <div class="grid">
                 <div>
                     <label for="cc-input">CC</label>
@@ -199,7 +199,7 @@
         <div id="preview-unresolved" class="hidden callout callout-danger"></div>
 
         <details>
-            <summary>All Recipients</summary>
+            <summary>All recipients</summary>
             <div id="preview-filter-info" class="hidden" style="margin-bottom:0.5rem;"></div>
             <div class="table-wrap">
                 <table id="recipients-table" class="striped results-table"><thead></thead><tbody></tbody></table>
@@ -226,7 +226,7 @@
         </div>
 
         <div style="display:flex;gap:0.5rem;margin:1rem 0;">
-            <button type="button" id="btn-send-test" onclick="sendTestEmail()">Send Test Email</button>
+            <button type="button" id="btn-send-test" onclick="sendTestEmail()">Send test email</button>
             <button type="button" id="btn-retry-test" class="outline hidden" onclick="sendTestEmail()">Retry</button>
         </div>
 
@@ -262,13 +262,13 @@
             <div id="send-confirm-details"></div>
             <label for="send-confirm-input" style="margin-top:0.5rem;">Type <strong>SEND</strong> to confirm:</label>
             <input type="text" id="send-confirm-input" class="confirm-input" placeholder="SEND" autocomplete="off">
-            <button type="button" id="btn-do-send" disabled onclick="startSend()">Send Emails</button>
+            <button type="button" id="btn-do-send" disabled onclick="startSend()">Send emails</button>
         </div>
 
         <div id="send-progress" class="hidden">
             <div class="progress-info">
                 <span id="send-progress-text">Sending...</span>
-                <button type="button" id="btn-stop-send" class="outline secondary" style="padding:0.25rem 0.75rem;font-size:0.8rem;" onclick="stopSend()">Stop Sending</button>
+                <button type="button" id="btn-stop-send" class="outline secondary" style="padding:0.25rem 0.75rem;font-size:0.8rem;" onclick="stopSend()">Stop sending</button>
             </div>
             <progress id="send-progress-bar" max="100" value="0"></progress>
         </div>
@@ -281,18 +281,18 @@
             <div></div>
         </div>
         <div class="nav-buttons hidden" id="send-done-nav">
-            <button type="button" id="btn-download-csv" class="outline" onclick="downloadCsv()">Download Mail Merge Report</button>
-            <button type="button" id="btn-new-merge" onclick="newMerge()">New Merge</button>
+            <button type="button" id="btn-download-csv" class="outline" onclick="downloadCsv()">Download mail merge report</button>
+            <button type="button" id="btn-new-merge" onclick="newMerge()">New merge</button>
         </div>
     </div>
 
     <dialog id="session-timeout-modal">
         <article>
-            <h3>Session Expired</h3>
-            <p>Your security session has timed out due to inactivity or the 1-hour limit. To protect your data, the interface has been locked.</p>
+            <h3>Session expired</h3>
+            <p>Your security session has timed out due to inactivity or the 24-hour limit. To protect your data, the interface has been locked.</p>
             <p><strong>Don't worry:</strong> Your message subject and body have been saved to your browser and will be restored automatically.</p>
             <footer>
-                <button onclick="window.location.reload()">Restart Session</button>
+                <button onclick="window.location.reload()">Restart session</button>
             </footer>
         </article>
     </dialog>
