@@ -24,7 +24,7 @@ Since the user is already in a browser, use the OAuth 2.0 Authorization Code flo
 6. Token is cached in the same MSAL cache file (`~/.mail-merge-token-cache.json`)
 7. When `send_merge()` later calls `acquire_token()`, silent acquisition succeeds from the shared cache
 
-**Setup requirement:** The Azure AD app registration needs `http://localhost:5050/auth/callback` added as a redirect URI (under "Mobile and desktop applications" for public clients). This is a one-time setup step, documented in the UI.
+**Setup requirement:** The Azure AD app registration needs `http://localhost:5050/auth/callback` added as a redirect URI (under "Mobile and desktop applications" for public clients). This is a one-time setup step, documented in the UI. Note: Entra ignores the port for localhost URIs, so this works on any port — no re-registration needed if the port auto-increments.
 
 ## API Compatibility & Maintainability Review
 
@@ -158,7 +158,7 @@ mail_merge_web.spec      # PyInstaller spec for building standalone app
 - **Browser mode** (default): Binds the socket first (confirms port availability), opens the default browser via a short-delay Timer thread, then starts Flask on the pre-bound socket. This avoids the browser hitting a connection-refused page before Flask is ready.
 - **Desktop mode** (`--desktop`): Uses `pywebview` to open a native OS window with the Flask app embedded. No external browser needed.
 
-**Port conflict handling:** If the default port (5050) is in use, auto-increment and try the next port (5051, 5052, ...) up to 5099. Log the actual port being used. The auth callback redirect URI must match the port, so `initiate_auth_code_flow()` is called with the actual port. The UI shows a note if a non-default port was used, reminding the user to register that redirect URI in Entra.
+**Port conflict handling:** If the default port (5050) is in use, auto-increment and try the next port (5051, 5052, ...) up to 5099. Log the actual port being used. The auth callback redirect URI uses the actual port, but **Entra ignores the port component for localhost redirect URIs** — so a single registered `http://localhost:5050/auth/callback` (or `http://localhost/auth/callback`) will work on any port. No additional Entra configuration needed when the port changes.
 
 Installed as `mail-merge-web` console script. The desktop mode is the intended path for non-CLI users — they double-click a packaged app that starts in desktop mode automatically.
 
@@ -273,8 +273,21 @@ A step indicator at the top shows: `Setup > Preview > Test > Verify > Send`. Eac
 - `beforeunload` warning during active send: "Emails are currently being sent. Closing this tab will stop the process."
 - Results table + CSV export. On failure, show human-readable errors: parse common Graph API error codes (ErrorSendAsDenied, ErrorRecipientNotFound, etc.) with "Technical details" expandable section.
 - Back disabled once sending starts
+- **After send completes (or is stopped):** No "Back" button. Instead show "New Merge" button + "Download CSV" button. See Navigation below.
 
-**Navigation:** Steps 1-2 freely navigable. Steps 3-4 cannot be skipped. Going back from 3+ shows confirmation: "Going back will discard your test and verification results. You will need to complete these steps again. [Go back] [Stay here]"
+**Navigation:**
+
+*Pre-send (Steps 1-4):*
+- Steps 1-2 freely navigable (Back/Next).
+- Steps 3-4 cannot be skipped.
+- Going back from Step 3+ shows confirmation: "Going back will discard your test and verification results. You will need to complete these steps again. [Go back] [Stay here]"
+- Setup data (spreadsheet, body, options) is preserved when going back — only test/verify results are discarded.
+
+*Post-send (Step 5 completed or stopped):*
+- **No "Back" button** — prevents accidentally re-sending to the same recipients.
+- **"New Merge" button** — clears the uploaded spreadsheet and resets wizard to Step 1. Auth session and config (client_id, tenant_id) are preserved. Message template (subject, body, options) may be restored from `localStorage` auto-save if the user wants to reuse it with a different spreadsheet.
+- **"Download CSV"** — export results before starting a new merge.
+- This structural separation makes it unambiguous: "Back" = fix something before sending, "New Merge" = start a fresh send operation.
 
 ### Logging
 
