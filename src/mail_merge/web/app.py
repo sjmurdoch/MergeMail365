@@ -137,7 +137,7 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
     
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 hour
+    app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
     app.config["STARTUP_TOKEN"] = startup_token
     app.config["PORT"] = port
 
@@ -167,6 +167,9 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
                 status=403,
                 content_type="text/plain; charset=utf-8",
             )
+        
+        # Refresh sliding window
+        session.permanent = True
         return None
 
     # ----- CSRF protection -----

@@ -33,6 +33,8 @@ function apiFetch(url, opts = {}) {
     opts.headers = opts.headers || {};
     if (opts.method && opts.method !== "GET") {
         opts.headers["X-CSRF-Token"] = CSRF_TOKEN;
+        // Refresh sliding window on activity
+        sessionStart = Date.now();
     }
     return fetch(url, opts);
 }
@@ -1021,8 +1023,8 @@ function handleAuthHash() {
 // ---------------------------------------------------------------------------
 // Session timer
 // ---------------------------------------------------------------------------
-const SESSION_LIFETIME_MS = 60 * 60 * 1000; // 1 hour
-const sessionStart = Date.now();
+const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 hours
+let sessionStart = Date.now();
 
 function updateSessionTimer() {
     const el = $("session-timer");
@@ -1040,9 +1042,12 @@ function updateSessionTimer() {
         el.textContent = `Session expires in ${mins}m`;
         el.className = "session-timer session-warn";
         show(el);
-    } else {
-        el.textContent = `Time before automatic logout: ${mins}m`;
+    } else if (mins <= 60) {
+        el.textContent = `Session expires in ${mins}m`;
+        el.className = "session-timer";
         show(el);
+    } else {
+        hide(el);
     }
 }
 
