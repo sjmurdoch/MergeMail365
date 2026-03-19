@@ -230,6 +230,42 @@ body > main {
 }
 
 /* Collapsible options */
+details summary {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 0.25rem;
+    background: var(--pico-secondary-background);
+    color: var(--pico-secondary-color);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--pico-secondary-border);
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    margin-bottom: 0.5rem;
+    list-style: none; /* Hide default arrow in some browsers */
+}
+
+details summary::-webkit-details-marker {
+    display: none; /* Hide default arrow in Safari */
+}
+
+details summary::before {
+    content: "▶";
+    display: inline-block;
+    margin-right: 0.5rem;
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+}
+
+details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+details summary:hover {
+    background: var(--pico-secondary-hover-background);
+    border-color: var(--pico-secondary-hover-border);
+}
+
 .collapsible-header {
     cursor: pointer;
     user-select: none;

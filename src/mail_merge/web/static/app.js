@@ -240,7 +240,11 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         }
         spreadsheetData = data;
         show("spreadsheet-info");
-        $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, showing first ${data.rows.length} rows`;
+        const count = data.rows.length;
+        $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${count} rows.`;
+        if (count > 99) {
+            $("spreadsheet-summary").innerHTML += ` <span class="failure"><strong>Warning: ${count} recipients found. The web UI only supports up to 99.</strong></span>`;
+        }
 
         // Populate dropdowns
         populateSelect($("email-column"), data.columns, true);
@@ -375,6 +379,26 @@ function renderPreviewRecipient() {
         hide("preview-body-html");
         $("preview-body").textContent = rendered_body;
     }
+
+    // Headers
+    if (sendMode === "bcc") {
+        $("preview-to").textContent = $("bcc-blast-to").value || "(none)";
+        $("preview-cc").textContent = "(none in BCC blast mode)";
+        $("preview-bcc").textContent = `[all ${recipients.length} recipients]`;
+    } else {
+        const emailCol = $("email-column").value;
+        const nameCol = $("name-column").value;
+        let to = row[emailCol] || "";
+        if (nameCol && row[nameCol]) {
+            to = `${row[nameCol]} <${to}>`;
+        }
+        $("preview-to").textContent = to;
+        $("preview-cc").textContent = $("cc-input").value || "(none)";
+        $("preview-bcc").textContent = $("bcc-input").value || "(none)";
+    }
+    $("preview-reply-to").textContent = $("reply-to-input").value || "(none)";
+    $("preview-importance").textContent = $("importance-select").value || "Normal";
+
     $("preview-recipient-label").textContent = `Previewing recipient ${previewIndex + 1} of ${recipients.length}`;
 }
 
@@ -399,7 +423,8 @@ function buildRecipientsTable() {
     const recipients = getRecipients();
     if (!recipients || !spreadsheetData) return;
     const emailCol = $("email-column").value;
-    const cols = [emailCol, ...spreadsheetData.columns.filter(c => c !== emailCol)].slice(0, 5);
+    // Show the email column first, then all other columns
+    const cols = [emailCol, ...spreadsheetData.columns.filter(c => c !== emailCol)];
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
     thead.innerHTML = "<tr>" + cols.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
