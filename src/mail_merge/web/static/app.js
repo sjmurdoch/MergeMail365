@@ -139,7 +139,7 @@ function validateSetup() {
         return false;
     }
     if (sendMode === "bcc" && !$("bcc-blast-to").value.trim()) {
-        alert("BCC Blast mode requires a To: address.");
+        alert("BCC mode requires a To: address.");
         return false;
     }
     // Quick pre-check using the total row count from the spreadsheet.
@@ -624,7 +624,7 @@ function renderPreviewRecipient() {
     // Headers
     if (sendMode === "bcc") {
         $("preview-to").textContent = $("bcc-blast-to").value || "(none)";
-        $("preview-cc").textContent = "(none in BCC blast mode)";
+        $("preview-cc").textContent = "(none in BCC mode)";
         $("preview-bcc").textContent = `[all ${recipients.length} recipients]`;
     } else {
         const emailCol = $("email-column").value;
