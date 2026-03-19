@@ -250,15 +250,22 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         if not client_id:
             return jsonify({"authenticated": False, "email": None})
 
-        from mail_merge.auth import diagnose_auth
+        from mail_merge.auth import SCOPES, _build_msal_app, token_expires_at
 
-        info = diagnose_auth(client_id, tenant_id)
-        if info["token_valid"] and info["accounts"]:
-            return jsonify({
-                "authenticated": True,
-                "email": info["accounts"][0].get("username", ""),
-                "token_expires_at": info.get("token_expires_at"),
-            })
+        try:
+            msal_app, _cache = _build_msal_app(client_id, tenant_id)
+            accounts = msal_app.get_accounts()
+            if accounts:
+                result = msal_app.acquire_token_silent(SCOPES, account=accounts[0])
+                if result and "access_token" in result:
+                    expires = token_expires_at(result["access_token"])
+                    return jsonify({
+                        "authenticated": True,
+                        "email": accounts[0].get("username", ""),
+                        "token_expires_at": expires.isoformat() if expires else None,
+                    })
+        except Exception:
+            pass
         return jsonify({"authenticated": False, "email": None})
 
     @app.route("/auth/debug")
@@ -274,10 +281,9 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     @app.route("/api/config")
     def api_config() -> Response:
-        config = load_config()
         return jsonify({
-            "client_id": config.get("client_id", ""),
-            "tenant_id": config.get("tenant_id", ""),
+            "client_id": _get_config_value("client_id") or "",
+            "tenant_id": _get_config_value("tenant_id") or "",
         })
 
     # ----- Spreadsheet upload -----
@@ -351,7 +357,7 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
     def api_start_job() -> Response:
         data = request.form.to_dict()
         spreadsheet_path = session.get("spreadsheet_path")
-        if not spreadsheet_path or not os.path.exists(spreadsheet_path):
+        if not spreadsheet_path:
             return jsonify({"error": "No spreadsheet uploaded"}), 400  # type: ignore[return-value]
 
         mode = data.get("mode", "dry_run")  # dry_run, test_email, send

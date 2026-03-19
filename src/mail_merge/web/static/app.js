@@ -346,15 +346,17 @@ function validatePlaceholders() {
 // Step 2: Preview
 // ---------------------------------------------------------------------------
 async function loadPreview() {
-    if (!spreadsheetData || !getRecipients() || getRecipients().length === 0) return;
+    const rows = getRecipients();
+    if (!spreadsheetData || !rows || rows.length === 0) return;
     previewIndex = 0;
     renderPreviewRecipient();
     buildRecipientsTable();
 }
 
 function renderPreviewRecipient() {
-    if (!getRecipients() || getRecipients().length === 0) return;
-    const row = getRecipients()[previewIndex];
+    const recipients = getRecipients();
+    if (!recipients || recipients.length === 0) return;
+    const row = recipients[previewIndex];
     const subject = $("subject-input").value;
     const body = $("body-input").value;
 
@@ -373,7 +375,7 @@ function renderPreviewRecipient() {
         hide("preview-body-html");
         $("preview-body").textContent = rendered_body;
     }
-    $("preview-recipient-label").textContent = `Previewing recipient ${previewIndex + 1} of ${getRecipients().length}`;
+    $("preview-recipient-label").textContent = `Previewing recipient ${previewIndex + 1} of ${recipients.length}`;
 }
 
 function renderTemplate(template, data) {
@@ -387,19 +389,21 @@ function renderTemplate(template, data) {
 }
 
 function changePreviewRecipient(delta) {
-    if (!getRecipients()) return;
-    previewIndex = Math.max(0, Math.min(getRecipients().length - 1, previewIndex + delta));
+    const recipients = getRecipients();
+    if (!recipients) return;
+    previewIndex = Math.max(0, Math.min(recipients.length - 1, previewIndex + delta));
     renderPreviewRecipient();
 }
 
 function buildRecipientsTable() {
-    if (!getRecipients() || !spreadsheetData) return;
+    const recipients = getRecipients();
+    if (!recipients || !spreadsheetData) return;
     const emailCol = $("email-column").value;
     const cols = [emailCol, ...spreadsheetData.columns.filter(c => c !== emailCol)].slice(0, 5);
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
     thead.innerHTML = "<tr>" + cols.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
-    tbody.innerHTML = getRecipients().map(row =>
+    tbody.innerHTML = recipients.map(row =>
         "<tr>" + cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
     ).join("");
 }
@@ -414,8 +418,9 @@ function checkAuthForStep3() {
 }
 
 function updateTestPreview() {
-    if (!getRecipients() || getRecipients().length === 0) return;
-    const row = getRecipients()[0];
+    const recipients = getRecipients();
+    if (!recipients || recipients.length === 0) return;
+    const row = recipients[0];
     const subject = $("subject-input").value;
     const rendered = renderTemplate(subject, row);
     const testAddr = $("test-email-input").value || "(enter test address above)";
@@ -481,7 +486,8 @@ function showTestResult(success, msg) {
 // Step 4: Verify (Dry Run)
 // ---------------------------------------------------------------------------
 function startVerify() {
-    $("verify-count").textContent = getRecipients() ? getRecipients().length : "?";
+    const recipients = getRecipients();
+    $("verify-count").textContent = recipients ? recipients.length : "?";
     $("verify-log").innerHTML = "";
     hide("verify-result");
     $("btn-next-4").disabled = true;
@@ -500,12 +506,13 @@ function startVerify() {
                 if (result.status === "completed") {
                     verifyPassed = true;
                     $("btn-next-4").disabled = false;
-                    const n = getRecipients() ? getRecipients().length : "?";
-                    const estSec = getRecipients() ? getRecipients().length * 2 : "?";
+                    const recs = getRecipients();
+                    const n = recs ? recs.length : "?";
+                    const estSec = recs ? recs.length * 2 : "?";
                     let msg = `${n} emails ready to send. Estimated time: ~${estSec} seconds (2-second delay between sends).`;
                     // Token expiry check
-                    if (tokenExpiresAt && getRecipients()) {
-                        const estEndMs = Date.now() + getRecipients().length * 2000;
+                    if (tokenExpiresAt && recs) {
+                        const estEndMs = Date.now() + recs.length * 2000;
                         if (estEndMs > tokenExpiresAt.getTime()) {
                             msg += "\n⚠️ Warning: Your authentication token may expire before sending completes. Consider signing in again before proceeding.";
                         }
@@ -532,7 +539,8 @@ function showVerifyResult(success, msg) {
 function prepareSend() {
     sendStarted = false;
     sendResults = null;
-    const n = getRecipients() ? getRecipients().length : "?";
+    const recipients = getRecipients();
+    const n = recipients ? recipients.length : "?";
     $("send-count").textContent = n;
 
     // Build details
@@ -659,11 +667,18 @@ function showSendResult(success, msg) {
     window.removeEventListener("beforeunload", beforeUnloadWarn);
 }
 
+function sanitizeCsvValue(val) {
+    if (!val) return val;
+    const s = String(val);
+    if (/^[=+@\-\t\r]/.test(s)) return "\t" + s;
+    return s;
+}
+
 function downloadCsv() {
     if (!sendResults || sendResults.length === 0) return;
     let csv = "email,success,status_code,error\n";
     for (const r of sendResults) {
-        csv += `"${r.email}",${r.success},${r.status_code || ""},"${(r.error || "").replace(/"/g, '""')}"\n`;
+        csv += `"${sanitizeCsvValue(r.email)}",${r.success},${r.status_code || ""},"${sanitizeCsvValue((r.error || "").replace(/"/g, '""'))}"\n`;
     }
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);

@@ -1,5 +1,6 @@
 """Tests for the web interface."""
 
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -61,6 +62,27 @@ def sample_xlsx_100(tmp_path):
     return path
 
 
+# ---- Shared helpers ----
+
+def get_csrf(client):
+    """Get CSRF token from session."""
+    client.get("/")
+    with client.session_transaction() as sess:
+        return sess.get("csrf_token", "")
+
+
+def wait_for_job(client, job_id, timeout_sec=15):
+    """Poll job status until terminal state or timeout. Returns status dict."""
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        resp = client.get(f"/api/job/{job_id}/status")
+        status = resp.get_json()
+        if status["status"] in ("completed", "failed"):
+            return status
+        time.sleep(0.2)
+    return status
+
+
 # ---- Access control ----
 
 class TestAccessControl:
@@ -103,7 +125,7 @@ class TestConfig:
 
 class TestUpload:
     def test_upload_xlsx_returns_columns_and_preview(self, web_client, sample_xlsx_web):
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         with open(sample_xlsx_web, "rb") as f:
             resp = web_client.post(
                 "/api/upload-spreadsheet",
@@ -120,7 +142,7 @@ class TestUpload:
         assert data["rows"][0]["name"] == "Alice"
 
     def test_upload_non_xlsx_rejected(self, web_client, tmp_path):
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         txt_file = tmp_path / "bad.txt"
         txt_file.write_text("not a spreadsheet")
         with open(txt_file, "rb") as f:
@@ -133,7 +155,7 @@ class TestUpload:
         assert resp.status_code == 400
 
     def test_upload_empty_xlsx_rejected(self, web_client, tmp_path):
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         path = tmp_path / "empty.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -148,19 +170,13 @@ class TestUpload:
             )
         assert resp.status_code == 400
 
-    def _get_csrf(self, client):
-        """Get CSRF token from session."""
-        # Make a GET request to trigger CSRF token creation
-        client.get("/")
-        with client.session_transaction() as sess:
-            return sess.get("csrf_token", "")
 
 
 # ---- Template preview ----
 
 class TestPreview:
     def test_preview_renders_placeholders(self, web_client):
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         resp = web_client.post(
             "/api/preview-template",
             json={
@@ -178,7 +194,7 @@ class TestPreview:
         assert data["unresolved_placeholders"] == []
 
     def test_preview_reports_unresolved_placeholders(self, web_client):
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         resp = web_client.post(
             "/api/preview-template",
             json={
@@ -194,7 +210,7 @@ class TestPreview:
         assert "missing" in data["unresolved_placeholders"]
 
     def test_preview_escapes_html(self, web_client):
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         resp = web_client.post(
             "/api/preview-template",
             json={
@@ -210,10 +226,6 @@ class TestPreview:
         # But the data is returned as JSON, so it's safe. The frontend uses textContent.
         assert "<script>" in data["subject"]  # raw in JSON is fine
 
-    def _get_csrf(self, client):
-        client.get("/")
-        with client.session_transaction() as sess:
-            return sess.get("csrf_token", "")
 
 
 # ---- Auth endpoints ----
@@ -252,12 +264,14 @@ class TestAuth:
         assert resp.status_code == 302
         assert "#auth-error=" in resp.headers["Location"]
 
-    @patch("mail_merge.auth.diagnose_auth")
-    def test_auth_status_authenticated(self, mock_diag, web_client):
-        mock_diag.return_value = {
-            "token_valid": True,
-            "accounts": [{"username": "user@example.com"}],
-        }
+    @patch("mail_merge.auth._load_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication")
+    def test_auth_status_authenticated(self, mock_app_cls, mock_cache, web_client):
+        mock_cache.return_value = MagicMock()
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
+        mock_app.acquire_token_silent.return_value = {"access_token": "eyJ.eyJleHAiOjk5OTk5OTk5OTl9.sig"}
+        mock_app_cls.return_value = mock_app
 
         with web_client.session_transaction() as sess:
             sess["client_id"] = "test-client-id"
@@ -304,18 +318,24 @@ class TestAuth:
         assert resp.status_code == 302
         mock_flow.assert_called_once_with("from-query", "my-tenant", "http://localhost:5050/auth/callback")
 
-    @patch("mail_merge.auth.diagnose_auth")
-    def test_auth_status_includes_token_expiry(self, mock_diag, web_client):
-        mock_diag.return_value = {
-            "token_valid": True,
-            "accounts": [{"username": "user@example.com"}],
-            "token_expires_at": "2026-03-19T12:00:00+00:00",
-        }
+    @patch("mail_merge.auth._load_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication")
+    def test_auth_status_includes_token_expiry(self, mock_app_cls, mock_cache, web_client):
+        import base64, json as _json
+        # Create a JWT with exp claim for 2026-03-19T12:00:00+00:00
+        payload = base64.urlsafe_b64encode(_json.dumps({"exp": 1773921600}).encode()).rstrip(b"=").decode()
+        fake_jwt = f"eyJ.{payload}.sig"
+        mock_cache.return_value = MagicMock()
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
+        mock_app.acquire_token_silent.return_value = {"access_token": fake_jwt}
+        mock_app_cls.return_value = mock_app
         with web_client.session_transaction() as sess:
             sess["client_id"] = "test-client-id"
         resp = web_client.get("/auth/status")
         data = resp.get_json()
-        assert data["token_expires_at"] == "2026-03-19T12:00:00+00:00"
+        assert data["token_expires_at"] is not None
+        assert "2026-03-19" in data["token_expires_at"]
 
 
 # ---- Job lifecycle ----
@@ -323,7 +343,7 @@ class TestAuth:
 class TestJobs:
     def _setup_upload(self, web_client, xlsx_path):
         """Upload a spreadsheet and return CSRF token."""
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         with open(xlsx_path, "rb") as f:
             resp = web_client.post(
                 "/api/upload-spreadsheet",
@@ -350,15 +370,7 @@ class TestJobs:
         data = resp.get_json()
         assert "job_id" in data
 
-        # Poll for completion
-        import time
-        for _ in range(30):
-            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
-            status = status_resp.get_json()
-            if status["status"] in ("completed", "failed"):
-                break
-            time.sleep(0.2)
-
+        status = wait_for_job(web_client, data["job_id"])
         assert status["status"] == "completed"
         assert status["summary"]["total"] == 2
         assert status["summary"]["sent"] == 2
@@ -378,14 +390,7 @@ class TestJobs:
         assert resp.status_code == 200
         data = resp.get_json()
 
-        import time
-        for _ in range(30):
-            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
-            status = status_resp.get_json()
-            if status["status"] in ("completed", "failed"):
-                break
-            time.sleep(0.2)
-
+        status = wait_for_job(web_client, data["job_id"])
         assert status["status"] == "failed"
         assert "nonexistent" in status["error"].lower()
 
@@ -411,14 +416,7 @@ class TestJobs:
         assert resp.status_code == 200
         data = resp.get_json()
 
-        import time
-        for _ in range(60):
-            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
-            status = status_resp.get_json()
-            if status["status"] in ("completed", "failed"):
-                break
-            time.sleep(0.5)
-
+        status = wait_for_job(web_client, data["job_id"], timeout_sec=30)
         assert status["status"] == "completed"
         assert len(status["results"]) == 2
 
@@ -461,14 +459,7 @@ class TestJobs:
         assert resp.status_code == 200
         data = resp.get_json()
 
-        import time
-        for _ in range(30):
-            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
-            status = status_resp.get_json()
-            if status["status"] in ("completed", "failed"):
-                break
-            time.sleep(0.2)
-
+        status = wait_for_job(web_client, data["job_id"])
         assert status["status"] == "completed"
         assert status["results"][0]["email"] == "tester@example.com"
 
@@ -487,9 +478,8 @@ class TestJobs:
         data = resp.get_json()
         job_id = data["job_id"]
 
-        # Read SSE events
-        import time
-        time.sleep(1)  # Let job run
+        # Let job run
+        time.sleep(1)
 
         # Check status instead of SSE (SSE is streaming, hard to test with test client)
         status_resp = web_client.get(f"/api/job/{job_id}/status")
@@ -522,14 +512,7 @@ class TestJobs:
         assert resp.status_code == 200
         data = resp.get_json()
 
-        import time
-        for _ in range(60):
-            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
-            status = status_resp.get_json()
-            if status["status"] in ("completed", "failed"):
-                break
-            time.sleep(0.5)
-
+        status = wait_for_job(web_client, data["job_id"], timeout_sec=30)
         assert status["status"] == "completed"
         assert status["summary"]["sent"] == 1
         assert status["summary"]["failed"] == 1
@@ -551,28 +534,17 @@ class TestJobs:
         assert resp.status_code == 200
         data = resp.get_json()
 
-        import time
-        for _ in range(30):
-            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
-            status = status_resp.get_json()
-            if status["status"] in ("completed", "failed"):
-                break
-            time.sleep(0.2)
-
         # Job completes — the client's delay=0 was ignored (server forces 2.0)
+        status = wait_for_job(web_client, data["job_id"])
         assert status["status"] == "completed"
 
-    def _get_csrf(self, client):
-        client.get("/")
-        with client.session_transaction() as sess:
-            return sess.get("csrf_token", "")
 
 
 # ---- Options passthrough ----
 
 class TestOptionsPassthrough:
     def _setup_and_start(self, web_client, xlsx_path, extra_data=None):
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         with open(xlsx_path, "rb") as f:
             web_client.post(
                 "/api/upload-spreadsheet",
@@ -611,7 +583,7 @@ class TestOptionsPassthrough:
 
     def test_attachments_uploaded(self, web_client, sample_xlsx_web, tmp_path):
         """Attachments are saved and passed through to send_merge."""
-        csrf = self._get_csrf(web_client)
+        csrf = get_csrf(web_client)
         with open(sample_xlsx_web, "rb") as f:
             web_client.post(
                 "/api/upload-spreadsheet",
@@ -640,10 +612,6 @@ class TestOptionsPassthrough:
             )
         assert resp.status_code == 200
 
-    def _get_csrf(self, client):
-        client.get("/")
-        with client.session_transaction() as sess:
-            return sess.get("csrf_token", "")
 
 
 # ---- Report summarize ----

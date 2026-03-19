@@ -44,6 +44,11 @@ def _save_cache(cache: msal.SerializableTokenCache) -> None:
             CACHE_PATH.chmod(0o600)
 
 
+def _extract_msal_error(result: dict[str, Any]) -> str:
+    """Extract a human-readable error message from an MSAL result dict."""
+    return str(result.get("error_description", result.get("error", "Unknown error")))
+
+
 def _build_msal_app(
     client_id: str, tenant_id: str,
 ) -> tuple[msal.PublicClientApplication, msal.SerializableTokenCache]:
@@ -91,8 +96,7 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     _save_cache(cache)
 
     if "access_token" not in result:
-        error = result.get("error_description", result.get("error", "Unknown error"))
-        raise RuntimeError(f"Authentication failed: {error}")
+        raise RuntimeError(f"Authentication failed: {_extract_msal_error(result)}")
 
     token: str = result["access_token"]
     return token
@@ -130,8 +134,7 @@ def acquire_token_by_auth_code(
     _save_cache(cache)
 
     if "access_token" not in result:
-        error = result.get("error_description", result.get("error", "Unknown error"))
-        raise RuntimeError(f"Auth code exchange failed: {error}")
+        raise RuntimeError(f"Auth code exchange failed: {_extract_msal_error(result)}")
 
     token: str = result["access_token"]
     return token
