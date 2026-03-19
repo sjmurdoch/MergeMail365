@@ -44,6 +44,24 @@ def _save_cache(cache: msal.SerializableTokenCache) -> None:
             CACHE_PATH.chmod(0o600)
 
 
+def _build_msal_app(
+    client_id: str, tenant_id: str,
+) -> tuple[msal.PublicClientApplication, msal.SerializableTokenCache]:
+    """Validate tenant_id, load cache, and build an MSAL app."""
+    if not _TENANT_ID_RE.match(tenant_id):
+        raise ValueError(
+            f"Invalid tenant_id {tenant_id!r}: must be a UUID, 'common', "
+            f"'organizations', 'consumers', or a domain name"
+        )
+    cache = _load_cache()
+    app = msal.PublicClientApplication(
+        client_id,
+        authority=f"{AUTHORITY_BASE}/{tenant_id}",
+        token_cache=cache,
+    )
+    return app, cache
+
+
 def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     """Acquire an access token via MSAL device code flow.
 
@@ -52,18 +70,7 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
 
     Returns the access token string.
     """
-    if not _TENANT_ID_RE.match(tenant_id):
-        raise ValueError(
-            f"Invalid tenant_id {tenant_id!r}: must be a UUID, 'common', "
-            f"'organizations', 'consumers', or a domain name"
-        )
-    authority = f"{AUTHORITY_BASE}/{tenant_id}"
-    cache = _load_cache()
-    app = msal.PublicClientApplication(
-        client_id,
-        authority=authority,
-        token_cache=cache,
-    )
+    app, cache = _build_msal_app(client_id, tenant_id)
 
     accounts: list[dict[str, Any]] = app.get_accounts()
     result: dict[str, Any] | None = None
@@ -97,18 +104,7 @@ def initiate_auth_code_flow(
     redirect_uri: str = "http://localhost:5050/auth/callback",
 ) -> dict[str, Any]:
     """Start an authorization code flow. Returns the flow dict to store in the session."""
-    if not _TENANT_ID_RE.match(tenant_id):
-        raise ValueError(
-            f"Invalid tenant_id {tenant_id!r}: must be a UUID, 'common', "
-            f"'organizations', 'consumers', or a domain name"
-        )
-    authority = f"{AUTHORITY_BASE}/{tenant_id}"
-    cache = _load_cache()
-    app = msal.PublicClientApplication(
-        client_id,
-        authority=authority,
-        token_cache=cache,
-    )
+    app, _cache = _build_msal_app(client_id, tenant_id)
     flow: dict[str, Any] = app.initiate_auth_code_flow(
         scopes=SCOPES,
         redirect_uri=redirect_uri,
@@ -123,24 +119,13 @@ def initiate_auth_code_flow(
 def acquire_token_by_auth_code(
     client_id: str,
     tenant_id: str = "common",
-    auth_code_flow: dict[str, Any] = {},
-    auth_response: dict[str, str] = {},
+    auth_code_flow: dict[str, Any] | None = None,
+    auth_response: dict[str, str] | None = None,
 ) -> str:
     """Complete the authorization code flow. Returns the access token."""
-    if not _TENANT_ID_RE.match(tenant_id):
-        raise ValueError(
-            f"Invalid tenant_id {tenant_id!r}: must be a UUID, 'common', "
-            f"'organizations', 'consumers', or a domain name"
-        )
-    authority = f"{AUTHORITY_BASE}/{tenant_id}"
-    cache = _load_cache()
-    app = msal.PublicClientApplication(
-        client_id,
-        authority=authority,
-        token_cache=cache,
-    )
+    app, cache = _build_msal_app(client_id, tenant_id)
     result: dict[str, Any] = app.acquire_token_by_auth_code_flow(
-        auth_code_flow, auth_response,
+        auth_code_flow or {}, auth_response or {},
     )
     _save_cache(cache)
 
@@ -176,7 +161,7 @@ def diagnose_auth(client_id: str, tenant_id: str = "common") -> dict[str, Any]:
         import requests as _requests
         resp = _requests.get(
             f"{authority}/v2.0/.well-known/openid-configuration",
-            timeout=5,
+            timeout=3,
         )
         info["authority_reachable"] = resp.status_code == 200
     except Exception:
@@ -184,12 +169,7 @@ def diagnose_auth(client_id: str, tenant_id: str = "common") -> dict[str, Any]:
 
     # Check cached accounts and token
     try:
-        cache = _load_cache()
-        app = msal.PublicClientApplication(
-            client_id,
-            authority=authority,
-            token_cache=cache,
-        )
+        app, _cache = _build_msal_app(client_id, tenant_id)
         accounts: list[dict[str, Any]] = app.get_accounts()
         info["accounts"] = [
             {"username": a.get("username", ""), "home_account_id": a.get("home_account_id", "")}

@@ -10,9 +10,10 @@ def read_preview(
     path: str | Path,
     sheet_name: str | None = None,
     max_rows: int = 5,
-) -> tuple[list[str], list[dict[str, str]]]:
-    """Read column headers and first N rows. Returns (columns, rows).
+) -> tuple[list[str], list[dict[str, str]], list[str]]:
+    """Read column headers, first N rows, and sheet names.
 
+    Returns (columns, rows, sheet_names).
     Does not require an email_column — used for spreadsheet preview in the web UI.
     """
     path = Path(path)
@@ -25,6 +26,7 @@ def read_preview(
         )
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
+        sheet_names = wb.sheetnames
         ws = wb[sheet_name] if sheet_name else wb.active
 
         rows_iter = ws.iter_rows()
@@ -44,7 +46,7 @@ def read_preview(
             preview_rows.append(record)
     finally:
         wb.close()
-    return columns, preview_rows
+    return columns, preview_rows, sheet_names
 
 
 def read_recipients(
