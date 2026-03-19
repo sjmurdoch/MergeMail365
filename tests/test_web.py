@@ -228,6 +228,60 @@ class TestPreview:
 
 
 
+class TestRecipientAPI:
+    def test_get_recipients_filtering(self, web_client, sample_xlsx):
+        # 1. Establish session with token
+        web_client.get("/?token=test-token")
+        csrf = get_csrf(web_client)
+        
+        # 2. Upload
+        with open(sample_xlsx, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": f},
+                headers={"X-CSRF-Token": csrf}
+            )
+        
+        # 3. Get with filter
+        resp = web_client.post(
+            "/api/get-recipients",
+            data={
+                "email_column": "email",
+                "filters": "company=Acme"
+            },
+            headers={"X-CSRF-Token": csrf}
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data["recipients"]) == 1
+        assert data["recipients"][0]["name"] == "Alice"
+
+    def test_get_recipients_limit_enforced(self, web_client, sample_xlsx, monkeypatch):
+        # 1. Establish session
+        web_client.get("/?token=test-token")
+        csrf = get_csrf(web_client)
+        
+        # 2. Upload
+        with open(sample_xlsx, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": f},
+                headers={"X-CSRF-Token": csrf}
+            )
+        
+        # Mock read_recipients to return > 99 rows
+        from mail_merge import excel
+        monkeypatch.setattr(excel, "read_recipients", lambda *a, **kw: [{"email": "x@y.com"}] * 105)
+        
+        resp = web_client.post(
+            "/api/get-recipients",
+            data={"email_column": "email"},
+            headers={"X-CSRF-Token": csrf}
+        )
+        assert resp.status_code == 400
+        assert "Too many recipients" in resp.get_json()["error"]
+
+
 # ---- Auth endpoints ----
 
 class TestAuth:
@@ -662,12 +716,13 @@ class TestSummarize:
 class TestReadPreview:
     def test_read_preview_returns_columns_and_rows(self, sample_xlsx_web):
         from mail_merge.excel import read_preview
-        columns, rows, sheets = read_preview(sample_xlsx_web)
+        columns, rows, sheets, total = read_preview(sample_xlsx_web)
         assert "name" in columns
         assert "email" in columns
         assert len(rows) == 2
         assert rows[0]["name"] == "Alice"
         assert len(sheets) >= 1
+        assert total == 2
 
     def test_read_preview_max_rows(self, tmp_path):
         from mail_merge.excel import read_preview
@@ -679,8 +734,9 @@ class TestReadPreview:
             ws.append([str(i), f"val{i}"])
         wb.save(path)
 
-        columns, rows, _sheets = read_preview(path, max_rows=3)
+        columns, rows, _sheets, total = read_preview(path, max_rows=3)
         assert len(rows) == 3
+        assert total == 20
 
     def test_read_preview_empty_raises(self, tmp_path):
         from mail_merge.excel import read_preview
