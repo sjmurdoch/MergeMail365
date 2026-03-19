@@ -127,7 +127,6 @@ def _unregister_temp_dir(path: str) -> None:
 def create_app(
     startup_token: str = "",
     port: int = 5050,
-    desktop: bool = False,
     client_id: str = "",
     tenant_id: str = "",
 ) -> Flask:
@@ -146,7 +145,6 @@ def create_app(
     app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
     app.config["STARTUP_TOKEN"] = startup_token
     app.config["PORT"] = port
-    app.config["DESKTOP"] = desktop
     app.config["FIXED_CLIENT_ID"] = client_id
     app.config["FIXED_TENANT_ID"] = tenant_id
 
@@ -154,11 +152,6 @@ def create_app(
 
     @app.before_request
     def _check_auth() -> Any:
-        # Desktop mode: native window is the access control — auto-authenticate
-        if app.config["DESKTOP"] and not session.get("authenticated"):
-            session["authenticated"] = True
-            session.permanent = True
-
         # Allow static files and auth routes without session auth
         if request.endpoint == "static":
             return None

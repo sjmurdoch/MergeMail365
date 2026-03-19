@@ -57,7 +57,6 @@ def main(argv: list[str] | None = None) -> None:
     app = create_app(
         startup_token=startup_token,
         port=port,
-        desktop=desktop,
         client_id=args.client_id,
         tenant_id=args.tenant_id,
     )
@@ -78,7 +77,25 @@ def main(argv: list[str] | None = None) -> None:
                 sys.exit(1)
 
     if desktop:
-        webview.create_window("Mail Merge", app, width=1100, height=800)
+        # Run Flask on a real HTTP port so OAuth redirect callbacks work.
+        # (Passing the WSGI app directly to pywebview uses a random internal
+        # port, which breaks the OAuth redirect_uri.)
+        flask_thread = threading.Thread(
+            target=app.run,
+            kwargs={"host": args.host, "port": port, "debug": False, "use_reloader": False},
+            daemon=True,
+        )
+        flask_thread.start()
+        # Wait for Flask to be ready before opening the window
+        for _ in range(50):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect(("127.0.0.1", port))
+                    break
+            except OSError:
+                import time
+                time.sleep(0.1)
+        webview.create_window("Mail Merge", url, width=1100, height=800)
         webview.start()
     else:
         # Open browser after a short delay
