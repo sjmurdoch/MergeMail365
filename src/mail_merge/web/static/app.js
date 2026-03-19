@@ -219,9 +219,22 @@ $("btn-test-connection").addEventListener("click", async () => {
     try {
         const resp = await apiFetch("/auth/debug");
         const data = await resp.json();
-        $("auth-diag-content").textContent = JSON.stringify(data, null, 2);
+        
+        // Build a summary of results
+        let summary = "";
+        if (data.error) {
+            summary = `<div class="callout callout-danger" style="margin-top:0;"><strong>Connection Error:</strong> ${escapeHtml(data.error)}</div>`;
+        } else if (data.token_valid) {
+            summary = `<div class="callout callout-info" style="margin-top:0; background-color: #166534; border-color: #166534;"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
+        } else if (data.authority_reachable) {
+            summary = `<div class="callout callout-warning" style="margin-top:0;"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
+        } else {
+            summary = `<div class="callout callout-danger" style="margin-top:0;"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
+        }
+        
+        $("auth-diag-content").innerHTML = summary + `<pre style="font-size:0.8rem; margin-top: 0.5rem;">${JSON.stringify(data, null, 2)}</pre>`;
     } catch (e) {
-        $("auth-diag-content").textContent = "Error: " + e.message;
+        $("auth-diag-content").innerHTML = `<div class="callout callout-danger" style="margin-top:0;"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
     }
 });
 
