@@ -10,6 +10,7 @@ import secrets
 import socket
 import sys
 import threading
+import time
 import webbrowser
 
 from mail_merge.console import setup_logging
@@ -93,7 +94,6 @@ def main(argv: list[str] | None = None) -> None:
                     s.connect(("127.0.0.1", port))
                     break
             except OSError:
-                import time
                 time.sleep(0.1)
         webview.create_window("Mail Merge", url, width=1100, height=800)
         webview.start()

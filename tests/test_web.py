@@ -562,13 +562,8 @@ class TestJobs:
     def test_send_rejects_over_99(self, web_client, sample_xlsx_100):
         csrf = self._setup_upload(web_client, sample_xlsx_100)
         resp = web_client.post(
-            "/api/start-job",
-            data={
-                "mode": "send",
-                "email_column": "email",
-                "subject": "Hello {{name}}",
-                "body": "Body.",
-            },
+            "/api/get-recipients",
+            data={"email_column": "email"},
             headers={"X-CSRF-Token": csrf},
         )
         assert resp.status_code == 400

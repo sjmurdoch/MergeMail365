@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import enum
+import hashlib
 import json
 import logging
 import os
@@ -137,7 +138,6 @@ def create_app(
     )
     # Use a stable secret key based on the startup token so that restarting
     # the server doesn't invalidate the user's session.
-    import hashlib
     app.secret_key = hashlib.sha256(startup_token.encode()).hexdigest()
     
     app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -406,10 +406,10 @@ def create_app(
                 "error": "No recipients remaining after removing invalid email addresses"
             }), 400  # type: ignore[return-value]
 
-        if len(recipients) > 99:
+        if len(recipients) > MAX_WEB_RECIPIENTS:
             return jsonify({
                 "error": f"Too many recipients: {len(recipients)} found after filtering. "
-                         "The web UI supports a maximum of 99 recipients. "
+                         f"The web UI supports a maximum of {MAX_WEB_RECIPIENTS} recipients. "
                          "Please use more restrictive filters or the CLI."
             }), 400  # type: ignore[return-value]
 
@@ -464,19 +464,6 @@ def create_app(
 
         if not email_column or not subject:
             return jsonify({"error": "email_column and subject are required"}), 400  # type: ignore[return-value]
-
-        # Enforce 99 recipient cap
-        from mail_merge.excel import read_recipients
-        try:
-            all_recipients = read_recipients(spreadsheet_path, email_column)
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
-
-        if len(all_recipients) > MAX_WEB_RECIPIENTS:
-            return jsonify({
-                "error": f"Too many recipients ({len(all_recipients)}). "
-                         f"The web UI supports up to {MAX_WEB_RECIPIENTS}. Use the CLI for larger sends."
-            }), 400  # type: ignore[return-value]
 
         # Build kwargs
         client_id, tenant_id = _get_client_tenant()
@@ -673,7 +660,7 @@ def create_app(
         nonlocal _cached_config
         if _cached_config is None:
             _cached_config = load_config()
-        return _cached_config.get(key) or os.environ.get(f"MAIL_MERGE_{key.upper()}")
+        return os.environ.get(f"MAIL_MERGE_{key.upper()}") or _cached_config.get(key)
 
     def _get_client_tenant() -> tuple[str | None, str]:
         client_id = session.get("client_id") or _get_config_value("client_id")

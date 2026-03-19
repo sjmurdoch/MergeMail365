@@ -216,24 +216,9 @@ body > main {
     font-weight: 600;
 }
 
-.badge-info {
-    background: var(--pico-primary-background);
-    color: var(--pico-primary);
-}
-
-.badge-success {
-    background: var(--pico-ins-color);
-    color: white;
-}
-
 .badge-warning {
     background: #fbbf24;
     color: #78350f;
-}
-
-.badge-danger {
-    background: var(--pico-del-color);
-    color: white;
 }
 
 /* Confirmation input */
@@ -288,19 +273,6 @@ details[open] summary::before {
 
 details summary:hover {
     filter: brightness(1.1);
-}
-
-.collapsible-header {
-    cursor: pointer;
-    user-select: none;
-}
-
-.collapsible-content {
-    display: none;
-}
-
-.collapsible-content.open {
-    display: block;
 }
 
 /* Sending mode toggle */
@@ -378,7 +350,6 @@ details summary:hover {
 }
 
 .auth-indicator .dot.green { background: #22c55e; }
-.auth-indicator .dot.red { background: #ef4444; }
 .auth-indicator .dot.gray { background: #9ca3af; }
 
 /* Session timer */

@@ -29,6 +29,30 @@ function escapeHtml(s) {
     return d.innerHTML;
 }
 
+function updateStepUI(n) {
+    document.querySelectorAll(".step-panel").forEach(p => p.classList.remove("active"));
+    $("step-" + n).classList.add("active");
+    document.querySelectorAll(".step-indicator li").forEach(li => {
+        const s = parseInt(li.dataset.step);
+        li.classList.remove("active", "completed");
+        if (s < n) li.classList.add("completed");
+        if (s === n) li.classList.add("active");
+    });
+}
+
+function renderSpreadsheetSummary(data) {
+    $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${data.total_rows} rows.`;
+    if (data.total_rows > 99) {
+        $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning" style="margin-left:0.5rem;">Large file — filters required</span>`;
+    }
+}
+
+function populateDropdowns(data) {
+    populateSelect($("email-column"), data.columns, true);
+    populateSelect($("name-column"), data.columns, false);
+    populateSheetSelect(data.sheets);
+}
+
 function apiFetch(url, opts = {}) {
     opts.headers = opts.headers || {};
     if (opts.method && opts.method !== "GET") {
@@ -70,15 +94,7 @@ async function goToStep(n) {
 
     currentStep = n;
     saveState();
-    document.querySelectorAll(".step-panel").forEach(p => p.classList.remove("active"));
-    $("step-" + n).classList.add("active");
-
-    document.querySelectorAll(".step-indicator li").forEach(li => {
-        const s = parseInt(li.dataset.step);
-        li.classList.remove("active", "completed");
-        if (s < n) li.classList.add("completed");
-        if (s === n) li.classList.add("active");
-    });
+    updateStepUI(n);
 }
 
 function confirmGoBack(targetStep) {
@@ -202,23 +218,10 @@ async function loadConfig() {
         // Restore session spreadsheet if it exists
         if (data.spreadsheet) {
             const s = data.spreadsheet;
-            spreadsheetData = {
-                columns: s.columns,
-                rows: s.rows,
-                sheets: s.sheets,
-                file_name: s.file_name,
-                total_rows: s.total_rows
-            };
+            spreadsheetData = s;
             show("spreadsheet-info");
-            $("spreadsheet-summary").textContent = `${s.file_name}: ${s.columns.length} columns, ${s.total_rows} rows.`;
-            if (s.total_rows > 99) {
-                $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning" style="margin-left:0.5rem;">Large file — filters required</span>`;
-            }
-            
-            // Re-populate dropdowns
-            populateSelect($("email-column"), s.columns, true);
-            populateSelect($("name-column"), s.columns, false);
-            populateSheetSelect(s.sheets);
+            renderSpreadsheetSummary(s);
+            populateDropdowns(s);
             
             // Restore chosen columns if they match what's in the sheet
             const savedEmailCol = localStorage.getItem("mm_email_col");
@@ -245,14 +248,7 @@ async function loadConfig() {
             $("btn-back-5").disabled = true;
             window.addEventListener("beforeunload", beforeUnloadWarn);
             currentStep = 5;
-            document.querySelectorAll(".step-panel").forEach(p => p.classList.remove("active"));
-            $("step-5").classList.add("active");
-            document.querySelectorAll(".step-indicator li").forEach(li => {
-                const s = parseInt(li.dataset.step);
-                li.classList.remove("active", "completed");
-                if (s < 5) li.classList.add("completed");
-                if (s === 5) li.classList.add("active");
-            });
+            updateStepUI(5);
             streamEvents(currentJobId, "send-log", (result) => {
                 window.removeEventListener("beforeunload", beforeUnloadWarn);
                 if (result.status === "completed" || result.status === "stopped") {
@@ -353,17 +349,9 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         }
         spreadsheetData = data;
         show("spreadsheet-info");
-        const count = data.total_rows;
-        $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${count} rows.`;
-        if (count > 99) {
-            $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning" style="margin-left:0.5rem;">Large file — filters required</span>`;
-        }
+        renderSpreadsheetSummary(data);
         $("btn-next-1").disabled = false;
-
-        // Populate dropdowns
-        populateSelect($("email-column"), data.columns, true);
-        populateSelect($("name-column"), data.columns, false);
-        populateSheetSelect(data.sheets);
+        populateDropdowns(data);
 
         // Auto-detect email column
         const emailPatterns = ["email", "e-mail", "email address", "emailaddress", "mail"];
@@ -385,18 +373,18 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
 });
 
 function populateSelect(sel, cols, required) {
-    sel.innerHTML = required ? '<option value="">-- select --</option>' : '<option value="">-- none --</option>';
+    let html = required ? '<option value="">-- select --</option>' : '<option value="">-- none --</option>';
     for (const c of cols) {
-        sel.innerHTML += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
+        html += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
     }
+    sel.innerHTML = html;
 }
 
 function populateSheetSelect(sheets) {
     const sel = $("sheet-select");
-    sel.innerHTML = "";
-    for (const s of sheets) {
-        sel.innerHTML += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
-    }
+    sel.innerHTML = sheets.map(s =>
+        `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
+    ).join("");
 }
 
 function buildPreviewTable(columns, rows) {
@@ -1058,9 +1046,6 @@ function handleAuthHash() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Init
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Session timer
 // ---------------------------------------------------------------------------
