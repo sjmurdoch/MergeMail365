@@ -286,6 +286,17 @@
         </div>
     </div>
 
+    <dialog id="session-timeout-modal">
+        <article>
+            <h3>Session Expired</h3>
+            <p>Your security session has timed out due to inactivity or the 1-hour limit. To protect your data, the interface has been locked.</p>
+            <p><strong>Don't worry:</strong> Your message subject and body have been saved to your browser and will be restored automatically.</p>
+            <footer>
+                <button onclick="window.location.reload()">Restart Session</button>
+            </footer>
+        </article>
+    </dialog>
+
 </main>
 
 <script>

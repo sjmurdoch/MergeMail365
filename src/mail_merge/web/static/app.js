@@ -1007,11 +1007,11 @@ function handleAuthHash() {
     const hash = window.location.hash;
     if (hash.startsWith("#auth-success")) {
         checkAuthStatus();
-        history.replaceState(null, "", window.location.pathname);
+        history.replaceState(null, "", window.location.pathname + window.location.search);
     } else if (hash.startsWith("#auth-error=")) {
         const error = decodeURIComponent(hash.substring("#auth-error=".length));
         alert("Authentication error: " + error);
-        history.replaceState(null, "", window.location.pathname);
+        history.replaceState(null, "", window.location.pathname + window.location.search);
     }
 }
 
@@ -1034,6 +1034,8 @@ function updateSessionTimer() {
         el.textContent = "Session expired";
         el.className = "session-timer session-warn";
         show(el);
+        const modal = $("session-timeout-modal");
+        if (modal) modal.setAttribute("open", "true");
     } else if (mins <= 10) {
         el.textContent = `Session expires in ${mins}m`;
         el.className = "session-timer session-warn";
@@ -1075,6 +1077,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Session timer — update every 30 seconds
     updateSessionTimer();
     setInterval(updateSessionTimer, 30000);
+
+    // Initial check for expired session (if browser was suspended etc)
+    const elapsed = Date.now() - sessionStart;
+    if (elapsed >= SESSION_LIFETIME_MS) {
+        const modal = $("session-timeout-modal");
+        if (modal) modal.setAttribute("open", "true");
+    }
 
     // Auto-save to localStorage (only when form content changed)
     setInterval(() => {
