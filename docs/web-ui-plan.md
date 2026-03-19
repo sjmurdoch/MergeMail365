@@ -1,5 +1,39 @@
 # Plan: Web Interface for mail-merge
 
+## Implementation Status
+
+> Last updated: 2026-03-19
+
+### Completed
+
+All core features from this plan have been implemented. The implementation closely follows the plan with the differences noted below.
+
+### Differences from Plan
+
+**`read_preview()` return type:** Plan specified `tuple[list[str], list[dict[str, str]]]` (2-tuple). Implementation returns a 3-tuple `(columns, rows, sheet_names)` to avoid a separate `openpyxl.load_workbook()` call for fetching sheet names.
+
+**`_build_msal_app()` helper:** Not in original plan. Added during implementation to deduplicate MSAL app construction across `acquire_token()`, `initiate_auth_code_flow()`, `acquire_token_by_auth_code()`, and `diagnose_auth()`.
+
+**`token_expires_at()` utility:** Not in original plan. Added to `auth.py` to decode JWT exp claims for the session timer and token expiry warnings.
+
+**`_build_merge_kwargs()` helper:** Plan proposed a shared helper to build `send_merge()` kwargs across wizard steps. Implementation builds kwargs inline in `api_start_job()` since there's only one call site (the mode is passed as a form field).
+
+**Auth login route:** Plan didn't specify how `client_id`/`tenant_id` from the UI form reach the `/auth/login` route. Implementation sends them as query parameters and the route reads from `request.args`, falling back to session/config.
+
+**Preview rendering:** Plan specified server-side preview via `POST /api/preview-template`. Implementation does client-side template rendering in JavaScript for immediate feedback, with the server endpoint available for validation of unresolved placeholders.
+
+**`mutable default arguments`:** Plan showed `auth_code_flow: dict[str, Any]` and `auth_response: dict[str, str]` as required positional params. Implementation uses `None` defaults with `or {}` guards to avoid mutable default argument pitfalls.
+
+### Not Implemented (deferred)
+
+**Searchable recipient table in Preview step:** The recipients table in Step 2 is not searchable. For the 99-recipient cap this is acceptable — all recipients are visible by scrolling.
+
+**"Did you mean?" placeholder suggestions:** Unresolved placeholder warnings list available columns but don't compute fuzzy matches. The column list is shown as context instead.
+
+**"Show technical details" toggle on log panels:** Log panels show all messages. A toggle to filter between user-meaningful events and technical details was not implemented — the log volume is manageable with the 99-recipient cap.
+
+---
+
 ## Context
 
 The mail-merge tool currently has a CLI and Python API but no browser-based interface. A web UI on localhost will make it more accessible — users can upload spreadsheets, compose templates with live preview, and monitor send progress visually, without memorising CLI flags.

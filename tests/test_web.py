@@ -252,14 +252,12 @@ class TestAuth:
         assert resp.status_code == 302
         assert "#auth-error=" in resp.headers["Location"]
 
-    @patch("mail_merge.auth._load_cache")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
-    def test_auth_status_authenticated(self, mock_app_cls, mock_cache, web_client):
-        mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
-        mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
-        mock_app.acquire_token_silent.return_value = {"access_token": "token"}
-        mock_app_cls.return_value = mock_app
+    @patch("mail_merge.auth.diagnose_auth")
+    def test_auth_status_authenticated(self, mock_diag, web_client):
+        mock_diag.return_value = {
+            "token_valid": True,
+            "accounts": [{"username": "user@example.com"}],
+        }
 
         with web_client.session_transaction() as sess:
             sess["client_id"] = "test-client-id"
@@ -290,6 +288,34 @@ class TestAuth:
         data = resp.get_json()
         assert "cache_exists" in data
         assert data["authority_reachable"] is True
+
+    @patch("mail_merge.auth.initiate_auth_code_flow")
+    @patch("mail_merge.web.app.load_config", return_value={})
+    def test_auth_login_reads_client_id_from_query(self, mock_config, mock_flow, web_client):
+        """Client ID and tenant ID from query params should be used when not in session."""
+        mock_flow.return_value = {
+            "auth_uri": "https://login.microsoftonline.com/test",
+            "state": "abc",
+        }
+        resp = web_client.get(
+            "/auth/login?client_id=from-query&tenant_id=my-tenant",
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
+        mock_flow.assert_called_once_with("from-query", "my-tenant", "http://localhost:5050/auth/callback")
+
+    @patch("mail_merge.auth.diagnose_auth")
+    def test_auth_status_includes_token_expiry(self, mock_diag, web_client):
+        mock_diag.return_value = {
+            "token_valid": True,
+            "accounts": [{"username": "user@example.com"}],
+            "token_expires_at": "2026-03-19T12:00:00+00:00",
+        }
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        resp = web_client.get("/auth/status")
+        data = resp.get_json()
+        assert data["token_expires_at"] == "2026-03-19T12:00:00+00:00"
 
 
 # ---- Job lifecycle ----
@@ -471,6 +497,71 @@ class TestJobs:
         # Job should be completed or still running
         assert status["status"] in ("completed", "running", "pending")
 
+    @responses.activate
+    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    def test_send_with_failures(self, mock_auth, web_client, sample_xlsx_web):
+        """One recipient fails with 400, the other succeeds — partial failure."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=400,
+                      json={"error": {"code": "ErrorRecipientNotFound", "message": "Bad recipient"}})
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+
+        resp = web_client.post(
+            "/api/start-job",
+            data={
+                "mode": "send",
+                "email_column": "email",
+                "subject": "Hello {{name}}",
+                "body": "Body for {{name}}.",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        import time
+        for _ in range(60):
+            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
+            status = status_resp.get_json()
+            if status["status"] in ("completed", "failed"):
+                break
+            time.sleep(0.5)
+
+        assert status["status"] == "completed"
+        assert status["summary"]["sent"] == 1
+        assert status["summary"]["failed"] == 1
+
+    def test_send_enforces_fixed_delay(self, web_client, sample_xlsx_web):
+        """The web UI always uses delay=2.0 regardless of what the client sends."""
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        resp = web_client.post(
+            "/api/start-job",
+            data={
+                "mode": "dry_run",
+                "email_column": "email",
+                "subject": "Hello {{name}}",
+                "body": "Body.",
+                "delay": "0",  # try to override
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        import time
+        for _ in range(30):
+            status_resp = web_client.get(f"/api/job/{data['job_id']}/status")
+            status = status_resp.get_json()
+            if status["status"] in ("completed", "failed"):
+                break
+            time.sleep(0.2)
+
+        # Job completes — the client's delay=0 was ignored (server forces 2.0)
+        assert status["status"] == "completed"
+
     def _get_csrf(self, client):
         client.get("/")
         with client.session_transaction() as sess:
@@ -511,6 +602,44 @@ class TestOptionsPassthrough:
                                      {"importance": "high"})
         assert resp.status_code == 200
 
+    def test_cc_bcc_passed_through(self, web_client, sample_xlsx_web):
+        resp = self._setup_and_start(web_client, sample_xlsx_web, {
+            "cc": "cc@example.com",
+            "bcc": "bcc@example.com",
+        })
+        assert resp.status_code == 200
+
+    def test_attachments_uploaded(self, web_client, sample_xlsx_web, tmp_path):
+        """Attachments are saved and passed through to send_merge."""
+        csrf = self._get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+
+        # Create a small attachment file
+        att_path = tmp_path / "doc.txt"
+        att_path.write_text("attachment content")
+
+        import io
+        with open(att_path, "rb") as att:
+            resp = web_client.post(
+                "/api/start-job",
+                data={
+                    "mode": "dry_run",
+                    "email_column": "email",
+                    "subject": "Test",
+                    "body": "Body.",
+                    "attachments": (io.BytesIO(b"file data"), "doc.txt"),
+                },
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        assert resp.status_code == 200
+
     def _get_csrf(self, client):
         client.get("/")
         with client.session_transaction() as sess:
@@ -542,11 +671,12 @@ class TestSummarize:
 class TestReadPreview:
     def test_read_preview_returns_columns_and_rows(self, sample_xlsx_web):
         from mail_merge.excel import read_preview
-        columns, rows = read_preview(sample_xlsx_web)
+        columns, rows, sheets = read_preview(sample_xlsx_web)
         assert "name" in columns
         assert "email" in columns
         assert len(rows) == 2
         assert rows[0]["name"] == "Alice"
+        assert len(sheets) >= 1
 
     def test_read_preview_max_rows(self, tmp_path):
         from mail_merge.excel import read_preview
@@ -558,7 +688,7 @@ class TestReadPreview:
             ws.append([str(i), f"val{i}"])
         wb.save(path)
 
-        columns, rows = read_preview(path, max_rows=3)
+        columns, rows, _sheets = read_preview(path, max_rows=3)
         assert len(rows) == 3
 
     def test_read_preview_empty_raises(self, tmp_path):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import enum
+import json
 import logging
 import os
 import queue
@@ -189,8 +190,19 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     @app.route("/auth/login")
     def auth_login() -> Any:
-        client_id = session.get("client_id") or _get_config_value("client_id")
-        tenant_id = session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        # Read client_id/tenant_id from query params (sent by JS), falling
+        # back to session/config.  Store in session for later use.
+        client_id = (
+            request.args.get("client_id")
+            or session.get("client_id")
+            or _get_config_value("client_id")
+        )
+        tenant_id = (
+            request.args.get("tenant_id")
+            or session.get("tenant_id")
+            or _get_config_value("tenant_id")
+            or "common"
+        )
         if not client_id:
             return jsonify({"error": "client_id is required"}), 400
 
@@ -234,34 +246,24 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     @app.route("/auth/status")
     def auth_status() -> Response:
-        client_id = session.get("client_id") or _get_config_value("client_id")
-        tenant_id = session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        client_id, tenant_id = _get_client_tenant()
         if not client_id:
             return jsonify({"authenticated": False, "email": None})
 
-        from mail_merge.auth import _load_cache, SCOPES
-        import msal
+        from mail_merge.auth import diagnose_auth
 
-        cache = _load_cache()
-        msal_app = msal.PublicClientApplication(
-            client_id,
-            authority=f"https://login.microsoftonline.com/{tenant_id}",
-            token_cache=cache,
-        )
-        accounts = msal_app.get_accounts()
-        if accounts:
-            result = msal_app.acquire_token_silent(SCOPES, account=accounts[0])
-            if result and "access_token" in result:
-                return jsonify({
-                    "authenticated": True,
-                    "email": accounts[0].get("username", ""),
-                })
+        info = diagnose_auth(client_id, tenant_id)
+        if info["token_valid"] and info["accounts"]:
+            return jsonify({
+                "authenticated": True,
+                "email": info["accounts"][0].get("username", ""),
+                "token_expires_at": info.get("token_expires_at"),
+            })
         return jsonify({"authenticated": False, "email": None})
 
     @app.route("/auth/debug")
     def auth_debug() -> Response:
-        client_id = session.get("client_id") or _get_config_value("client_id")
-        tenant_id = session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        client_id, tenant_id = _get_client_tenant()
         if not client_id:
             return jsonify({"error": "client_id is required"})
 
@@ -299,17 +301,11 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         from mail_merge.excel import read_preview
 
         try:
-            columns, rows = read_preview(filepath)
-        except (ValueError, Exception) as exc:
+            columns, rows, sheets = read_preview(filepath)
+        except Exception as exc:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             _unregister_temp_dir(tmp_dir)
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
-
-        # Get sheet names
-        import openpyxl
-        wb = openpyxl.load_workbook(filepath, read_only=True)
-        sheets = wb.sheetnames
-        wb.close()
 
         session["spreadsheet_path"] = filepath
         session["spreadsheet_tmp_dir"] = tmp_dir
@@ -371,7 +367,7 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         from mail_merge.excel import read_recipients
         try:
             all_recipients = read_recipients(spreadsheet_path, email_column)
-        except (ValueError, Exception) as exc:
+        except Exception as exc:
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
 
         if len(all_recipients) > MAX_WEB_RECIPIENTS:
@@ -381,8 +377,7 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
             }), 400  # type: ignore[return-value]
 
         # Build kwargs
-        client_id = session.get("client_id") or _get_config_value("client_id")
-        tenant_id = session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        client_id, tenant_id = _get_client_tenant()
 
         kwargs: dict[str, Any] = {
             "spreadsheet": spreadsheet_path,
@@ -454,6 +449,11 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
             kwargs["token_provider"] = _make_token_provider(client_id, tenant_id)
 
+        # Evict completed/failed jobs before creating a new one
+        for jid in list(_jobs):
+            if _jobs[jid].status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.STOPPED):
+                del _jobs[jid]
+
         # Create and start job
         job = Job(id=str(uuid.uuid4()))
         _jobs[job.id] = job
@@ -505,7 +505,6 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
                 if event is None:
                     yield "data: {\"type\": \"done\"}\n\n"
                     break
-                import json
                 yield f"data: {json.dumps(event)}\n\n"
 
         return Response(generate(), mimetype="text/event-stream")
@@ -544,8 +543,17 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     # ----- Helpers -----
 
+    _cached_config: dict[str, str] | None = None
+
     def _get_config_value(key: str) -> str | None:
-        config = load_config()
-        return config.get(key) or os.environ.get(f"MAIL_MERGE_{key.upper()}")
+        nonlocal _cached_config
+        if _cached_config is None:
+            _cached_config = load_config()
+        return _cached_config.get(key) or os.environ.get(f"MAIL_MERGE_{key.upper()}")
+
+    def _get_client_tenant() -> tuple[str | None, str]:
+        client_id = session.get("client_id") or _get_config_value("client_id")
+        tenant_id = session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        return client_id, tenant_id
 
     return app

@@ -121,3 +121,31 @@ class TestDiagnoseAuth:
         assert info["token_valid"] is True
         assert len(info["accounts"]) == 1
         assert info["authority_reachable"] is True
+
+    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth._load_cache")
+    def test_expired_token(self, mock_cache, mock_app_cls):
+        """Silent acquisition fails for expired tokens — token_valid should be False."""
+        mock_cache.return_value = MagicMock()
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = [{"username": "user@example.com", "home_account_id": "123"}]
+        # Silent acquisition returns error (expired refresh token)
+        mock_app.acquire_token_silent.return_value = {
+            "error": "interaction_required",
+            "error_description": "Token expired",
+        }
+        mock_app_cls.return_value = mock_app
+
+        with patch("mail_merge.auth.CACHE_PATH") as mock_path:
+            mock_path.exists.return_value = True
+            mock_path.__str__ = lambda self: "/fake/path"
+            with patch("requests.get") as mock_get:
+                mock_resp = MagicMock()
+                mock_resp.status_code = 200
+                mock_get.return_value = mock_resp
+
+                info = diagnose_auth("test-client-id")
+
+        assert info["token_valid"] is False
+        assert len(info["accounts"]) == 1
+        assert info["authority_reachable"] is True

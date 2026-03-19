@@ -5,7 +5,6 @@
 // ---------------------------------------------------------------------------
 let currentStep = 1;
 let spreadsheetData = null;   // { columns, rows, sheets, file_name }
-let allRecipients = null;     // full rows from preview
 let previewIndex = 0;
 let sendMode = "individual";  // "individual" | "bcc"
 let testPassed = false;
@@ -13,6 +12,10 @@ let verifyPassed = false;
 let sendStarted = false;
 let currentJobId = null;
 let sendResults = null;
+let formDirty = false;
+
+// Convenience getter — spreadsheetData.rows is the single source of truth
+function getRecipients() { return spreadsheetData ? spreadsheetData.rows : null; }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -115,6 +118,12 @@ function validateSetup() {
         alert("BCC Blast mode requires a To: address.");
         return false;
     }
+    // 99-recipient cap
+    const recipients = getRecipients();
+    if (recipients && recipients.length > 99) {
+        alert(`Too many recipients (${recipients.length}). The web interface supports up to 99 recipients. For larger sends, use the command-line tool.`);
+        return false;
+    }
     return true;
 }
 
@@ -163,6 +172,7 @@ async function loadConfig() {
 }
 
 // Check auth status
+let tokenExpiresAt = null;
 async function checkAuthStatus() {
     try {
         const resp = await apiFetch("/auth/status");
@@ -173,8 +183,12 @@ async function checkAuthStatus() {
             if ($("test-email-input") && !$("test-email-input").value) {
                 $("test-email-input").value = data.email;
             }
+            if (data.token_expires_at) {
+                tokenExpiresAt = new Date(data.token_expires_at);
+            }
         } else {
             el.innerHTML = '<span class="dot gray"></span> Not signed in';
+            tokenExpiresAt = null;
         }
     } catch (e) { /* ignore */ }
 }
@@ -225,7 +239,6 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
             return;
         }
         spreadsheetData = data;
-        allRecipients = data.rows;
         show("spreadsheet-info");
         $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, showing first ${data.rows.length} rows`;
 
@@ -304,6 +317,7 @@ function onTemplateChange() {
     clearTimeout(placeholderTimer);
     placeholderTimer = setTimeout(validatePlaceholders, 500);
     if (sendMode === "bcc") checkBccPlaceholders();
+    formDirty = true;
 }
 $("subject-input").addEventListener("input", onTemplateChange);
 $("body-input").addEventListener("input", onTemplateChange);
@@ -332,15 +346,15 @@ function validatePlaceholders() {
 // Step 2: Preview
 // ---------------------------------------------------------------------------
 async function loadPreview() {
-    if (!spreadsheetData || !allRecipients || allRecipients.length === 0) return;
+    if (!spreadsheetData || !getRecipients() || getRecipients().length === 0) return;
     previewIndex = 0;
     renderPreviewRecipient();
     buildRecipientsTable();
 }
 
 function renderPreviewRecipient() {
-    if (!allRecipients || allRecipients.length === 0) return;
-    const row = allRecipients[previewIndex];
+    if (!getRecipients() || getRecipients().length === 0) return;
+    const row = getRecipients()[previewIndex];
     const subject = $("subject-input").value;
     const body = $("body-input").value;
 
@@ -359,7 +373,7 @@ function renderPreviewRecipient() {
         hide("preview-body-html");
         $("preview-body").textContent = rendered_body;
     }
-    $("preview-recipient-label").textContent = `Previewing recipient ${previewIndex + 1} of ${allRecipients.length}`;
+    $("preview-recipient-label").textContent = `Previewing recipient ${previewIndex + 1} of ${getRecipients().length}`;
 }
 
 function renderTemplate(template, data) {
@@ -373,19 +387,19 @@ function renderTemplate(template, data) {
 }
 
 function changePreviewRecipient(delta) {
-    if (!allRecipients) return;
-    previewIndex = Math.max(0, Math.min(allRecipients.length - 1, previewIndex + delta));
+    if (!getRecipients()) return;
+    previewIndex = Math.max(0, Math.min(getRecipients().length - 1, previewIndex + delta));
     renderPreviewRecipient();
 }
 
 function buildRecipientsTable() {
-    if (!allRecipients || !spreadsheetData) return;
+    if (!getRecipients() || !spreadsheetData) return;
     const emailCol = $("email-column").value;
     const cols = [emailCol, ...spreadsheetData.columns.filter(c => c !== emailCol)].slice(0, 5);
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
     thead.innerHTML = "<tr>" + cols.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
-    tbody.innerHTML = allRecipients.map(row =>
+    tbody.innerHTML = getRecipients().map(row =>
         "<tr>" + cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
     ).join("");
 }
@@ -400,8 +414,8 @@ function checkAuthForStep3() {
 }
 
 function updateTestPreview() {
-    if (!allRecipients || allRecipients.length === 0) return;
-    const row = allRecipients[0];
+    if (!getRecipients() || getRecipients().length === 0) return;
+    const row = getRecipients()[0];
     const subject = $("subject-input").value;
     const rendered = renderTemplate(subject, row);
     const testAddr = $("test-email-input").value || "(enter test address above)";
@@ -444,7 +458,8 @@ async function sendTestEmail() {
                 $("btn-next-3").disabled = false;
                 showTestResult(true, "Test email sent successfully!");
             } else {
-                showTestResult(false, result.error || "Test email failed");
+                const errMsg = categoriseError(result.error || "Test email failed");
+                showTestResult(false, errMsg);
                 show("btn-retry-test");
             }
         });
@@ -466,7 +481,7 @@ function showTestResult(success, msg) {
 // Step 4: Verify (Dry Run)
 // ---------------------------------------------------------------------------
 function startVerify() {
-    $("verify-count").textContent = allRecipients ? allRecipients.length : "?";
+    $("verify-count").textContent = getRecipients() ? getRecipients().length : "?";
     $("verify-log").innerHTML = "";
     hide("verify-result");
     $("btn-next-4").disabled = true;
@@ -485,9 +500,17 @@ function startVerify() {
                 if (result.status === "completed") {
                     verifyPassed = true;
                     $("btn-next-4").disabled = false;
-                    const n = allRecipients ? allRecipients.length : "?";
-                    const est = allRecipients ? allRecipients.length * 2 : "?";
-                    showVerifyResult(true, `${n} emails ready to send. Estimated time: ~${est} seconds (2-second delay between sends).`);
+                    const n = getRecipients() ? getRecipients().length : "?";
+                    const estSec = getRecipients() ? getRecipients().length * 2 : "?";
+                    let msg = `${n} emails ready to send. Estimated time: ~${estSec} seconds (2-second delay between sends).`;
+                    // Token expiry check
+                    if (tokenExpiresAt && getRecipients()) {
+                        const estEndMs = Date.now() + getRecipients().length * 2000;
+                        if (estEndMs > tokenExpiresAt.getTime()) {
+                            msg += "\n⚠️ Warning: Your authentication token may expire before sending completes. Consider signing in again before proceeding.";
+                        }
+                    }
+                    showVerifyResult(true, msg);
                 } else {
                     showVerifyResult(false, result.error || "Verification failed");
                 }
@@ -509,15 +532,24 @@ function showVerifyResult(success, msg) {
 function prepareSend() {
     sendStarted = false;
     sendResults = null;
-    const n = allRecipients ? allRecipients.length : "?";
+    const n = getRecipients() ? getRecipients().length : "?";
     $("send-count").textContent = n;
 
     // Build details
     let details = "";
-    const emailCol = $("email-column").value;
-    details += `<strong>Email column:</strong> ${escapeHtml(emailCol)}<br>`;
+    const authEmail = $("auth-display").querySelector(".email");
+    if (authEmail) details += `<strong>From:</strong> ${escapeHtml(authEmail.textContent)}<br>`;
+    details += `<strong>Recipients:</strong> ${n}<br>`;
     if ($("cc-input").value) details += `<strong>CC:</strong> ${escapeHtml($("cc-input").value)}<br>`;
     if ($("bcc-input").value) details += `<strong>BCC:</strong> ${escapeHtml($("bcc-input").value)}<br>`;
+    const attInput = $("attachment-input");
+    if (attInput.files.length > 0) {
+        const attList = Array.from(attInput.files).map(f => {
+            const sizeKb = (f.size / 1024).toFixed(0);
+            return `${escapeHtml(f.name)} (${sizeKb} KB)`;
+        });
+        details += `<strong>Attachments:</strong> ${attList.join(", ")}<br>`;
+    }
     $("send-confirm-details").innerHTML = details;
 
     show("send-confirm");
@@ -562,6 +594,10 @@ async function startSend() {
             } else {
                 showSendResult(false, result.error || "Send failed");
             }
+        }, (current, total) => {
+            $("send-progress-bar").max = total;
+            $("send-progress-bar").value = current;
+            $("send-progress-text").textContent = `Sending ${current} of ${total}...`;
         });
     } catch (e) {
         window.removeEventListener("beforeunload", beforeUnloadWarn);
@@ -640,7 +676,6 @@ function downloadCsv() {
 
 function newMerge() {
     spreadsheetData = null;
-    allRecipients = null;
     sendResults = null;
     testPassed = false;
     verifyPassed = false;
@@ -655,7 +690,7 @@ function newMerge() {
 // ---------------------------------------------------------------------------
 // SSE streaming
 // ---------------------------------------------------------------------------
-function streamEvents(jobId, logPanelId, onComplete) {
+function streamEvents(jobId, logPanelId, onComplete, onProgress) {
     const panel = $(logPanelId);
     const evtSource = new EventSource(`/api/job/${jobId}/events`);
 
@@ -675,6 +710,11 @@ function streamEvents(jobId, logPanelId, onComplete) {
             entry.textContent = `[${event.data.timestamp}] ${event.data.message}`;
             panel.appendChild(entry);
             panel.scrollTop = panel.scrollHeight;
+            // Extract send progress from log messages like "Sending [3/42]"
+            if (onProgress) {
+                const match = event.data.message.match(/\[(\d+)\/(\d+)\]/);
+                if (match) onProgress(parseInt(match[1]), parseInt(match[2]));
+            }
         }
         if (event.type === "completed" || event.type === "error") {
             // Will be followed by "done"
@@ -744,13 +784,68 @@ function handleAuthHash() {
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Session timer
+// ---------------------------------------------------------------------------
+const SESSION_LIFETIME_MS = 60 * 60 * 1000; // 1 hour
+const sessionStart = Date.now();
+
+function updateSessionTimer() {
+    const el = $("session-timer");
+    if (!el) return;
+    const elapsed = Date.now() - sessionStart;
+    const remaining = Math.max(0, SESSION_LIFETIME_MS - elapsed);
+    const mins = Math.ceil(remaining / 60000);
+    if (remaining <= 0) {
+        el.textContent = "Session expired";
+        el.className = "session-timer session-warn";
+        show(el);
+    } else if (mins <= 10) {
+        el.textContent = `Session expires in ${mins}m`;
+        el.className = "session-timer session-warn";
+        show(el);
+    } else {
+        el.textContent = `Session: ${mins}m`;
+        show(el);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Categorised error messages for test email
+// ---------------------------------------------------------------------------
+function categoriseError(msg) {
+    if (!msg) return msg;
+    if (/401|403|Forbidden|Unauthorized/i.test(msg)) {
+        return "Permission denied. Check that your Azure AD app has Mail.Send permission and admin consent has been granted.";
+    }
+    if (/400|Bad Request/i.test(msg)) {
+        return "Email rejected by Microsoft. Check that all addresses, attachments, and fields are valid.";
+    }
+    if (/429|Too Many Requests|throttl/i.test(msg)) {
+        return "Rate limited by Microsoft. Wait a moment and retry.";
+    }
+    if (/5\d\d|Server Error|Internal/i.test(msg)) {
+        return "Microsoft server error. This is usually temporary. Try again in a few moments.";
+    }
+    return msg;
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
     loadConfig();
     checkAuthStatus();
     handleAuthHash();
 
-    // Auto-save to localStorage
+    // Session timer — update every 30 seconds
+    updateSessionTimer();
+    setInterval(updateSessionTimer, 30000);
+
+    // Auto-save to localStorage (only when form content changed)
     setInterval(() => {
+        if (!formDirty) return;
+        formDirty = false;
         try {
             localStorage.setItem("mm_subject", $("subject-input").value);
             localStorage.setItem("mm_body", $("body-input").value);

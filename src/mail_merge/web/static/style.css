@@ -319,3 +319,15 @@ body > main {
 .auth-indicator .dot.green { background: #22c55e; }
 .auth-indicator .dot.red { background: #ef4444; }
 .auth-indicator .dot.gray { background: #9ca3af; }
+
+/* Session timer */
+.session-timer {
+    font-size: 0.75rem;
+    color: var(--pico-muted-color);
+    margin-right: 1rem;
+}
+
+.session-timer.session-warn {
+    color: #d97706;
+    font-weight: 600;
+}
