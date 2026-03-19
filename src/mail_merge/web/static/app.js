@@ -74,6 +74,7 @@ async function goToStep(n) {
     }
 
     currentStep = n;
+    saveState();
     document.querySelectorAll(".step-panel").forEach(p => p.classList.remove("active"));
     $("step-" + n).classList.add("active");
 
@@ -170,11 +171,27 @@ function checkBccPlaceholders() {
     }
 }
 
-// Load config on page load
+async function saveState() {
+    try {
+        await apiFetch("/api/state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                current_step: currentStep,
+                test_passed: testPassed,
+                verify_passed: verifyPassed
+            })
+        });
+    } catch (e) { /* ignore */ }
+}
+
+// Load config and session status on page load
 async function loadConfig() {
     try {
         const resp = await apiFetch("/api/config");
         const data = await resp.json();
+        
+        // Restore config
         if (data.client_id) {
             $("client-id").value = data.client_id;
             show("config-badge");
@@ -182,7 +199,53 @@ async function loadConfig() {
         if (data.tenant_id) {
             $("tenant-id").value = data.tenant_id;
         }
-    } catch (e) { /* ignore */ }
+
+        // Restore session spreadsheet if it exists
+        if (data.spreadsheet) {
+            const s = data.spreadsheet;
+            spreadsheetData = {
+                columns: s.columns,
+                rows: s.rows,
+                sheets: s.sheets,
+                file_name: s.file_name,
+                total_rows: s.total_rows
+            };
+            show("spreadsheet-info");
+            $("spreadsheet-summary").textContent = `${s.file_name}: ${s.columns.length} columns, ${s.total_rows} rows.`;
+            if (s.total_rows > 99) {
+                $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning" style="margin-left:0.5rem;">Large file — filters required</span>`;
+            }
+            
+            // Re-populate dropdowns
+            populateSelect($("email-column"), s.columns, true);
+            populateSelect($("name-column"), s.columns, false);
+            populateSheetSelect(s.sheets);
+            
+            // Restore chosen columns if they match what's in the sheet
+            const savedEmailCol = localStorage.getItem("mm_email_col");
+            if (savedEmailCol && s.columns.includes(savedEmailCol)) {
+                $("email-column").value = savedEmailCol;
+            }
+            const savedNameCol = localStorage.getItem("mm_name_col");
+            if (savedNameCol && s.columns.includes(savedNameCol)) {
+                $("name-column").value = savedNameCol;
+            }
+        }
+
+        // Restore wizard state
+        testPassed = data.test_passed;
+        verifyPassed = data.verify_passed;
+        
+        if (data.active_job_id) {
+            currentJobId = data.active_job_id;
+            sendStarted = true;
+            // Jump to step 5 (Send) and connect to the existing stream
+            await goToStep(5);
+            connectSSE(currentJobId);
+        } else if (data.current_step > 1) {
+            await goToStep(data.current_step);
+        }
+    } catch (e) { console.error("Error loading config:", e); }
 }
 
 // Check auth status
@@ -368,6 +431,13 @@ function onTemplateChange() {
 }
 $("subject-input").addEventListener("input", onTemplateChange);
 $("body-input").addEventListener("input", onTemplateChange);
+$("email-column").addEventListener("change", onTemplateChange);
+$("name-column").addEventListener("change", onTemplateChange);
+$("html-toggle").addEventListener("change", onTemplateChange);
+$("cc-input").addEventListener("input", onTemplateChange);
+$("bcc-input").addEventListener("input", onTemplateChange);
+$("reply-to-input").addEventListener("input", onTemplateChange);
+$("filter-input").addEventListener("input", onTemplateChange);
 
 function validatePlaceholders() {
     if (!spreadsheetData) return;
@@ -550,6 +620,9 @@ async function sendTestEmail() {
         return;
     }
 
+    testPassed = false;
+    saveState();
+
     $("btn-send-test").disabled = true;
     $("btn-send-test").setAttribute("aria-busy", "true");
     hide("btn-retry-test");
@@ -571,6 +644,7 @@ async function sendTestEmail() {
         streamEvents(data.job_id, "test-log", (result) => {
             if (result.status === "completed") {
                 testPassed = true;
+                saveState();
                 $("btn-next-3").disabled = false;
                 showTestResult(true, "Test email sent successfully!");
             } else {
@@ -602,6 +676,8 @@ function startVerify() {
     $("verify-log").innerHTML = "";
     hide("verify-result");
     $("btn-next-4").disabled = true;
+    verifyPassed = false;
+    saveState();
 
     const form = buildJobFormData("dry_run");
 
@@ -616,6 +692,7 @@ function startVerify() {
             streamEvents(data.job_id, "verify-log", (result) => {
                 if (result.status === "completed") {
                     verifyPassed = true;
+                    saveState();
                     $("btn-next-4").disabled = false;
                     const recs = getRecipients();
                     const n = recs ? recs.length : "?";
@@ -807,6 +884,8 @@ function newMerge() {
     verifyPassed = false;
     sendStarted = false;
     currentJobId = null;
+    currentStep = 1;
+    saveState();
     
     // Clear Step 1
     $("spreadsheet-file").value = "";
@@ -853,7 +932,10 @@ function streamEvents(jobId, logPanelId, onComplete, onProgress) {
             // Fetch final status
             apiFetch(`/api/job/${jobId}/status`)
                 .then(r => r.json())
-                .then(data => onComplete(data));
+                .then(data => {
+                    onComplete(data);
+                    saveState();
+                });
             return;
         }
         if (event.type === "log") {
@@ -1001,6 +1083,8 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             localStorage.setItem("mm_subject", $("subject-input").value);
             localStorage.setItem("mm_body", $("body-input").value);
+            localStorage.setItem("mm_email_col", $("email-column").value);
+            localStorage.setItem("mm_name_col", $("name-column").value);
         } catch (e) { /* ignore */ }
     }, 5000);
 
@@ -1008,7 +1092,12 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
         const savedSubject = localStorage.getItem("mm_subject");
         const savedBody = localStorage.getItem("mm_body");
+        const savedEmailCol = localStorage.getItem("mm_email_col");
+        const savedNameCol = localStorage.getItem("mm_name_col");
+        
         if (savedSubject && !$("subject-input").value) $("subject-input").value = savedSubject;
         if (savedBody && !$("body-input").value) $("body-input").value = savedBody;
+        if (savedEmailCol && !$("email-column").value) $("email-column").value = savedEmailCol;
+        if (savedNameCol && !$("name-column").value) $("name-column").value = savedNameCol;
     } catch (e) { /* ignore */ }
 });

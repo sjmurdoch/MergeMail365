@@ -130,7 +130,11 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         template_folder=os.path.join(os.path.dirname(__file__), "templates"),
         static_folder=os.path.join(os.path.dirname(__file__), "static"),
     )
-    app.secret_key = secrets.token_hex(32)
+    # Use a stable secret key based on the startup token so that restarting
+    # the server doesn't invalidate the user's session.
+    import hashlib
+    app.secret_key = hashlib.sha256(startup_token.encode()).hexdigest()
+    
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 hour
@@ -292,10 +296,32 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     @app.route("/api/config")
     def api_config() -> Response:
+        # Check if there is an active job still running for this session
+        active_job_id = None
+        job_id = session.get("job_id")
+        if job_id and job_id in jobs:
+            active_job_id = job_id
+
         return jsonify({
             "client_id": _get_config_value("client_id") or "",
             "tenant_id": _get_config_value("tenant_id") or "",
+            "spreadsheet": session.get("spreadsheet_info"),
+            "current_step": session.get("current_step", 1),
+            "test_passed": session.get("test_passed", False),
+            "verify_passed": session.get("verify_passed", False),
+            "active_job_id": active_job_id,
         })
+
+    @app.route("/api/state", methods=["POST"])
+    def api_save_state() -> Response:
+        data = request.get_json()
+        if "current_step" in data:
+            session["current_step"] = data["current_step"]
+        if "test_passed" in data:
+            session["test_passed"] = data["test_passed"]
+        if "verify_passed" in data:
+            session["verify_passed"] = data["verify_passed"]
+        return jsonify({"success": True})
 
     # ----- Spreadsheet upload -----
 
@@ -326,14 +352,15 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
         session["spreadsheet_path"] = filepath
         session["spreadsheet_tmp_dir"] = tmp_dir
-
-        return jsonify({
+        session["spreadsheet_info"] = {
             "columns": columns,
             "rows": rows,
             "sheets": sheets,
             "total_rows": total_rows,
             "file_name": file.filename,
-        })
+        }
+
+        return jsonify(session["spreadsheet_info"])
 
     @app.route("/api/get-recipients", methods=["POST"])
     def api_get_recipients() -> Response:
