@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import werkzeug
+werkzeug.serving._log_add_style = False
 from flask import (
     Flask,
     Response,

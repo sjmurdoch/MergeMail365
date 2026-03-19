@@ -4,10 +4,6 @@ from __future__ import annotations
 
 import os
 
-# Disable Werkzeug's built-in ANSI colors since we use Rich for logging.
-# This MUST be set before Flask or Werkzeug are imported anywhere.
-os.environ["WERKZEUG_COLOR"] = "0"
-
 import argparse
 import logging
 import secrets
