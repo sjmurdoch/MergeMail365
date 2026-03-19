@@ -139,8 +139,10 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     @app.before_request
     def _check_auth() -> Any:
-        # Allow static files without auth
+        # Allow static files and auth callback without session auth
         if request.endpoint == "static":
+            return None
+        if request.endpoint in ("auth_callback",):
             return None
 
         # Check for startup token in query string
@@ -154,9 +156,10 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         # Check session
         if not session.get("authenticated"):
             return Response(
-                "Forbidden — use the URL printed in the terminal to access this app.",
+                "Forbidden -- use the URL printed in the terminal to access this app.\n"
+                "Look for the line starting with 'Access URL:' in the server output.\n",
                 status=403,
-                content_type="text/plain",
+                content_type="text/plain; charset=utf-8",
             )
         return None
 
