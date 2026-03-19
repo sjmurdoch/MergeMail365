@@ -41,24 +41,28 @@ function apiFetch(url, opts = {}) {
 // Step navigation
 // ---------------------------------------------------------------------------
 function goToStep(n) {
-    // Validation before advancing
-    if (n === 2 && currentStep === 1) {
-        if (!validateSetup()) return;
-        loadPreview();
-    }
-    if (n === 3) {
-        if (!testPassed) {
-            // pre-fill test email
-            checkAuthForStep3();
+    console.log("Navigating to step", n, "from", currentStep);
+    
+    // Only perform validation/trigger side-effects when advancing forward
+    if (n > currentStep) {
+        if (n === 2 && currentStep === 1) {
+            if (!validateSetup()) return;
+            loadPreview();
         }
-    }
-    if (n === 4) {
-        if (!testPassed) return;
-        startVerify();
-    }
-    if (n === 5) {
-        if (!verifyPassed) return;
-        prepareSend();
+        if (n === 3) {
+            if (!testPassed) {
+                // pre-fill test email
+                checkAuthForStep3();
+            }
+        }
+        if (n === 4) {
+            if (!testPassed) return;
+            startVerify();
+        }
+        if (n === 5) {
+            if (!verifyPassed) return;
+            prepareSend();
+        }
     }
 
     currentStep = n;
@@ -135,12 +139,14 @@ function setSendMode(mode) {
         $("mode-bcc").classList.remove("active-mode");
         $("mode-bcc").classList.add("outline");
         hide("bcc-blast-options");
+        if (spreadsheetData) show("placeholder-chips");
     } else {
         $("mode-bcc").classList.add("active-mode");
         $("mode-bcc").classList.remove("outline");
         $("mode-individual").classList.remove("active-mode");
         $("mode-individual").classList.add("outline");
         show("bcc-blast-options");
+        hide("placeholder-chips");
         checkBccPlaceholders();
     }
 }
@@ -302,14 +308,29 @@ function showPlaceholderChips(columns) {
         const chip = document.createElement("span");
         chip.className = "chip";
         chip.textContent = "{{" + col + "}}";
-        chip.addEventListener("click", () => {
-            const ta = $("body-input");
-            const start = ta.selectionStart;
-            const end = ta.selectionEnd;
-            const text = ta.value;
-            ta.value = text.substring(0, start) + "{{" + col + "}}" + text.substring(end);
-            ta.focus();
-            ta.setSelectionRange(start + col.length + 4, start + col.length + 4);
+        chip.addEventListener("mousedown", (e) => {
+            // Use mousedown and preventDefault to avoid the input losing focus
+            // when clicking the chip.
+            e.preventDefault();
+            
+            // Target either the subject or the body, whichever was last focused
+            let target = document.activeElement;
+            if (target !== $("subject-input") && target !== $("body-input")) {
+                target = $("body-input");
+            }
+            
+            const start = target.selectionStart;
+            const end = target.selectionEnd;
+            const text = target.value;
+            const insertion = "{{" + col + "}}";
+            
+            target.value = text.substring(0, start) + insertion + text.substring(end);
+            target.focus();
+            const newPos = start + insertion.length;
+            target.setSelectionRange(newPos, newPos);
+            
+            // Trigger validation/auto-save
+            onTemplateChange();
         });
         container.appendChild(chip);
     }
@@ -720,10 +741,35 @@ function newMerge() {
     testPassed = false;
     verifyPassed = false;
     sendStarted = false;
+    currentJobId = null;
+    
+    // Clear Step 1
     $("spreadsheet-file").value = "";
     hide("spreadsheet-info");
+    
+    // Clear Step 3 (Test)
+    $("test-email-input").value = "";
+    $("test-log").innerHTML = "";
+    hide("test-log");
+    $("test-result").innerHTML = "";
+    hide("test-result");
     $("btn-next-3").disabled = true;
+    
+    // Clear Step 4 (Verify)
+    $("verify-log").innerHTML = "";
+    hide("verify-log");
+    $("verify-result").innerHTML = "";
+    hide("verify-result");
     $("btn-next-4").disabled = true;
+    
+    // Clear Step 5 (Send)
+    $("send-confirm-input").value = "";
+    $("send-log").innerHTML = "";
+    hide("send-log");
+    $("send-result").innerHTML = "";
+    hide("send-result");
+    $("send-progress-bar").value = 0;
+    
     goToStep(1);
 }
 

@@ -111,16 +111,17 @@ body > main {
     display: inline-block;
     padding: 0.2rem 0.6rem;
     border-radius: 1rem;
-    background: var(--pico-secondary-background);
-    color: var(--pico-secondary);
+    background-color: var(--pico-primary);
+    color: var(--pico-primary-inverse);
     font-size: 0.8rem;
+    font-weight: 600;
     cursor: pointer;
-    border: 1px solid var(--pico-secondary-border);
-    transition: background 0.15s;
+    border: 1px solid var(--pico-primary);
+    transition: filter 0.15s;
 }
 
 .chip:hover {
-    background: var(--pico-secondary-hover-background);
+    filter: brightness(1.2);
 }
 
 /* Log panel */
@@ -176,11 +177,23 @@ body > main {
 }
 
 .results-table .success {
-    color: var(--pico-ins-color);
+    color: #166534; /* Darker green for better contrast */
+    font-weight: 600;
 }
 
 .results-table .failure {
     color: var(--pico-del-color);
+    font-weight: 600;
+}
+
+.success {
+    color: #166534;
+    font-weight: 600;
+}
+
+.failure {
+    color: var(--pico-del-color);
+    font-weight: 600;
 }
 
 /* Recipient count badge */
@@ -232,15 +245,15 @@ body > main {
 /* Collapsible options */
 details summary {
     display: inline-block;
-    padding: 0.25rem 0.75rem;
-    border-radius: 0.25rem;
-    background: var(--pico-secondary-background);
-    color: var(--pico-secondary-color);
-    font-size: 0.85rem;
-    font-weight: 500;
+    padding: 0.4rem 1rem;
+    border-radius: var(--pico-border-radius);
+    background-color: var(--pico-primary);
+    color: var(--pico-primary-inverse) !important;
+    font-size: 0.9rem;
+    font-weight: 700;
     cursor: pointer;
-    border: 1px solid var(--pico-secondary-border);
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    border: 1px solid var(--pico-primary);
+    transition: background-color 0.15s, border-color 0.15s, filter 0.15s;
     margin-bottom: 0.5rem;
     list-style: none; /* Hide default arrow in some browsers */
 }
@@ -255,6 +268,7 @@ details summary::before {
     margin-right: 0.5rem;
     font-size: 0.7rem;
     transition: transform 0.2s;
+    color: var(--pico-primary-inverse);
 }
 
 details[open] summary::before {
@@ -262,8 +276,7 @@ details[open] summary::before {
 }
 
 details summary:hover {
-    background: var(--pico-secondary-hover-background);
-    border-color: var(--pico-secondary-hover-border);
+    filter: brightness(1.1);
 }
 
 .collapsible-header {
@@ -309,8 +322,9 @@ details summary:hover {
 }
 
 .callout-info {
-    background: var(--pico-primary-background);
-    border: 1px solid var(--pico-primary-border);
+    background-color: var(--pico-primary);
+    border: 1px solid var(--pico-primary);
+    color: var(--pico-primary-inverse);
 }
 
 .callout-danger {

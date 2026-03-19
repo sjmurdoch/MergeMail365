@@ -11,7 +11,7 @@
 <main>
     <!-- Header -->
     <div class="header-bar">
-        <strong>Mail Merge</strong>
+        <strong>Email mail merge</strong>
         <div class="identity">
             <span id="session-timer" class="session-timer hidden"></span>
             <span id="auth-display" class="auth-indicator">
@@ -31,7 +31,7 @@
 
     <!-- ===== STEP 1: Setup ===== -->
     <div class="step-panel active" id="step-1">
-        <h3>Setup</h3>
+        <h3>Setup the mail merge</h3>
 
         <!-- Auth -->
         <fieldset>
@@ -169,7 +169,7 @@
 
     <!-- ===== STEP 2: Preview ===== -->
     <div class="step-panel" id="step-2">
-        <h3>Preview</h3>
+        <h3>Preview emails to send</h3>
         <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
             <button type="button" class="outline" onclick="changePreviewRecipient(-1)">&larr; Prev</button>
             <span id="preview-recipient-label">Previewing recipient 1 of ?</span>
@@ -177,7 +177,6 @@
         </div>
 
         <div class="preview-box" style="margin-bottom:1rem;">
-            <div class="preview-label">Headers</div>
             <div class="grid" style="margin-bottom: 0; row-gap: 0.5rem;">
                 <div>
                     <small><strong>To:</strong> <span id="preview-to"></span></small><br>
@@ -196,7 +195,6 @@
             <div id="preview-subject" style="font-weight:600;"></div>
         </div>
         <div class="preview-box" style="margin-bottom:1rem;">
-            <div class="preview-label">Body</div>
             <pre id="preview-body" style="white-space:pre-wrap;margin:0;"></pre>
             <iframe id="preview-body-html" class="hidden" sandbox="" style="width:100%;min-height:200px;border:none;"></iframe>
         </div>
@@ -219,7 +217,7 @@
 
     <!-- ===== STEP 3: Test Email ===== -->
     <div class="step-panel" id="step-3">
-        <h3>Test Email</h3>
+        <h3>Send one test email</h3>
         <p>This step sends <strong>one real email</strong> to verify your setup. The email is personalized with the first recipient's data but delivered only to the test address below. No emails are sent to your actual recipients.</p>
 
         <label for="test-email-input">Test email address</label>
@@ -246,7 +244,7 @@
 
     <!-- ===== STEP 4: Verify (Dry Run) ===== -->
     <div class="step-panel" id="step-4">
-        <h3>Verify</h3>
+        <h3>Check emails to be sent</h3>
         <p>No emails will be sent. This step verifies that all <span id="verify-count">?</span> emails can be composed correctly.</p>
 
         <div id="verify-log" class="log-panel"></div>
@@ -260,7 +258,7 @@
 
     <!-- ===== STEP 5: Send ===== -->
     <div class="step-panel" id="step-5">
-        <h3>Send</h3>
+        <h3>Send emails</h3>
 
         <div id="send-confirm" class="callout callout-danger" style="margin-bottom:1rem;">
             <p><strong>You are about to send <span id="send-count">?</span> real emails. This cannot be undone.</strong></p>
@@ -286,7 +284,7 @@
             <div></div>
         </div>
         <div class="nav-buttons hidden" id="send-done-nav">
-            <button type="button" id="btn-download-csv" class="outline" onclick="downloadCsv()">Download CSV</button>
+            <button type="button" id="btn-download-csv" class="outline" onclick="downloadCsv()">Download Mail Merge Report</button>
             <button type="button" id="btn-new-merge" onclick="newMerge()">New Merge</button>
         </div>
     </div>

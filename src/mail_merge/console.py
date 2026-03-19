@@ -5,7 +5,7 @@ import logging
 from rich.console import Console
 from rich.logging import RichHandler
 
-console = Console(stderr=True)
+console = Console(stderr=True, force_terminal=True)
 
 
 def setup_logging(level: int) -> None:
@@ -14,5 +14,5 @@ def setup_logging(level: int) -> None:
         level=level,
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(console=console, show_path=False, markup=True)],
+        handlers=[RichHandler(console=console, show_path=False, markup=False)],
     )

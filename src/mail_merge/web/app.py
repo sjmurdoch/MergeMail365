@@ -123,6 +123,9 @@ def _unregister_temp_dir(path: str) -> None:
 
 
 def create_app(startup_token: str = "", port: int = 5050) -> Flask:
+    # Disable Werkzeug's built-in ANSI colors since we use Rich for logging
+    os.environ["WERKZEUG_COLOR"] = "0"
+    
     app = Flask(
         __name__,
         template_folder=os.path.join(os.path.dirname(__file__), "templates"),
