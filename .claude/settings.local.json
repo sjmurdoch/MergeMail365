@@ -4,7 +4,13 @@
       "Bash(git -C c:/Users/sjmur/w/mail-merge log --oneline -3)",
       "Bash(tee c:/Users/sjmur/w/mail-merge/tmp_git.txt)",
       "Bash(wc:*)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "WebSearch",
+      "WebFetch(domain:devblogs.microsoft.com)",
+      "WebFetch(domain:www.emailonacid.com)",
+      "WebFetch(domain:dev.to)"
     ]
   }
 }
