@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 def read_preview(
     path: str | Path,
     sheet_name: str | None = None,
-    max_rows: int = 5,
-) -> tuple[list[str], list[dict[str, str]], list[str]]:
-    """Read column headers, first N rows, and sheet names.
+    max_rows: int = 99,
+) -> tuple[list[str], list[dict[str, str]], list[str], int]:
+    """Read column headers, first N rows, sheet names, and total row count.
 
-    Returns (columns, rows, sheet_names).
+    Returns (columns, rows, sheet_names, total_rows).
     Does not require an email_column — used for spreadsheet preview in the web UI.
     """
     path = Path(path)
@@ -28,6 +28,9 @@ def read_preview(
     try:
         sheet_names = wb.sheetnames
         ws = wb[sheet_name] if sheet_name else wb.active
+
+        # Count total rows (excluding header)
+        total_rows = ws.max_row - 1 if ws.max_row else 0
 
         rows_iter = ws.iter_rows()
         header_row = next(rows_iter, None)
@@ -46,7 +49,7 @@ def read_preview(
             preview_rows.append(record)
     finally:
         wb.close()
-    return columns, preview_rows, sheet_names
+    return columns, preview_rows, sheet_names, total_rows
 
 
 def read_recipients(

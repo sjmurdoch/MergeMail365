@@ -120,7 +120,7 @@ def _parse_filter(expr: str) -> tuple[str, str, str]:
     raise ValueError(err)
 
 
-def _validate_emails(
+def validate_emails(
     recipients: list[dict[str, str]], email_column: str
 ) -> list[dict[str, str]]:
     """Remove recipients with invalid email addresses, logging each skip."""
@@ -142,7 +142,7 @@ def _validate_emails(
     return result
 
 
-def _apply_filters(
+def apply_filters(
     recipients: list[dict[str, str]], filters: list[str]
 ) -> list[dict[str, str]]:
     """Apply all filter expressions (AND logic) to recipients.
@@ -317,12 +317,12 @@ def send_merge(
         name_column = _normalize_column(name_column, recipients, "Name column")
 
     # --- Validate email addresses ---
-    recipients = _validate_emails(recipients, email_column)
+    recipients = validate_emails(recipients, email_column)
 
     # --- Apply filters ---
     if filters:
         total = len(recipients)
-        recipients = _apply_filters(recipients, filters)
+        recipients = apply_filters(recipients, filters)
         if not recipients:
             raise ValueError(
                 f"No recipients match the filter(s): {', '.join(filters)}"

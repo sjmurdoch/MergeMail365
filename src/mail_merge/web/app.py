@@ -318,7 +318,7 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         from mail_merge.excel import read_preview
 
         try:
-            columns, rows, sheets = read_preview(filepath)
+            columns, rows, sheets, total_rows = read_preview(filepath)
         except Exception as exc:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             _unregister_temp_dir(tmp_dir)
@@ -331,8 +331,41 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
             "columns": columns,
             "rows": rows,
             "sheets": sheets,
+            "total_rows": total_rows,
             "file_name": file.filename,
         })
+
+    @app.route("/api/get-recipients", methods=["POST"])
+    def api_get_recipients() -> Response:
+        filepath = session.get("spreadsheet_path")
+        if not filepath or not os.path.exists(filepath):
+            return jsonify({"error": "No spreadsheet uploaded"}), 400  # type: ignore[return-value]
+
+        email_column = request.form.get("email_column", "")
+        filters_raw = request.form.get("filters", "")
+        sheet = request.form.get("sheet")
+
+        filters = [f.strip() for f in filters_raw.split("\n") if f.strip()]
+
+        from mail_merge.api import apply_filters, validate_emails
+        from mail_merge.excel import read_recipients
+
+        try:
+            recipients = read_recipients(filepath, email_column, sheet_name=sheet)
+            recipients = validate_emails(recipients, email_column)
+            if filters:
+                recipients = apply_filters(recipients, filters)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
+
+        if len(recipients) > 99:
+            return jsonify({
+                "error": f"Too many recipients: {len(recipients)} found after filtering. "
+                         "The web UI supports a maximum of 99 recipients. "
+                         "Please use more restrictive filters or the CLI."
+            }), 400  # type: ignore[return-value]
+
+        return jsonify({"recipients": recipients})
 
     # ----- Template preview -----
 

@@ -40,14 +40,22 @@ function apiFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 // Step navigation
 // ---------------------------------------------------------------------------
-function goToStep(n) {
+async function goToStep(n) {
     console.log("Navigating to step", n, "from", currentStep);
     
     // Only perform validation/trigger side-effects when advancing forward
     if (n > currentStep) {
         if (n === 2 && currentStep === 1) {
             if (!validateSetup()) return;
-            loadPreview();
+            await loadPreview();
+            // loadPreview may have called goToStep(1) on failure, so check if we should continue
+            if (currentStep === 1 && n === 2) {
+                // we're still on step 1, but we wanted step 2... 
+                // if loadPreview handled the error (by calling goToStep(1) or showing an alert)
+                // then we should stay here.
+                const activePanel = document.querySelector(".step-panel.active");
+                if (activePanel && activePanel.id === "step-1") return;
+            }
         }
         if (n === 3) {
             if (!testPassed) {
@@ -259,11 +267,12 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         }
         spreadsheetData = data;
         show("spreadsheet-info");
-        const count = data.rows.length;
+        const count = data.total_rows;
         $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${count} rows.`;
         if (count > 99) {
-            $("spreadsheet-summary").innerHTML += ` <span class="failure"><strong>Warning: ${count} recipients found. The web UI only supports up to 99.</strong></span>`;
+            $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning" style="margin-left:0.5rem;">Large file — filters required</span>`;
         }
+        $("btn-next-1").disabled = false;
 
         // Populate dropdowns
         populateSelect($("email-column"), data.columns, true);
@@ -384,11 +393,54 @@ function validatePlaceholders() {
 // Step 2: Preview
 // ---------------------------------------------------------------------------
 async function loadPreview() {
-    const rows = getRecipients();
-    if (!spreadsheetData || !rows || rows.length === 0) return;
-    previewIndex = 0;
-    renderPreviewRecipient();
-    buildRecipientsTable();
+    $("btn-next-1").ariaBusy = "true";
+    $("btn-next-1").disabled = true;
+    
+    try {
+        const form = new FormData();
+        form.set("email_column", $("email-column").value);
+        form.set("filters", $("filter-input").value);
+        if ($("sheet-select").value) {
+            form.set("sheet", $("sheet-select").value);
+        }
+
+        const resp = await apiFetch("/api/get-recipients", {
+            method: "POST",
+            body: form
+        });
+        const data = await resp.json();
+        
+        if (!resp.ok) {
+            alert(data.error || "Failed to load recipients");
+            goToStep(1);
+            return;
+        }
+
+        // Store the final filtered recipients in spreadsheetData
+        spreadsheetData.rows = data.recipients;
+        
+        const rows = spreadsheetData.rows;
+        if (!rows || rows.length === 0) {
+            alert("No recipients found (check your filters and email column).");
+            goToStep(1);
+            return;
+        }
+
+        previewIndex = 0;
+        renderPreviewRecipient();
+        buildRecipientsTable();
+        
+        // Update verify/send recipient counts
+        $("verify-count").textContent = rows.length;
+        $("send-count").textContent = rows.length;
+
+    } catch (e) {
+        alert("Error loading preview: " + e.message);
+        goToStep(1);
+    } finally {
+        $("btn-next-1").ariaBusy = "false";
+        $("btn-next-1").disabled = false;
+    }
 }
 
 function renderPreviewRecipient() {
@@ -759,6 +811,7 @@ function newMerge() {
     // Clear Step 1
     $("spreadsheet-file").value = "";
     hide("spreadsheet-info");
+    $("btn-next-1").disabled = false;
     
     // Clear Step 3 (Test)
     $("test-email-input").value = "";
@@ -846,7 +899,7 @@ function buildJobFormData(mode) {
     if ($("bcc-input").value) form.set("bcc", $("bcc-input").value);
     if ($("reply-to-input").value) form.set("reply_to", $("reply-to-input").value);
     if ($("html-toggle").checked) form.set("html", "true");
-    if ($("no-save-sent").checked) form.set("save_to_sent_items", "false");
+    form.set("save_to_sent_items", "true");
     if ($("filter-input").value.trim()) form.set("filters", $("filter-input").value.trim());
 
     if (sendMode === "bcc") {
