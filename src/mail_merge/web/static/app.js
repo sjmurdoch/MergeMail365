@@ -434,11 +434,14 @@ function showPlaceholderChips(columns) {
     }
 }
 
-// Real-time placeholder validation
-let placeholderTimer = null;
+// Real-time placeholder and HTML validation
+let validationTimer = null;
 function onTemplateChange() {
-    clearTimeout(placeholderTimer);
-    placeholderTimer = setTimeout(validatePlaceholders, 500);
+    clearTimeout(validationTimer);
+    validationTimer = setTimeout(() => {
+        validatePlaceholders();
+        validateHtmlBody();
+    }, 500);
     if (sendMode === "bcc") checkBccPlaceholders();
     formDirty = true;
 }
@@ -466,6 +469,73 @@ function validatePlaceholders() {
         el.innerHTML = unique.map(p =>
             `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${spreadsheetData.columns.join(", ")}`
         ).join("<br>");
+        show(el);
+    } else {
+        hide(el);
+    }
+}
+
+const GMAIL_CLIP_KB = 102;
+const HTML_TAG_RE = /<[a-zA-Z][^>]*>/;
+const BLOCK_OR_BR_RE = /<(br|p|div|table|tr|td|li|ul|ol|h[1-6])\b/i;
+const STRIPPED_TAGS_RE = /<(script|iframe|form|embed|object)\b/i;
+const EXT_STYLESHEET_RE = /<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>/i;
+
+function validateHtmlBody() {
+    const el = $("html-warnings");
+    if (!$("html-toggle").checked) { hide(el); return; }
+    const body = $("body-input").value;
+    if (!body.trim()) { hide(el); return; }
+
+    const warnings = [];
+
+    // Plain text with no HTML tags at all
+    if (!HTML_TAG_RE.test(body)) {
+        warnings.push(
+            "<strong>No HTML tags detected.</strong> The body appears to be plain text " +
+            "but will be sent as HTML. Line breaks will not be visible to recipients. " +
+            "Use <code>&lt;br&gt;</code> for line breaks or <code>&lt;p&gt;</code> for paragraphs."
+        );
+    }
+    // Has HTML tags but newlines without any block/br elements
+    else if (/\n/.test(body) && !BLOCK_OR_BR_RE.test(body)) {
+        warnings.push(
+            "<strong>Line breaks may not render.</strong> The body contains newlines but no " +
+            "<code>&lt;br&gt;</code>, <code>&lt;p&gt;</code>, or <code>&lt;div&gt;</code> tags. " +
+            "Newlines are ignored in HTML — use <code>&lt;br&gt;</code> for line breaks."
+        );
+    }
+
+    // Tags stripped by all email clients
+    if (STRIPPED_TAGS_RE.test(body)) {
+        const found = [];
+        for (const tag of ["script", "iframe", "form", "embed", "object"]) {
+            if (new RegExp(`<${tag}\\b`, "i").test(body)) found.push(`&lt;${tag}&gt;`);
+        }
+        warnings.push(
+            `<strong>Unsupported tags:</strong> ${found.join(", ")} will be stripped by email clients.`
+        );
+    }
+
+    // External stylesheets
+    if (EXT_STYLESHEET_RE.test(body)) {
+        warnings.push(
+            "<strong>External stylesheets ignored:</strong> <code>&lt;link rel=\"stylesheet\"&gt;</code> " +
+            "is not supported in email. Use inline <code>style</code> attributes instead."
+        );
+    }
+
+    // Gmail clipping threshold (~102 KB)
+    const sizeKb = new Blob([body]).size / 1024;
+    if (sizeKb > GMAIL_CLIP_KB) {
+        warnings.push(
+            `<strong>Large body (${Math.round(sizeKb)} KB):</strong> Gmail clips emails over ~102 KB. ` +
+            "Recipients may see a truncated message with a \"View entire message\" link."
+        );
+    }
+
+    if (warnings.length > 0) {
+        el.innerHTML = warnings.join("<hr style='margin:0.4rem 0;border-color:inherit;opacity:0.3;'>");
         show(el);
     } else {
         hide(el);

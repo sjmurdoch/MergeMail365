@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-> Last updated: 2026-03-19
+> Last updated: 2026-03-19 (HTML validation, recipient cap fixes, desktop mode fix, /simplify refactoring)
 
 ### Completed
 
@@ -46,6 +46,18 @@ All core features from this plan have been implemented. The implementation close
 **`goToStep()` / `loadPreview()` control flow:** Plan didn't specify the navigation guard logic. Original implementation had a broken guard in `goToStep()` that checked the active DOM panel after `loadPreview()`, but since the DOM hadn't been updated yet, the guard always triggered — preventing navigation to Step 2 even on success. Fixed by having `loadPreview()` return a boolean and removing the guard.
 
 **Active job reconnection:** Original implementation called an undefined `connectSSE()` function, referenced `jobs` instead of `_jobs`, and never stored the job ID in the session. Fixed: `app.js` now calls `streamEvents()` with full send-step UI setup, `app.py` references `_jobs` and stores `session["job_id"]` when starting a job.
+
+**Desktop mode architecture:** Plan specified passing the Flask app directly to pywebview's internal server. This broke OAuth because pywebview serves on a random internal port that doesn't match the auth callback redirect URI. Fixed by running Flask in a background thread on the real port and passing the URL (with startup token) to pywebview. Desktop auto-auth was removed — with Flask on a known port, any local process could access the server without a token, so the startup token is now required in desktop mode too.
+
+**Config precedence fix:** `_get_config_value()` checked the config file before environment variables, opposite to `api.py`'s documented precedence (CLI flag > env var > config file > default). Fixed by swapping the `or` operands so env vars take priority.
+
+**Refactored JS helpers:** `updateStepUI()`, `renderSpreadsheetSummary()`, and `populateDropdowns()` were extracted from duplicated inline code in `app.js`. `populateSelect` was fixed to build the options string before assigning innerHTML (was appending in a loop). `populateSheetSelect` uses `.map().join()`.
+
+**Recipient cap enforcement (three-layer):** The 99-recipient cap is enforced at three levels: (1) client-side in `goToStep(2)` checking `spreadsheetData.total_rows` (was checking `rows.length` which is already capped by `read_preview`), (2) server-side in `api_get_recipients` using `MAX_WEB_RECIPIENTS` constant, (3) server-side in `api_start_job` using `_validated_recipient_count()` which re-reads, validates, and filters recipients from disk (defense-in-depth, since `send_merge()` re-reads the spreadsheet independently). The original `api_start_job` cap check was buggy — it re-read the spreadsheet without applying filters, so a 200-row spreadsheet filtered to 50 recipients would be incorrectly rejected.
+
+**HTML email body validation:** Not in original plan. Client-side `validateHtmlBody()` in `app.js` and server-side `_validate_html_body()` in `app.py` warn about common HTML email pitfalls: plain text without HTML tags, newlines without `<br>`/block elements, stripped tags (`<script>`, `<iframe>`, `<form>`, `<embed>`, `<object>`), external stylesheets (unsupported by email clients), and Gmail's ~102 KB clipping threshold. Warnings are shown in a callout below the body textarea and returned from `/api/preview-template` as `html_warnings`. These are warnings only — they do not block sending.
+
+**Dead CSS removed:** `.collapsible-header`, `.collapsible-content`, `.collapsible-content.open`, `.badge-info`, `.badge-success`, `.badge-danger`, and `.dot.red` were unused and removed from `style.css`.
 
 ### Not Implemented (deferred)
 

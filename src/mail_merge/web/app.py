@@ -441,10 +441,15 @@ def create_app(
         rendered_subject = render(subject, sample_data)
         rendered_body = render(body_text, sample_data)
 
+        html_warnings: list[str] = []
+        if data.get("html"):
+            html_warnings = _validate_html_body(rendered_body)
+
         return jsonify({
             "subject": rendered_subject,
             "body": rendered_body,
             "unresolved_placeholders": bad,
+            "html_warnings": html_warnings,
         })
 
     # ----- Job management -----
@@ -650,6 +655,65 @@ def create_app(
         return jsonify({"message": "Stop requested"})
 
     # ----- Helpers -----
+
+    import re as _re
+
+    _HTML_TAG_RE = _re.compile(r"<[a-zA-Z][^>]*>")
+    _BLOCK_OR_BR_RE = _re.compile(
+        r"<(br|p|div|table|tr|td|li|ul|ol|h[1-6])\b", _re.IGNORECASE,
+    )
+    _STRIPPED_TAGS_RE = _re.compile(
+        r"<(script|iframe|form|embed|object)\b", _re.IGNORECASE,
+    )
+    _EXT_STYLESHEET_RE = _re.compile(
+        r"""<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>""", _re.IGNORECASE,
+    )
+    _GMAIL_CLIP_BYTES = 102 * 1024  # ~102 KB
+
+    def _validate_html_body(body: str) -> list[str]:
+        """Return a list of warning strings for HTML email body content."""
+        if not body.strip():
+            return []
+        warnings: list[str] = []
+
+        if not _HTML_TAG_RE.search(body):
+            warnings.append(
+                "No HTML tags detected. The body appears to be plain text "
+                "but will be sent as HTML. Line breaks will not be visible "
+                "to recipients. Use <br> for line breaks or <p> for paragraphs."
+            )
+        elif "\n" in body and not _BLOCK_OR_BR_RE.search(body):
+            warnings.append(
+                "Line breaks may not render. The body contains newlines but "
+                "no <br>, <p>, or <div> tags. Newlines are ignored in HTML."
+            )
+
+        m = _STRIPPED_TAGS_RE.search(body)
+        if m:
+            found = [
+                tag for tag in ("script", "iframe", "form", "embed", "object")
+                if _re.search(rf"<{tag}\b", body, _re.IGNORECASE)
+            ]
+            warnings.append(
+                f"Unsupported tags: <{'>, <'.join(found)}> will be stripped "
+                "by email clients."
+            )
+
+        if _EXT_STYLESHEET_RE.search(body):
+            warnings.append(
+                "External stylesheets (<link rel=\"stylesheet\">) are not "
+                "supported in email. Use inline style attributes instead."
+            )
+
+        body_bytes = len(body.encode("utf-8"))
+        if body_bytes > _GMAIL_CLIP_BYTES:
+            size_kb = body_bytes // 1024
+            warnings.append(
+                f"Large body ({size_kb} KB): Gmail clips emails over ~102 KB. "
+                "Recipients may see a truncated message."
+            )
+
+        return warnings
 
     def _partition_emails(
         recipients: list[dict[str, str]], email_column: str,

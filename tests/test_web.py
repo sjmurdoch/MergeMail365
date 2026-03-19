@@ -226,6 +226,85 @@ class TestPreview:
         # But the data is returned as JSON, so it's safe. The frontend uses textContent.
         assert "<script>" in data["subject"]  # raw in JSON is fine
 
+    def test_preview_html_warns_plain_text(self, web_client):
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "Hello world\nSecond line",
+                "sample_data": {},
+                "columns": [],
+                "html": True,
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert len(data["html_warnings"]) > 0
+        assert "No HTML tags" in data["html_warnings"][0]
+
+    def test_preview_html_warns_newlines_without_br(self, web_client):
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "<b>Hello</b>\nSecond line",
+                "sample_data": {},
+                "columns": [],
+                "html": True,
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert any("Line breaks" in w for w in data["html_warnings"])
+
+    def test_preview_html_warns_script_tags(self, web_client):
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "<p>Hello</p><script>alert(1)</script>",
+                "sample_data": {},
+                "columns": [],
+                "html": True,
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert any("script" in w for w in data["html_warnings"])
+
+    def test_preview_html_no_warnings_for_valid_html(self, web_client):
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "<p>Hello</p><br><p>World</p>",
+                "sample_data": {},
+                "columns": [],
+                "html": True,
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert data["html_warnings"] == []
+
+    def test_preview_html_no_warnings_when_not_html(self, web_client):
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "Plain text\nwith newlines",
+                "sample_data": {},
+                "columns": [],
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert data["html_warnings"] == []
 
 
 class TestRecipientAPI:
