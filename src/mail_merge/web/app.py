@@ -673,6 +673,10 @@ def create_app(
     _cached_config: dict[str, str] | None = None
 
     def _get_config_value(key: str) -> str | None:
+        # Fixed values (from --client-id / --tenant-id) take highest priority
+        fixed_key = f"FIXED_{key.upper()}"
+        if app.config.get(fixed_key):
+            return app.config[fixed_key]
         nonlocal _cached_config
         if _cached_config is None:
             _cached_config = load_config()

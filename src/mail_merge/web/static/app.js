@@ -191,16 +191,12 @@ async function loadConfig() {
             $("client-id").value = data.client_id;
             show("config-badge");
         }
-        if (data.client_id_locked) {
-            $("client-id").readOnly = true;
-            $("config-badge").textContent = "Built into application";
-            show("config-badge");
-        }
         if (data.tenant_id) {
             $("tenant-id").value = data.tenant_id;
         }
-        if (data.tenant_id_locked) {
-            $("tenant-id").readOnly = true;
+        // Hide config fields entirely when baked into the application
+        if (data.client_id_locked && data.tenant_id_locked) {
+            hide("auth-config-fields");
         }
 
         // Restore session spreadsheet if it exists

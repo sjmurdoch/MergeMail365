@@ -449,7 +449,13 @@ The spec file:
 - Bundles Flask, pywebview, msal, openpyxl, and all other dependencies
 
 Build commands:
-- macOS: `uv run pyinstaller mail_merge_web.spec`
+- macOS: 
+```sh
+MAIL_MERGE_CLIENT_ID=61e79ae3-40af-4af5-b204-4794d05be0f6 \
+MAIL_MERGE_TENANT_ID=1faf88fe-a998-4c5b-93c9-210a11d9a5c2 \
+uv run pyinstaller mail_merge_web.spec
+```
+
 - Windows: `uv run pyinstaller mail_merge_web.spec`
 
 The packaged app requires no Python installation, no CLI usage — user just double-clicks to start.
