@@ -7,6 +7,10 @@
     --log-bg: var(--pico-code-background-color);
 }
 
+legend {
+    font-weight: 700;
+}
+
 /* Layout */
 body > main {
     max-width: 900px;

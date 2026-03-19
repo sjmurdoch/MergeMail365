@@ -891,7 +891,7 @@ function updateSessionTimer() {
         el.className = "session-timer session-warn";
         show(el);
     } else {
-        el.textContent = `Session: ${mins}m`;
+        el.textContent = `Time before automatic logout: ${mins}m`;
         show(el);
     }
 }
