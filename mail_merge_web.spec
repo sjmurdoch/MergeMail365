@@ -1,14 +1,46 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for bundling mail-merge web UI as a standalone app."""
+"""PyInstaller spec for bundling mail-merge web UI as a standalone app.
+
+To hard-code Azure AD credentials into the built app, set these environment
+variables before running PyInstaller:
+
+    MAIL_MERGE_CLIENT_ID=your-client-id \\
+    MAIL_MERGE_TENANT_ID=your-tenant-id \\
+    uv run pyinstaller mail_merge_web.spec
+
+When set, the corresponding fields in the UI are pre-filled and read-only.
+When not set, users can enter them manually (or they are loaded from the
+config file as usual).
+"""
 
 import os
 import sys
 
 block_cipher = None
 
+# Optional: hard-code Azure AD credentials into the standalone app.
+# Set via environment variables at build time.
+FIXED_CLIENT_ID = os.environ.get("MAIL_MERGE_CLIENT_ID", "")
+FIXED_TENANT_ID = os.environ.get("MAIL_MERGE_TENANT_ID", "")
+
 # Locate source files
 src_dir = os.path.join("src", "mail_merge")
 web_dir = os.path.join(src_dir, "web")
+
+# Write a runtime hook that injects the hard-coded values as CLI arguments.
+# PyInstaller runtime hooks run before the main script.
+_runtime_hook = os.path.join("build", "_rt_hook_credentials.py")
+os.makedirs("build", exist_ok=True)
+with open(_runtime_hook, "w") as f:
+    f.write(
+        "import sys\n"
+        f"_client_id = {FIXED_CLIENT_ID!r}\n"
+        f"_tenant_id = {FIXED_TENANT_ID!r}\n"
+        "if _client_id:\n"
+        "    sys.argv.extend(['--client-id', _client_id])\n"
+        "if _tenant_id:\n"
+        "    sys.argv.extend(['--tenant-id', _tenant_id])\n"
+    )
 
 a = Analysis(
     [os.path.join(web_dir, "__init__.py")],
@@ -40,7 +72,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[_runtime_hook],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

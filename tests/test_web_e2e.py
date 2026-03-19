@@ -41,6 +41,20 @@ def sample_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="module")
+def mixed_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Spreadsheet with some invalid email addresses."""
+    path = tmp_path_factory.mktemp("data") / "mixed.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["name", "email", "company"])
+    ws.append(["Alice", "alice@example.com", "Acme"])
+    ws.append(["Bad", "not-an-email", "Nope"])
+    ws.append(["Bob", "bob@example.com", "Widgets"])
+    wb.save(path)
+    return path
+
+
+@pytest.fixture(scope="module")
 def big_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
     path = tmp_path_factory.mktemp("data") / "big.xlsx"
     wb = openpyxl.Workbook()
@@ -258,12 +272,42 @@ class TestRecipientCap:
         page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
         page.fill("#subject-input", "Hello {{name}}")
         page.fill("#body-input", "Body")
-        # Navigate to preview, then try to start a job
+        # Clicking Next triggers /api/get-recipients which rejects >99 recipients
+        alert_text = []
+        page.on("dialog", lambda dialog: (alert_text.append(dialog.message), dialog.accept()))
+        page.click("#btn-next-1")
+        page.wait_for_timeout(2000)
+        # Should stay on step 1
+        expect(page.locator("#step-1")).to_have_class(re.compile("active"))
+        assert any("Too many recipients" in t for t in alert_text)
+
+
+class TestInvalidEmailWarning:
+    def test_invalid_emails_shown_in_preview(self, authenticated_page: Page, mixed_xlsx: Path):
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(mixed_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.fill("#subject-input", "Hello {{name}}")
+        page.fill("#body-input", "Welcome to {{company}}")
         page.click("#btn-next-1")
         page.wait_for_selector("#step-2.active", timeout=5000)
-        # Navigate to step 3 (test email)
-        page.click("#btn-next-2")
-        page.wait_for_selector("#step-3.active", timeout=5000)
+        # Warning should be visible
+        expect(page.locator("#invalid-email-warning")).to_be_visible()
+        expect(page.locator("#invalid-email-warning")).to_contain_text("1 invalid email address skipped")
+        expect(page.locator("#invalid-email-warning")).to_contain_text("not-an-email")
+        # Only valid recipients shown in preview
+        expect(page.locator("#preview-recipient-label")).to_contain_text("1 of 2")
+
+    def test_no_warning_when_all_valid(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.fill("#subject-input", "Hello {{name}}")
+        page.fill("#body-input", "Welcome to {{company}}")
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        # Warning should not be visible
+        expect(page.locator("#invalid-email-warning")).to_be_hidden()
 
 
 class TestDryRunStep:
@@ -381,8 +425,12 @@ class TestSendConfirmation:
 
 class TestSessionTimer:
     def test_session_timer_visible(self, authenticated_page: Page):
-        """The session timer should be visible in the header."""
+        """The session timer becomes visible when remaining time is under 60 min."""
         page = authenticated_page
+        # With a 24-hour session, timer is hidden initially.  Simulate time
+        # passing so that less than 60 minutes remain.
+        page.evaluate("sessionStart = Date.now() - (24 * 60 * 60 * 1000 - 30 * 60 * 1000)")
+        page.evaluate("updateSessionTimer()")
         expect(page.locator("#session-timer")).to_be_visible()
         expect(page.locator("#session-timer")).to_contain_text("Session")
 

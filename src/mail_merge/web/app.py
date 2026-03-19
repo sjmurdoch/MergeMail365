@@ -124,7 +124,13 @@ def _unregister_temp_dir(path: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_app(startup_token: str = "", port: int = 5050) -> Flask:
+def create_app(
+    startup_token: str = "",
+    port: int = 5050,
+    desktop: bool = False,
+    client_id: str = "",
+    tenant_id: str = "",
+) -> Flask:
     app = Flask(
         __name__,
         template_folder=os.path.join(os.path.dirname(__file__), "templates"),
@@ -140,11 +146,19 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
     app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
     app.config["STARTUP_TOKEN"] = startup_token
     app.config["PORT"] = port
+    app.config["DESKTOP"] = desktop
+    app.config["FIXED_CLIENT_ID"] = client_id
+    app.config["FIXED_TENANT_ID"] = tenant_id
 
     # ----- Auth middleware -----
 
     @app.before_request
     def _check_auth() -> Any:
+        # Desktop mode: native window is the access control — auto-authenticate
+        if app.config["DESKTOP"] and not session.get("authenticated"):
+            session["authenticated"] = True
+            session.permanent = True
+
         # Allow static files and auth routes without session auth
         if request.endpoint == "static":
             return None
@@ -167,18 +181,17 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
                 status=403,
                 content_type="text/plain; charset=utf-8",
             )
-        
+
         # Refresh sliding window
         session.permanent = True
         return None
 
     # ----- CSRF protection -----
 
-    @app.after_request
-    def _set_csrf_token(response: Response) -> Response:
+    @app.before_request
+    def _ensure_csrf_token() -> None:
         if "csrf_token" not in session:
             session["csrf_token"] = secrets.token_hex(32)
-        return response
 
     @app.before_request
     def _check_csrf() -> Response | None:
@@ -302,12 +315,17 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         # Check if there is an active job still running for this session
         active_job_id = None
         job_id = session.get("job_id")
-        if job_id and job_id in jobs:
+        if job_id and job_id in _jobs:
             active_job_id = job_id
 
+        fixed_cid = app.config["FIXED_CLIENT_ID"]
+        fixed_tid = app.config["FIXED_TENANT_ID"]
+
         return jsonify({
-            "client_id": _get_config_value("client_id") or "",
-            "tenant_id": _get_config_value("tenant_id") or "",
+            "client_id": fixed_cid or _get_config_value("client_id") or "",
+            "tenant_id": fixed_tid or _get_config_value("tenant_id") or "",
+            "client_id_locked": bool(fixed_cid),
+            "tenant_id_locked": bool(fixed_tid),
             "spreadsheet": session.get("spreadsheet_info"),
             "current_step": session.get("current_step", 1),
             "test_passed": session.get("test_passed", False),
@@ -377,16 +395,23 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
         filters = [f.strip() for f in filters_raw.split("\n") if f.strip()]
 
-        from mail_merge.api import apply_filters, validate_emails
+        from mail_merge.api import apply_filters
         from mail_merge.excel import read_recipients
 
         try:
             recipients = read_recipients(filepath, email_column, sheet_name=sheet)
-            recipients = validate_emails(recipients, email_column)
+            total_before = len(recipients)
+            valid, invalid = _partition_emails(recipients, email_column)
+            recipients = valid
             if filters:
                 recipients = apply_filters(recipients, filters)
         except Exception as exc:
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
+
+        if not recipients:
+            return jsonify({
+                "error": "No recipients remaining after removing invalid email addresses"
+            }), 400  # type: ignore[return-value]
 
         if len(recipients) > 99:
             return jsonify({
@@ -395,7 +420,11 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
                          "Please use more restrictive filters or the CLI."
             }), 400  # type: ignore[return-value]
 
-        return jsonify({"recipients": recipients})
+        return jsonify({
+            "recipients": recipients,
+            "invalid_emails": invalid,
+            "total_before_validation": total_before,
+        })
 
     # ----- Template preview -----
 
@@ -567,6 +596,7 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         thread = threading.Thread(target=_run_job, daemon=True)
         thread.start()
 
+        session["job_id"] = job.id
         return jsonify({"job_id": job.id})
 
     @app.route("/api/job/<job_id>/events")
@@ -622,6 +652,23 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
         return jsonify({"message": "Stop requested"})
 
     # ----- Helpers -----
+
+    def _partition_emails(
+        recipients: list[dict[str, str]], email_column: str,
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """Split recipients into (valid, invalid) based on email validation."""
+        from email_validator import EmailNotValidError, validate_email
+
+        valid: list[dict[str, str]] = []
+        invalid: list[dict[str, str]] = []
+        for row in recipients:
+            addr = row.get(email_column, "")
+            try:
+                validate_email(addr, check_deliverability=False, allow_smtputf8=False)
+                valid.append(row)
+            except EmailNotValidError as exc:
+                invalid.append({"address": addr, "reason": str(exc)})
+        return valid, invalid
 
     _cached_config: dict[str, str] | None = None
 

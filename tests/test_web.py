@@ -281,6 +281,68 @@ class TestRecipientAPI:
         assert resp.status_code == 400
         assert "Too many recipients" in resp.get_json()["error"]
 
+    def test_get_recipients_reports_invalid_emails(self, web_client, tmp_path):
+        """Invalid email addresses are returned in the response so the UI can warn."""
+        csrf = get_csrf(web_client)
+        path = tmp_path / "mixed.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email"])
+        ws.append(["Alice", "alice@example.com"])
+        ws.append(["Bad", "not-an-email"])
+        ws.append(["Also Bad", "also@bad@example.com"])
+        ws.append(["Bob", "bob@example.com"])
+        wb.save(path)
+
+        with open(path, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "mixed.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+
+        resp = web_client.post(
+            "/api/get-recipients",
+            data={"email_column": "email"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        # Only valid emails remain
+        emails = [r["email"] for r in data["recipients"]]
+        assert emails == ["alice@example.com", "bob@example.com"]
+        # Invalid emails are reported
+        assert len(data["invalid_emails"]) == 2
+        invalid_addrs = [e["address"] for e in data["invalid_emails"]]
+        assert "not-an-email" in invalid_addrs
+        assert "also@bad@example.com" in invalid_addrs
+        # Each invalid entry has a reason
+        assert all("reason" in e for e in data["invalid_emails"])
+        # Total before validation includes all rows
+        assert data["total_before_validation"] == 4
+
+    def test_get_recipients_no_invalid_emails(self, web_client, sample_xlsx_web):
+        """When all emails are valid, invalid_emails is empty."""
+        csrf = get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        resp = web_client.post(
+            "/api/get-recipients",
+            data={"email_column": "email"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data["recipients"]) == 2
+        assert data["invalid_emails"] == []
+        assert data["total_before_validation"] == 2
+
 
 # ---- Auth endpoints ----
 

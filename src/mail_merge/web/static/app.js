@@ -49,15 +49,8 @@ async function goToStep(n) {
     if (n > currentStep) {
         if (n === 2 && currentStep === 1) {
             if (!validateSetup()) return;
-            await loadPreview();
-            // loadPreview may have called goToStep(1) on failure, so check if we should continue
-            if (currentStep === 1 && n === 2) {
-                // we're still on step 1, but we wanted step 2... 
-                // if loadPreview handled the error (by calling goToStep(1) or showing an alert)
-                // then we should stay here.
-                const activePanel = document.querySelector(".step-panel.active");
-                if (activePanel && activePanel.id === "step-1") return;
-            }
+            const previewOk = await loadPreview();
+            if (!previewOk) return;
         }
         if (n === 3) {
             if (!testPassed) {
@@ -198,8 +191,16 @@ async function loadConfig() {
             $("client-id").value = data.client_id;
             show("config-badge");
         }
+        if (data.client_id_locked) {
+            $("client-id").readOnly = true;
+            $("config-badge").textContent = "Built into application";
+            show("config-badge");
+        }
         if (data.tenant_id) {
             $("tenant-id").value = data.tenant_id;
+        }
+        if (data.tenant_id_locked) {
+            $("tenant-id").readOnly = true;
         }
 
         // Restore session spreadsheet if it exists
@@ -242,8 +243,32 @@ async function loadConfig() {
             currentJobId = data.active_job_id;
             sendStarted = true;
             // Jump to step 5 (Send) and connect to the existing stream
-            await goToStep(5);
-            connectSSE(currentJobId);
+            hide("send-confirm");
+            show("send-progress");
+            show("send-log");
+            $("btn-back-5").disabled = true;
+            window.addEventListener("beforeunload", beforeUnloadWarn);
+            currentStep = 5;
+            document.querySelectorAll(".step-panel").forEach(p => p.classList.remove("active"));
+            $("step-5").classList.add("active");
+            document.querySelectorAll(".step-indicator li").forEach(li => {
+                const s = parseInt(li.dataset.step);
+                li.classList.remove("active", "completed");
+                if (s < 5) li.classList.add("completed");
+                if (s === 5) li.classList.add("active");
+            });
+            streamEvents(currentJobId, "send-log", (result) => {
+                window.removeEventListener("beforeunload", beforeUnloadWarn);
+                if (result.status === "completed" || result.status === "stopped") {
+                    fetchAndShowSendResults(currentJobId);
+                } else {
+                    showSendResult(false, result.error || "Send failed");
+                }
+            }, (current, total) => {
+                $("send-progress-bar").max = total;
+                $("send-progress-bar").value = current;
+                $("send-progress-text").textContent = `Sending ${current} of ${total}...`;
+            });
         } else if (data.current_step > 1) {
             await goToStep(data.current_step);
         }
@@ -467,7 +492,7 @@ function validatePlaceholders() {
 async function loadPreview() {
     $("btn-next-1").ariaBusy = "true";
     $("btn-next-1").disabled = true;
-    
+
     try {
         const form = new FormData();
         form.set("email_column", $("email-column").value);
@@ -481,34 +506,36 @@ async function loadPreview() {
             body: form
         });
         const data = await resp.json();
-        
+
         if (!resp.ok) {
             alert(data.error || "Failed to load recipients");
-            goToStep(1);
-            return;
+            return false;
         }
 
         // Store the final filtered recipients in spreadsheetData
         spreadsheetData.rows = data.recipients;
-        
+
         const rows = spreadsheetData.rows;
         if (!rows || rows.length === 0) {
             alert("No recipients found (check your filters and email column).");
-            goToStep(1);
-            return;
+            return false;
         }
 
         previewIndex = 0;
         renderPreviewRecipient();
         buildRecipientsTable();
-        
+
+        // Show invalid email warning if any were skipped
+        showInvalidEmailWarning(data.invalid_emails || [], data.total_before_validation || 0);
+
         // Update verify/send recipient counts
         $("verify-count").textContent = rows.length;
         $("send-count").textContent = rows.length;
+        return true;
 
     } catch (e) {
         alert("Error loading preview: " + e.message);
-        goToStep(1);
+        return false;
     } finally {
         $("btn-next-1").ariaBusy = "false";
         $("btn-next-1").disabled = false;
@@ -589,6 +616,24 @@ function buildRecipientsTable() {
     tbody.innerHTML = recipients.map(row =>
         "<tr>" + cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
     ).join("");
+}
+
+function showInvalidEmailWarning(invalidEmails, totalBefore) {
+    const el = $("invalid-email-warning");
+    if (!invalidEmails || invalidEmails.length === 0) {
+        hide(el);
+        return;
+    }
+    const recipients = getRecipients();
+    const validCount = recipients ? recipients.length : 0;
+    const skippedList = invalidEmails.map(e =>
+        `<li><strong>${escapeHtml(e.address || "(empty)")}</strong>: ${escapeHtml(e.reason)}</li>`
+    ).join("");
+    el.innerHTML =
+        `<strong>${invalidEmails.length} invalid email${invalidEmails.length > 1 ? " addresses" : " address"} skipped</strong>` +
+        ` (${validCount} of ${totalBefore} recipients remain)` +
+        `<ul style="margin:0.5rem 0 0 1rem;padding:0;font-size:0.85rem;">${skippedList}</ul>`;
+    show(el);
 }
 
 // ---------------------------------------------------------------------------

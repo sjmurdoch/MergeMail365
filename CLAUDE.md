@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A Python CLI tool (`mail-merge`) that sends personalised emails via Microsoft Graph API. Recipients come from an Excel spreadsheet, and the email body/subject use `{{column_name}}` placeholders.
+A Python tool that sends personalised emails via Microsoft Graph API. Recipients come from an Excel spreadsheet, and the email body/subject use `{{column_name}}` placeholders. Has three interfaces: CLI (`mail-merge`), Python API (`send_merge()`), and a web UI (`mail-merge-web`).
 
 ## Commands
 
@@ -28,14 +28,20 @@ uv run mypy
 # CLI usage (after install) — dry run by default, add --send to deliver
 uv run mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email
 uv run mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email --send
+
+# Web UI — opens browser automatically
+uv run mail-merge-web
+uv run mail-merge-web --port 8080
+uv run mail-merge-web --desktop  # native window (requires pywebview)
 ```
 
 ## Architecture
 
-Source lives under `src/mail_merge/` (src layout). There are two entry points:
+Source lives under `src/mail_merge/` (src layout). There are three entry points:
 
 1. **CLI** (`cli.py:main()`) — parses args, sets up logging, delegates to `send_merge()`, converts exceptions to exit codes.
 2. **Python API** (`api.py:send_merge()`) — single function mirroring all CLI flags. Raises exceptions (`FileNotFoundError`, `ValueError`, `RuntimeError`) instead of returning exit codes. Returns `list[SendResult]`.
+3. **Web UI** (`web/__init__.py:main()`) — Flask app with a 5-step wizard (Setup → Preview → Test → Verify → Send). Runs on localhost, opens browser automatically. See "Web UI" section below.
 
 The orchestration flow (in `api.py`) is strictly ordered: resolve config → read spreadsheet → validate emails → apply filters → resume (skip previous successes) → apply batch size → read body template → validate all placeholders (abort if any unresolvable) → parse CC/BCC/reply-to → validate recipient count → process attachments → confirm → authenticate (MSAL device code) → send → merge results → report. All validation happens before any sending. Resume and batch size are skipped for `--test-email` (which only needs one recipient's data for rendering). Resume works for both individual sends and BCC blast mode.
 
@@ -62,6 +68,49 @@ Key design decisions:
 - **`--batch-size N`** limits how many emails are sent per invocation
 - **`--name-column`** specifies a spreadsheet column containing recipient display names; each email's `To:` header includes the name (e.g. `"Alice <alice@example.com>"`). In BCC blast mode, use `--bcc-blast-to "Display Name <email>"` instead.
 - Recipient count validation: errors if to + cc + bcc exceeds the Graph API limit of 500
+
+## Web UI
+
+The web interface lives under `src/mail_merge/web/` and is installed as `mail-merge-web`. Flask backend (`web/app.py`) + vanilla JS single-page app (`web/static/app.js`) + Pico CSS. No build step, no JS framework.
+
+**Dependencies:** `flask>=3.0` (optional `web` extra), `pywebview>=5.0` (optional `desktop` extra). Install with `uv sync --extra web`.
+
+**Key files:**
+- `web/__init__.py` — entry point: port discovery, startup token, browser launch
+- `web/app.py` — Flask app factory, all routes, background job management
+- `web/templates/index.html` — single Jinja2 template with all 5 wizard steps
+- `web/static/app.js` — wizard navigation, SSE streaming, client-side template preview
+- `web/static/style.css` — custom styles (step indicator, chips, log panel, callouts)
+- `web/static/pico.min.css` — bundled Pico CSS v2 (no CDN)
+
+**Architecture:**
+- **Auth:** OAuth 2.0 Authorization Code flow with PKCE (browser-native), vs device code flow for CLI. Both share the same MSAL token cache. Auth functions in `auth.py`: `initiate_auth_code_flow()`, `acquire_token_by_auth_code()`, `diagnose_auth()`, `token_expires_at()`.
+- **`send_merge()` integration:** The web UI calls `send_merge()` with two web-specific parameters: `body_text` (inline string, no temp file) and `token_provider` (callable for silent token acquisition, bypasses device code flow). Always passes `confirm=False`, `resume=False`.
+- **Background jobs:** `send_merge()` runs in a daemon thread. `JobLogHandler` captures `mail_merge` logger output into an event queue. SSE (`/api/job/<id>/events`) streams log entries to the browser. Job results are fetched via `/api/job/<id>/status` which calls `report.summarize()`.
+- **Safety limits:** 99-recipient cap (enforced server-side), fixed 2s send delay, mandatory test email and dry run steps, "SEND" confirmation typing.
+- **Session:** Startup token (like Jupyter) for access control. CSRF token on all POST routes. 24-hour session lifetime with sliding window. Server-side state persistence (`/api/state`) + client-side localStorage auto-save.
+- **Preview:** Client-side template rendering in JS for immediate feedback. Server-side `/api/get-recipients` handles email validation and filtering. Server-side `/api/preview-template` available for placeholder validation.
+
+**Routes:**
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/` | GET | Serve wizard UI |
+| `/auth/login` | GET | Start auth code flow → redirect to Microsoft |
+| `/auth/callback` | GET | Exchange auth code for token |
+| `/auth/status` | GET | Check if authenticated, return email + token expiry |
+| `/auth/debug` | GET | Auth diagnostics (cache, token, authority) |
+| `/api/config` | GET | Config + full session state for recovery |
+| `/api/state` | POST | Save wizard step/validation state |
+| `/api/upload-spreadsheet` | POST | Upload .xlsx, return columns + preview rows |
+| `/api/get-recipients` | POST | Filtered, validated recipient list |
+| `/api/preview-template` | POST | Server-side template render + placeholder validation |
+| `/api/start-job` | POST | Start background send_merge(), return job ID |
+| `/api/job/<id>/events` | GET | SSE stream of log + completion events |
+| `/api/job/<id>/status` | GET | Job status + results (poll fallback) |
+| `/api/job/<id>/stop` | POST | Request graceful stop |
+
+**Design plan:** `docs/web-ui-plan.md` contains the full design document with implementation status, security assessment, and deferred features.
 
 ## Email address pipeline
 
@@ -95,3 +144,11 @@ Implication for BCC blast: it is safe to send with `toRecipients: []` or omit th
 ## Testing
 
 Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge.auth.acquire_token`) is monkeypatched in CLI tests that need authentication. The `sample_xlsx` and `body_template_file` fixtures in `conftest.py` create temporary test files.
+
+**Web UI tests** span four files:
+- `test_web.py` — Flask test client tests for all routes, CSRF, auth, job lifecycle, options pass-through. Uses `web_client` fixture (pre-authenticated test client).
+- `test_web_e2e.py` — Playwright browser tests for the full wizard flow. Flask runs in a background thread with mocked Graph API and MSAL. Uses module-scoped `live_server` fixture.
+- `test_web_cli.py` — entry point and argument parsing for `mail-merge-web`.
+- `test_web_robustness.py` — edge cases (empty uploads, malformed requests).
+- `test_auth_additions.py` — auth code flow, `diagnose_auth()`, `token_expires_at()`.
+- `test_api_additions.py` — `body_text` and `token_provider` parameters on `send_merge()`.

@@ -10,7 +10,9 @@ All core features from this plan have been implemented. The implementation close
 
 ### Differences from Plan
 
-**`read_preview()` return type:** Plan specified `tuple[list[str], list[dict[str, str]]]` (2-tuple). Implementation returns a 3-tuple `(columns, rows, sheet_names)` to avoid a separate `openpyxl.load_workbook()` call for fetching sheet names.
+**`read_preview()` return type:** Plan specified `tuple[list[str], list[dict[str, str]]]` (2-tuple). Implementation returns a 4-tuple `(columns, rows, sheet_names, total_rows)` to avoid a separate `openpyxl.load_workbook()` call for sheet names, and to show the total row count even when previewing a subset.
+
+**`read_preview()` default max_rows:** Plan specified `max_rows: int = 5`. Implementation uses `max_rows: int = 99` to match the web UI recipient cap, so the preview rows double as the working recipient list.
 
 **`_build_msal_app()` helper:** Not in original plan. Added during implementation to deduplicate MSAL app construction across `acquire_token()`, `initiate_auth_code_flow()`, `acquire_token_by_auth_code()`, and `diagnose_auth()`.
 
@@ -24,6 +26,27 @@ All core features from this plan have been implemented. The implementation close
 
 **`mutable default arguments`:** Plan showed `auth_code_flow: dict[str, Any]` and `auth_response: dict[str, str]` as required positional params. Implementation uses `None` defaults with `or {}` guards to avoid mutable default argument pitfalls.
 
+**Session lifetime:** Plan specified 1 hour. Implementation uses 24 hours (`PERMANENT_SESSION_LIFETIME = 86400`) for better usability — large mail merges with test/verify/send steps can take significant time.
+
+**Default host:** Plan specified `127.0.0.1`. Implementation defaults to `localhost` to ensure the session cookie domain matches the `localhost` redirect URI used by the auth callback. The auth login route additionally redirects `127.0.0.1` requests to `localhost` to prevent domain mismatches.
+
+**Additional routes:** Three routes not in the original plan were added:
+- `POST /api/state` — saves wizard state (current_step, test_passed, verify_passed) to the Flask session for server-side persistence across page reloads.
+- `POST /api/get-recipients` — returns filtered and validated recipients from the uploaded spreadsheet. Handles server-side email validation and filter application, with the 99-recipient cap enforced.
+- `GET /api/config` expanded — beyond the planned client_id/tenant_id, also returns spreadsheet_info, current_step, test_passed, verify_passed, and active_job_id for full session restoration.
+
+**Werkzeug log styling:** `werkzeug.serving._log_add_style = False` is set to prevent ANSI escape codes in server logs.
+
+**CSV injection protection:** The CSV download function (`sanitizeCsvValue` in `app.js`) prefixes cells starting with `=`, `+`, `@`, `-`, tab, or carriage return with a tab character to prevent formula injection in spreadsheet applications.
+
+**Session timeout modal:** A `<dialog>` element shows a session-expired modal with a restart button and reassures the user that their form data has been auto-saved to localStorage. The session timer shows progressive warnings at 60 minutes and 10 minutes remaining.
+
+**Additional test files:** `test_web_robustness.py` (edge-case testing) and `test_web_cli.py` (web CLI entry point testing) were added beyond the plan's `test_web.py` and `test_web_e2e.py`.
+
+**`goToStep()` / `loadPreview()` control flow:** Plan didn't specify the navigation guard logic. Original implementation had a broken guard in `goToStep()` that checked the active DOM panel after `loadPreview()`, but since the DOM hadn't been updated yet, the guard always triggered — preventing navigation to Step 2 even on success. Fixed by having `loadPreview()` return a boolean and removing the guard.
+
+**Active job reconnection:** Original implementation called an undefined `connectSSE()` function, referenced `jobs` instead of `_jobs`, and never stored the job ID in the session. Fixed: `app.js` now calls `streamEvents()` with full send-step UI setup, `app.py` references `_jobs` and stores `session["job_id"]` when starting a job.
+
 ### Not Implemented (deferred)
 
 **Searchable recipient table in Preview step:** The recipients table in Step 2 is not searchable. For the 99-recipient cap this is acceptable — all recipients are visible by scrolling.
@@ -31,6 +54,20 @@ All core features from this plan have been implemented. The implementation close
 **"Did you mean?" placeholder suggestions:** Unresolved placeholder warnings list available columns but don't compute fuzzy matches. The column list is shown as context instead.
 
 **"Show technical details" toggle on log panels:** Log panels show all messages. A toggle to filter between user-meaningful events and technical details was not implemented — the log volume is manageable with the 99-recipient cap.
+
+**`save_to_sent_items` UI toggle:** Plan mentioned a save-to-sent toggle in the collapsible options. The implementation hardcodes `save_to_sent_items: "true"` in the JavaScript form builder with no UI control. The backend supports the toggle (`save_to_sent_items == "false"` check in `api_start_job`), but the UI element is missing.
+
+**`max_retries` UI control:** Plan mentioned max_retries in the collapsible options. No UI control exists; the default value from `send_merge()` is used.
+
+**Inline attachment size validation:** Plan mentioned validating the 3MB attachment limit inline in the UI. Not implemented — oversized attachments are rejected by the Graph API at send time.
+
+**Client ID empty callout:** Plan mentioned showing a callout with a setup guide link when client_id is empty. Not implemented — user sees validation via the "Test connection" diagnostics instead.
+
+**Upload validation summary:** Plan mentioned showing a breakdown after upload ("45 rows found. 42 valid recipients. 3 skipped..."). Implementation shows only the total column and row counts. Detailed validation happens when advancing to the Preview step via `/api/get-recipients`.
+
+**Name column empty cell warning:** Plan mentioned warning when name_column has empty cells. Not implemented.
+
+**Filter info in Preview step:** Plan mentioned showing "Showing 37 of 42 recipients (filtered by: company=Acme)." The `preview-filter-info` element exists in the HTML but is never populated by JavaScript.
 
 ---
 
