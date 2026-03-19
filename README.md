@@ -141,6 +141,65 @@ options:
                         The To: address used in BCC blast mode (required with --bcc-blast)
 ```
 
+## Web Interface
+
+Mail Merge includes a browser-based wizard to guide you through the process.
+
+1.  **Install web dependencies**:
+    ```bash
+    uv sync --extra web
+    ```
+
+2.  **Start the web server**:
+    ```bash
+    mail-merge-web
+    ```
+
+3.  **Open your browser**: Navigate to the URL printed in the terminal (usually `http://localhost:5050/?token=...`).
+
+The web interface provides a step-by-step wizard:
+- **Setup**: Configure your Azure App ID, upload your spreadsheet, and compose your message with live placeholder validation.
+- **Preview**: Scroll through rendered versions of every email before sending.
+- **Test**: Send a single real email to your own address to verify formatting.
+- **Verify**: Run a full dry-run to ensure all data is valid.
+- **Send**: Monitor real-time progress as emails are delivered.
+
+> **Note on Authentication**: The web interface uses `localhost` for authentication redirects. If you manually access the app via `127.0.0.1`, you will be automatically redirected to `localhost` when signing in to ensure your session is preserved.
+
+## Development & Testing
+
+### Setup for Development
+
+To install all development tools and dependencies:
+
+```bash
+uv sync --all-extras --group dev
+```
+
+### Running Tests
+
+We use `pytest` for testing. The suite includes CLI tests, API tests, and Web Interface tests.
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run specific test files
+uv run pytest tests/test_web.py
+uv run pytest tests/test_cli.py
+
+# Run with coverage report
+uv run pytest --cov=mail_merge
+```
+
+### Type Checking
+
+The project uses `mypy` for static type analysis:
+
+```bash
+uv run mypy
+```
+
 ## Python API
 
 The core logic can also be used as a Python library.

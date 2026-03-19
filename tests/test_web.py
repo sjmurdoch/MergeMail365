@@ -314,9 +314,32 @@ class TestAuth:
         resp = web_client.get(
             "/auth/login?client_id=from-query&tenant_id=my-tenant",
             follow_redirects=False,
+            base_url="http://localhost:5050/",
         )
         assert resp.status_code == 302
         mock_flow.assert_called_once_with("from-query", "my-tenant", "http://localhost:5050/auth/callback")
+
+    def test_auth_host_consistency_redirect(self, client):
+        """Test that starting on 127.0.0.1 redirects to localhost for session consistency.
+
+        This test would have caught the 'No auth flow in session' bug where the
+        session was set on 127.0.0.1 but the callback returned to localhost.
+        """
+        # 1. Start on 127.0.0.1 - should redirect to localhost/auth/login...
+        resp = client.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/")
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("http://localhost:5050/auth/login")
+
+        # 2. Follow to localhost - should now proceed to Microsoft and set session on localhost
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+            mock_flow.return_value = {"auth_uri": "https://microsoft.com/auth", "state": "abc"}
+            resp = client.get(resp.headers["Location"], base_url="http://localhost:5050/")
+            assert resp.status_code == 302
+            assert "microsoft.com" in resp.headers["Location"]
+
+            # Verify session is set on localhost
+            with client.session_transaction() as sess:
+                assert "auth_flow" in sess
 
     @patch("mail_merge.auth._load_cache")
     @patch("mail_merge.auth.msal.PublicClientApplication")

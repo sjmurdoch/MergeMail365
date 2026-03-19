@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> None:
         prog="mail-merge-web",
         description="Web interface for mail-merge",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    parser.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
     parser.add_argument("--port", type=int, default=5050, help="Port to bind to (default: 5050)")
     parser.add_argument("--desktop", action="store_true", help="Open in a native desktop window (requires pywebview)")
     parser.add_argument("--log-level", default="INFO", help="Logging level")

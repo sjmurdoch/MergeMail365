@@ -139,10 +139,10 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     @app.before_request
     def _check_auth() -> Any:
-        # Allow static files and auth callback without session auth
+        # Allow static files and auth routes without session auth
         if request.endpoint == "static":
             return None
-        if request.endpoint in ("auth_callback",):
+        if request.endpoint in ("auth_callback", "auth_login"):
             return None
 
         # Check for startup token in query string
@@ -193,6 +193,12 @@ def create_app(startup_token: str = "", port: int = 5050) -> Flask:
 
     @app.route("/auth/login")
     def auth_login() -> Any:
+        # If the user is on 127.0.0.1, redirect them to localhost so the
+        # session cookie is set on the domain that matches the redirect_uri.
+        if request.host.startswith("127.0.0.1"):
+            new_url = request.url.replace("127.0.0.1", "localhost", 1)
+            return redirect(new_url)
+
         # Read client_id/tenant_id from query params (sent by JS), falling
         # back to session/config.  Store in session for later use.
         client_id = (
