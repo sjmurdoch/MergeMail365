@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mail Merge</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+    <!-- Header -->
+    <div class="header-bar">
+        <strong>Mail Merge</strong>
+        <div class="identity">
+            <span id="auth-display" class="auth-indicator">
+                <span class="dot gray"></span> Not signed in
+            </span>
+        </div>
+    </div>
+
+    <!-- Step Indicator -->
+    <ol class="step-indicator" id="step-indicator">
+        <li class="active" data-step="1"><span class="step-num">1</span> Setup</li>
+        <li data-step="2"><span class="step-arrow">&rarr;</span><span class="step-num">2</span> Preview</li>
+        <li data-step="3"><span class="step-arrow">&rarr;</span><span class="step-num">3</span> Test</li>
+        <li data-step="4"><span class="step-arrow">&rarr;</span><span class="step-num">4</span> Verify</li>
+        <li data-step="5"><span class="step-arrow">&rarr;</span><span class="step-num">5</span> Send</li>
+    </ol>
+
+    <!-- ===== STEP 1: Setup ===== -->
+    <div class="step-panel active" id="step-1">
+        <h3>Setup</h3>
+
+        <!-- Auth -->
+        <fieldset>
+            <legend>Authentication</legend>
+            <div class="grid">
+                <div>
+                    <label for="client-id">Client ID</label>
+                    <input type="text" id="client-id" placeholder="Azure AD Application (Client) ID">
+                    <small id="config-badge" class="hidden">Loaded from config file</small>
+                </div>
+                <div>
+                    <label for="tenant-id">Tenant ID</label>
+                    <input type="text" id="tenant-id" placeholder="common" value="common">
+                    <small>Leave as "common" if unsure</small>
+                </div>
+            </div>
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <button type="button" id="btn-sign-in" class="outline">Sign In with Microsoft</button>
+                <button type="button" id="btn-test-connection" class="outline secondary">Test Connection</button>
+            </div>
+            <div id="auth-diagnostics" class="hidden" style="margin-top:0.75rem;">
+                <pre id="auth-diag-content" style="font-size:0.8rem;max-height:200px;overflow:auto;"></pre>
+            </div>
+        </fieldset>
+
+        <!-- Spreadsheet -->
+        <fieldset>
+            <legend>Spreadsheet</legend>
+            <label for="spreadsheet-file">Upload .xlsx file</label>
+            <input type="file" id="spreadsheet-file" accept=".xlsx">
+            <div id="spreadsheet-info" class="hidden">
+                <p id="spreadsheet-summary"></p>
+                <div class="grid">
+                    <div>
+                        <label for="email-column">Email Column</label>
+                        <select id="email-column"><option value="">-- select --</option></select>
+                    </div>
+                    <div>
+                        <label for="name-column">Name Column <small>(optional)</small></label>
+                        <select id="name-column"><option value="">-- none --</option></select>
+                    </div>
+                    <div>
+                        <label for="sheet-select">Sheet</label>
+                        <select id="sheet-select"><option value="">Default</option></select>
+                    </div>
+                </div>
+                <details>
+                    <summary>Preview data</summary>
+                    <div class="table-wrap">
+                        <table id="preview-table" class="striped"><thead></thead><tbody></tbody></table>
+                    </div>
+                </details>
+            </div>
+        </fieldset>
+
+        <!-- Message -->
+        <fieldset>
+            <legend>Message</legend>
+            <!-- Sending mode -->
+            <div class="mode-toggle">
+                <button type="button" id="mode-individual" class="active-mode" onclick="setSendMode('individual')">Individual Emails</button>
+                <button type="button" id="mode-bcc" class="outline" onclick="setSendMode('bcc')">BCC Blast</button>
+            </div>
+            <div id="bcc-blast-options" class="hidden">
+                <label for="bcc-blast-to">BCC Blast To: address</label>
+                <input type="text" id="bcc-blast-to" placeholder='Display Name <email@example.com>'>
+                <div id="bcc-placeholder-warn" class="callout callout-warning hidden">
+                    BCC blast does not support placeholders. Body and subject must be static text.
+                </div>
+            </div>
+
+            <label for="subject-input">Subject</label>
+            <input type="text" id="subject-input" placeholder="Hello {{name}}">
+
+            <label for="body-input">Body</label>
+            <textarea id="body-input" rows="8" placeholder="Hello {{name}},&#10;&#10;Welcome from {{company}}."></textarea>
+
+            <label>
+                <input type="checkbox" id="html-toggle"> Send as HTML
+            </label>
+
+            <div id="placeholder-chips" class="hidden">
+                <small>Available placeholders (click to insert):</small>
+                <div class="chip-container" id="chips"></div>
+            </div>
+            <div id="placeholder-errors" class="hidden callout callout-danger"></div>
+        </fieldset>
+
+        <!-- Options (collapsible) -->
+        <details>
+            <summary>Additional Options</summary>
+            <div class="grid">
+                <div>
+                    <label for="cc-input">CC</label>
+                    <input type="text" id="cc-input" placeholder="e.g., user@example.com or Display Name <user@example.com>">
+                </div>
+                <div>
+                    <label for="bcc-input">BCC</label>
+                    <input type="text" id="bcc-input" placeholder="e.g., user@example.com">
+                </div>
+            </div>
+            <div class="grid">
+                <div>
+                    <label for="reply-to-input">Reply-To</label>
+                    <input type="text" id="reply-to-input" placeholder="e.g., user@example.com">
+                </div>
+                <div>
+                    <label for="importance-select">Importance</label>
+                    <select id="importance-select">
+                        <option value="">Default</option>
+                        <option value="low">Low</option>
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+            </div>
+            <label for="attachment-input">Attachments</label>
+            <input type="file" id="attachment-input" multiple>
+            <div class="grid">
+                <div>
+                    <label for="filter-input">Filters <small>(one per line: column=value or column!=value)</small></label>
+                    <textarea id="filter-input" rows="2" placeholder="company=Acme"></textarea>
+                </div>
+            </div>
+            <label>
+                <input type="checkbox" id="no-save-sent" /> Do not save to Sent Items
+            </label>
+        </details>
+
+        <div class="nav-buttons">
+            <div></div>
+            <button type="button" id="btn-next-1" onclick="goToStep(2)">Next &rarr;</button>
+        </div>
+    </div>
+
+    <!-- ===== STEP 2: Preview ===== -->
+    <div class="step-panel" id="step-2">
+        <h3>Preview</h3>
+        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+            <button type="button" class="outline" onclick="changePreviewRecipient(-1)">&larr; Prev</button>
+            <span id="preview-recipient-label">Previewing recipient 1 of ?</span>
+            <button type="button" class="outline" onclick="changePreviewRecipient(1)">Next &rarr;</button>
+        </div>
+
+        <div class="preview-box" style="margin-bottom:1rem;">
+            <div class="preview-label">Subject</div>
+            <div id="preview-subject" style="font-weight:600;"></div>
+        </div>
+        <div class="preview-box" style="margin-bottom:1rem;">
+            <div class="preview-label">Body</div>
+            <pre id="preview-body" style="white-space:pre-wrap;margin:0;"></pre>
+            <iframe id="preview-body-html" class="hidden" sandbox="" style="width:100%;min-height:200px;border:none;"></iframe>
+        </div>
+
+        <div id="preview-unresolved" class="hidden callout callout-danger"></div>
+
+        <details>
+            <summary>All Recipients</summary>
+            <div id="preview-filter-info" class="hidden" style="margin-bottom:0.5rem;"></div>
+            <div class="table-wrap">
+                <table id="recipients-table" class="striped results-table"><thead></thead><tbody></tbody></table>
+            </div>
+        </details>
+
+        <div class="nav-buttons">
+            <button type="button" class="outline" onclick="goToStep(1)">&larr; Back</button>
+            <button type="button" id="btn-next-2" onclick="goToStep(3)">Next &rarr;</button>
+        </div>
+    </div>
+
+    <!-- ===== STEP 3: Test Email ===== -->
+    <div class="step-panel" id="step-3">
+        <h3>Test Email</h3>
+        <p>This step sends <strong>one real email</strong> to verify your setup. The email is personalized with the first recipient's data but delivered only to the test address below. No emails are sent to your actual recipients.</p>
+
+        <label for="test-email-input">Test email address</label>
+        <input type="email" id="test-email-input" placeholder="your-email@example.com">
+
+        <div class="preview-box" style="margin:1rem 0;">
+            <div class="preview-label">Will send</div>
+            <div id="test-preview-info"></div>
+        </div>
+
+        <div style="display:flex;gap:0.5rem;margin:1rem 0;">
+            <button type="button" id="btn-send-test" onclick="sendTestEmail()">Send Test Email</button>
+            <button type="button" id="btn-retry-test" class="outline hidden" onclick="sendTestEmail()">Retry</button>
+        </div>
+
+        <div id="test-log" class="log-panel hidden"></div>
+        <div id="test-result" class="hidden" style="margin-top:1rem;"></div>
+
+        <div class="nav-buttons">
+            <button type="button" class="outline" onclick="confirmGoBack(2)">&larr; Back</button>
+            <button type="button" id="btn-next-3" disabled onclick="goToStep(4)">Next &rarr;</button>
+        </div>
+    </div>
+
+    <!-- ===== STEP 4: Verify (Dry Run) ===== -->
+    <div class="step-panel" id="step-4">
+        <h3>Verify</h3>
+        <p>No emails will be sent. This step verifies that all <span id="verify-count">?</span> emails can be composed correctly.</p>
+
+        <div id="verify-log" class="log-panel"></div>
+        <div id="verify-result" class="hidden" style="margin-top:1rem;"></div>
+
+        <div class="nav-buttons">
+            <button type="button" class="outline" onclick="confirmGoBack(3)">&larr; Back</button>
+            <button type="button" id="btn-next-4" disabled onclick="goToStep(5)">Next &rarr;</button>
+        </div>
+    </div>
+
+    <!-- ===== STEP 5: Send ===== -->
+    <div class="step-panel" id="step-5">
+        <h3>Send</h3>
+
+        <div id="send-confirm" class="callout callout-danger" style="margin-bottom:1rem;">
+            <p><strong>You are about to send <span id="send-count">?</span> real emails. This cannot be undone.</strong></p>
+            <div id="send-confirm-details"></div>
+            <label for="send-confirm-input" style="margin-top:0.5rem;">Type <strong>SEND</strong> to confirm:</label>
+            <input type="text" id="send-confirm-input" class="confirm-input" placeholder="SEND" autocomplete="off">
+            <button type="button" id="btn-do-send" disabled onclick="startSend()">Send Emails</button>
+        </div>
+
+        <div id="send-progress" class="hidden">
+            <div class="progress-info">
+                <span id="send-progress-text">Sending...</span>
+                <button type="button" id="btn-stop-send" class="outline secondary" style="padding:0.25rem 0.75rem;font-size:0.8rem;" onclick="stopSend()">Stop Sending</button>
+            </div>
+            <progress id="send-progress-bar" max="100" value="0"></progress>
+        </div>
+
+        <div id="send-log" class="log-panel hidden"></div>
+        <div id="send-result" class="hidden" style="margin-top:1rem;"></div>
+
+        <div class="nav-buttons" id="send-nav">
+            <button type="button" class="outline" id="btn-back-5" onclick="confirmGoBack(4)">&larr; Back</button>
+            <div></div>
+        </div>
+        <div class="nav-buttons hidden" id="send-done-nav">
+            <button type="button" id="btn-download-csv" class="outline" onclick="downloadCsv()">Download CSV</button>
+            <button type="button" id="btn-new-merge" onclick="newMerge()">New Merge</button>
+        </div>
+    </div>
+
+</main>
+
+<script>
+const CSRF_TOKEN = {{ csrf_token | tojson }};
+</script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

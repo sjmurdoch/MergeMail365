@@ -91,6 +91,124 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     return token
 
 
+def initiate_auth_code_flow(
+    client_id: str,
+    tenant_id: str = "common",
+    redirect_uri: str = "http://localhost:5050/auth/callback",
+) -> dict[str, Any]:
+    """Start an authorization code flow. Returns the flow dict to store in the session."""
+    if not _TENANT_ID_RE.match(tenant_id):
+        raise ValueError(
+            f"Invalid tenant_id {tenant_id!r}: must be a UUID, 'common', "
+            f"'organizations', 'consumers', or a domain name"
+        )
+    authority = f"{AUTHORITY_BASE}/{tenant_id}"
+    cache = _load_cache()
+    app = msal.PublicClientApplication(
+        client_id,
+        authority=authority,
+        token_cache=cache,
+    )
+    flow: dict[str, Any] = app.initiate_auth_code_flow(
+        scopes=SCOPES,
+        redirect_uri=redirect_uri,
+    )
+    if "auth_uri" not in flow:
+        raise RuntimeError(
+            f"Failed to initiate auth code flow: {json.dumps(flow, indent=2)}"
+        )
+    return flow
+
+
+def acquire_token_by_auth_code(
+    client_id: str,
+    tenant_id: str = "common",
+    auth_code_flow: dict[str, Any] = {},
+    auth_response: dict[str, str] = {},
+) -> str:
+    """Complete the authorization code flow. Returns the access token."""
+    if not _TENANT_ID_RE.match(tenant_id):
+        raise ValueError(
+            f"Invalid tenant_id {tenant_id!r}: must be a UUID, 'common', "
+            f"'organizations', 'consumers', or a domain name"
+        )
+    authority = f"{AUTHORITY_BASE}/{tenant_id}"
+    cache = _load_cache()
+    app = msal.PublicClientApplication(
+        client_id,
+        authority=authority,
+        token_cache=cache,
+    )
+    result: dict[str, Any] = app.acquire_token_by_auth_code_flow(
+        auth_code_flow, auth_response,
+    )
+    _save_cache(cache)
+
+    if "access_token" not in result:
+        error = result.get("error_description", result.get("error", "Unknown error"))
+        raise RuntimeError(f"Auth code exchange failed: {error}")
+
+    token: str = result["access_token"]
+    return token
+
+
+def diagnose_auth(client_id: str, tenant_id: str = "common") -> dict[str, Any]:
+    """Test Entra auth config and return diagnostic info."""
+    info: dict[str, Any] = {
+        "cache_exists": CACHE_PATH.exists(),
+        "cache_path": str(CACHE_PATH),
+        "accounts": [],
+        "token_valid": False,
+        "token_expires_at": None,
+        "authority_reachable": False,
+        "client_id_valid": True,
+        "error": None,
+    }
+
+    if not _TENANT_ID_RE.match(tenant_id):
+        info["error"] = f"Invalid tenant_id: {tenant_id!r}"
+        return info
+
+    authority = f"{AUTHORITY_BASE}/{tenant_id}"
+
+    # Check authority reachability
+    try:
+        import requests as _requests
+        resp = _requests.get(
+            f"{authority}/v2.0/.well-known/openid-configuration",
+            timeout=5,
+        )
+        info["authority_reachable"] = resp.status_code == 200
+    except Exception:
+        info["authority_reachable"] = False
+
+    # Check cached accounts and token
+    try:
+        cache = _load_cache()
+        app = msal.PublicClientApplication(
+            client_id,
+            authority=authority,
+            token_cache=cache,
+        )
+        accounts: list[dict[str, Any]] = app.get_accounts()
+        info["accounts"] = [
+            {"username": a.get("username", ""), "home_account_id": a.get("home_account_id", "")}
+            for a in accounts
+        ]
+        if accounts:
+            result = app.acquire_token_silent(SCOPES, account=accounts[0])
+            if result and "access_token" in result:
+                info["token_valid"] = True
+                expires = token_expires_at(result["access_token"])
+                if expires:
+                    info["token_expires_at"] = expires.isoformat()
+    except Exception as exc:
+        info["client_id_valid"] = False
+        info["error"] = str(exc)
+
+    return info
+
+
 def token_expires_at(token: str) -> datetime | None:
     """Decode JWT exp claim without signature verification.
 

@@ -20,10 +20,29 @@ def _sanitize_csv(value: str) -> str:
     return value
 
 
-def print_summary(results: list[SendResult]) -> None:
+def summarize(results: list[SendResult]) -> dict[str, object]:
+    """Return structured summary: total, sent, failed counts + failed details."""
     total = len(results)
     sent = sum(1 for r in results if r.success)
     failed = total - sent
+    failed_details = [
+        {"email": r.email, "status_code": r.status_code, "error": r.error}
+        for r in results
+        if not r.success
+    ]
+    return {
+        "total": total,
+        "sent": sent,
+        "failed": failed,
+        "failed_details": failed_details,
+    }
+
+
+def print_summary(results: list[SendResult]) -> None:
+    summary = summarize(results)
+    total = summary["total"]
+    sent = summary["sent"]
+    failed = summary["failed"]
 
     console.rule("Summary")
     console.print(f"  Total:  {total}")

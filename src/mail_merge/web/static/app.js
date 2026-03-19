@@ -1,0 +1,767 @@
+/* Mail Merge — Wizard UI */
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let currentStep = 1;
+let spreadsheetData = null;   // { columns, rows, sheets, file_name }
+let allRecipients = null;     // full rows from preview
+let previewIndex = 0;
+let sendMode = "individual";  // "individual" | "bcc"
+let testPassed = false;
+let verifyPassed = false;
+let sendStarted = false;
+let currentJobId = null;
+let sendResults = null;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function $(id) { return document.getElementById(id); }
+function hide(el) { if (typeof el === "string") el = $(el); el.classList.add("hidden"); }
+function show(el) { if (typeof el === "string") el = $(el); el.classList.remove("hidden"); }
+function escapeHtml(s) {
+    const d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function apiFetch(url, opts = {}) {
+    opts.headers = opts.headers || {};
+    if (opts.method && opts.method !== "GET") {
+        opts.headers["X-CSRF-Token"] = CSRF_TOKEN;
+    }
+    return fetch(url, opts);
+}
+
+// ---------------------------------------------------------------------------
+// Step navigation
+// ---------------------------------------------------------------------------
+function goToStep(n) {
+    // Validation before advancing
+    if (n === 2 && currentStep === 1) {
+        if (!validateSetup()) return;
+        loadPreview();
+    }
+    if (n === 3) {
+        if (!testPassed) {
+            // pre-fill test email
+            checkAuthForStep3();
+        }
+    }
+    if (n === 4) {
+        if (!testPassed) return;
+        startVerify();
+    }
+    if (n === 5) {
+        if (!verifyPassed) return;
+        prepareSend();
+    }
+
+    currentStep = n;
+    document.querySelectorAll(".step-panel").forEach(p => p.classList.remove("active"));
+    $("step-" + n).classList.add("active");
+
+    document.querySelectorAll(".step-indicator li").forEach(li => {
+        const s = parseInt(li.dataset.step);
+        li.classList.remove("active", "completed");
+        if (s < n) li.classList.add("completed");
+        if (s === n) li.classList.add("active");
+    });
+}
+
+function confirmGoBack(targetStep) {
+    if (currentStep >= 3 && (testPassed || verifyPassed)) {
+        if (!confirm("Going back will discard your test and verification results. You will need to complete these steps again. Continue?")) {
+            return;
+        }
+        testPassed = false;
+        verifyPassed = false;
+        $("btn-next-3").disabled = true;
+        $("btn-next-4").disabled = true;
+        $("test-log").innerHTML = "";
+        hide("test-log");
+        hide("test-result");
+        $("verify-log").innerHTML = "";
+        hide("verify-result");
+    }
+    goToStep(targetStep);
+}
+
+// ---------------------------------------------------------------------------
+// Step 1: Setup
+// ---------------------------------------------------------------------------
+function validateSetup() {
+    if (!spreadsheetData) {
+        alert("Please upload a spreadsheet.");
+        return false;
+    }
+    const emailCol = $("email-column").value;
+    if (!emailCol) {
+        alert("Please select an email column.");
+        return false;
+    }
+    const subject = $("subject-input").value.trim();
+    if (!subject) {
+        alert("Please enter a subject.");
+        return false;
+    }
+    const body = $("body-input").value.trim();
+    if (!body) {
+        alert("Please enter a body.");
+        return false;
+    }
+    if (sendMode === "bcc" && !$("bcc-blast-to").value.trim()) {
+        alert("BCC Blast mode requires a To: address.");
+        return false;
+    }
+    return true;
+}
+
+function setSendMode(mode) {
+    sendMode = mode;
+    if (mode === "individual") {
+        $("mode-individual").classList.add("active-mode");
+        $("mode-individual").classList.remove("outline");
+        $("mode-bcc").classList.remove("active-mode");
+        $("mode-bcc").classList.add("outline");
+        hide("bcc-blast-options");
+    } else {
+        $("mode-bcc").classList.add("active-mode");
+        $("mode-bcc").classList.remove("outline");
+        $("mode-individual").classList.remove("active-mode");
+        $("mode-individual").classList.add("outline");
+        show("bcc-blast-options");
+        checkBccPlaceholders();
+    }
+}
+
+function checkBccPlaceholders() {
+    const subject = $("subject-input").value;
+    const body = $("body-input").value;
+    const has = /\{\{\w+\}\}/.test(subject + body);
+    if (has) {
+        show("bcc-placeholder-warn");
+    } else {
+        hide("bcc-placeholder-warn");
+    }
+}
+
+// Load config on page load
+async function loadConfig() {
+    try {
+        const resp = await apiFetch("/api/config");
+        const data = await resp.json();
+        if (data.client_id) {
+            $("client-id").value = data.client_id;
+            show("config-badge");
+        }
+        if (data.tenant_id) {
+            $("tenant-id").value = data.tenant_id;
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// Check auth status
+async function checkAuthStatus() {
+    try {
+        const resp = await apiFetch("/auth/status");
+        const data = await resp.json();
+        const el = $("auth-display");
+        if (data.authenticated) {
+            el.innerHTML = '<span class="dot green"></span> Signed in as <span class="email">' + escapeHtml(data.email) + '</span>';
+            if ($("test-email-input") && !$("test-email-input").value) {
+                $("test-email-input").value = data.email;
+            }
+        } else {
+            el.innerHTML = '<span class="dot gray"></span> Not signed in';
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// Sign in
+$("btn-sign-in").addEventListener("click", () => {
+    // Save client_id/tenant_id to session first
+    const clientId = $("client-id").value.trim();
+    const tenantId = $("tenant-id").value.trim() || "common";
+    if (!clientId) {
+        alert("Please enter a Client ID first.");
+        return;
+    }
+    // Store in session via query params on the login redirect
+    window.location.href = `/auth/login?client_id=${encodeURIComponent(clientId)}&tenant_id=${encodeURIComponent(tenantId)}`;
+});
+
+// Test connection
+$("btn-test-connection").addEventListener("click", async () => {
+    show("auth-diagnostics");
+    $("auth-diag-content").textContent = "Testing...";
+    try {
+        const resp = await apiFetch("/auth/debug");
+        const data = await resp.json();
+        $("auth-diag-content").textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+        $("auth-diag-content").textContent = "Error: " + e.message;
+    }
+});
+
+// Spreadsheet upload
+$("spreadsheet-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const form = new FormData();
+    form.append("spreadsheet", file);
+
+    try {
+        const resp = await apiFetch("/api/upload-spreadsheet", {
+            method: "POST",
+            body: form,
+            headers: { "X-CSRF-Token": CSRF_TOKEN },
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert(data.error || "Upload failed");
+            return;
+        }
+        spreadsheetData = data;
+        allRecipients = data.rows;
+        show("spreadsheet-info");
+        $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, showing first ${data.rows.length} rows`;
+
+        // Populate dropdowns
+        populateSelect($("email-column"), data.columns, true);
+        populateSelect($("name-column"), data.columns, false);
+        populateSheetSelect(data.sheets);
+
+        // Auto-detect email column
+        const emailPatterns = ["email", "e-mail", "email address", "emailaddress", "mail"];
+        for (const col of data.columns) {
+            if (emailPatterns.includes(col.toLowerCase())) {
+                $("email-column").value = col;
+                break;
+            }
+        }
+
+        // Build preview table
+        buildPreviewTable(data.columns, data.rows);
+
+        // Show placeholder chips
+        showPlaceholderChips(data.columns);
+    } catch (e) {
+        alert("Upload error: " + e.message);
+    }
+});
+
+function populateSelect(sel, cols, required) {
+    sel.innerHTML = required ? '<option value="">-- select --</option>' : '<option value="">-- none --</option>';
+    for (const c of cols) {
+        sel.innerHTML += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
+    }
+}
+
+function populateSheetSelect(sheets) {
+    const sel = $("sheet-select");
+    sel.innerHTML = "";
+    for (const s of sheets) {
+        sel.innerHTML += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
+    }
+}
+
+function buildPreviewTable(columns, rows) {
+    const thead = document.querySelector("#preview-table thead");
+    const tbody = document.querySelector("#preview-table tbody");
+    thead.innerHTML = "<tr>" + columns.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
+    tbody.innerHTML = rows.map(row =>
+        "<tr>" + columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
+    ).join("");
+}
+
+function showPlaceholderChips(columns) {
+    show("placeholder-chips");
+    const container = $("chips");
+    container.innerHTML = "";
+    for (const col of columns) {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = "{{" + col + "}}";
+        chip.addEventListener("click", () => {
+            const ta = $("body-input");
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            const text = ta.value;
+            ta.value = text.substring(0, start) + "{{" + col + "}}" + text.substring(end);
+            ta.focus();
+            ta.setSelectionRange(start + col.length + 4, start + col.length + 4);
+        });
+        container.appendChild(chip);
+    }
+}
+
+// Real-time placeholder validation
+let placeholderTimer = null;
+function onTemplateChange() {
+    clearTimeout(placeholderTimer);
+    placeholderTimer = setTimeout(validatePlaceholders, 500);
+    if (sendMode === "bcc") checkBccPlaceholders();
+}
+$("subject-input").addEventListener("input", onTemplateChange);
+$("body-input").addEventListener("input", onTemplateChange);
+
+function validatePlaceholders() {
+    if (!spreadsheetData) return;
+    const subject = $("subject-input").value;
+    const body = $("body-input").value;
+    const combined = subject + body;
+    const used = [...combined.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]);
+    const colsLower = spreadsheetData.columns.map(c => c.toLowerCase());
+    const bad = used.filter(p => !colsLower.includes(p.toLowerCase()));
+    const el = $("placeholder-errors");
+    if (bad.length > 0) {
+        const unique = [...new Set(bad)];
+        el.innerHTML = unique.map(p =>
+            `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${spreadsheetData.columns.join(", ")}`
+        ).join("<br>");
+        show(el);
+    } else {
+        hide(el);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Preview
+// ---------------------------------------------------------------------------
+async function loadPreview() {
+    if (!spreadsheetData || !allRecipients || allRecipients.length === 0) return;
+    previewIndex = 0;
+    renderPreviewRecipient();
+    buildRecipientsTable();
+}
+
+function renderPreviewRecipient() {
+    if (!allRecipients || allRecipients.length === 0) return;
+    const row = allRecipients[previewIndex];
+    const subject = $("subject-input").value;
+    const body = $("body-input").value;
+
+    // Client-side template rendering for preview
+    const rendered_subject = renderTemplate(subject, row);
+    const rendered_body = renderTemplate(body, row);
+
+    $("preview-subject").textContent = rendered_subject;
+    const isHtml = $("html-toggle").checked;
+    if (isHtml) {
+        hide("preview-body");
+        show("preview-body-html");
+        $("preview-body-html").srcdoc = rendered_body;
+    } else {
+        show("preview-body");
+        hide("preview-body-html");
+        $("preview-body").textContent = rendered_body;
+    }
+    $("preview-recipient-label").textContent = `Previewing recipient ${previewIndex + 1} of ${allRecipients.length}`;
+}
+
+function renderTemplate(template, data) {
+    const lowerData = {};
+    for (const [k, v] of Object.entries(data)) {
+        lowerData[k.toLowerCase()] = v;
+    }
+    return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+        return lowerData[key.toLowerCase()] !== undefined ? lowerData[key.toLowerCase()] : match;
+    });
+}
+
+function changePreviewRecipient(delta) {
+    if (!allRecipients) return;
+    previewIndex = Math.max(0, Math.min(allRecipients.length - 1, previewIndex + delta));
+    renderPreviewRecipient();
+}
+
+function buildRecipientsTable() {
+    if (!allRecipients || !spreadsheetData) return;
+    const emailCol = $("email-column").value;
+    const cols = [emailCol, ...spreadsheetData.columns.filter(c => c !== emailCol)].slice(0, 5);
+    const thead = document.querySelector("#recipients-table thead");
+    const tbody = document.querySelector("#recipients-table tbody");
+    thead.innerHTML = "<tr>" + cols.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
+    tbody.innerHTML = allRecipients.map(row =>
+        "<tr>" + cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
+    ).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Test Email
+// ---------------------------------------------------------------------------
+function checkAuthForStep3() {
+    // Pre-fill test email
+    checkAuthStatus();
+    updateTestPreview();
+}
+
+function updateTestPreview() {
+    if (!allRecipients || allRecipients.length === 0) return;
+    const row = allRecipients[0];
+    const subject = $("subject-input").value;
+    const rendered = renderTemplate(subject, row);
+    const testAddr = $("test-email-input").value || "(enter test address above)";
+    $("test-preview-info").innerHTML =
+        `<strong>To:</strong> ${escapeHtml(testAddr)}<br>` +
+        `<strong>Subject:</strong> ${escapeHtml(rendered)}<br>` +
+        `<small>Using data from first recipient: ${escapeHtml(row[$("email-column").value] || "?")}</small>`;
+}
+
+$("test-email-input").addEventListener("input", updateTestPreview);
+
+async function sendTestEmail() {
+    const testAddr = $("test-email-input").value.trim();
+    if (!testAddr) {
+        alert("Please enter a test email address.");
+        return;
+    }
+
+    $("btn-send-test").disabled = true;
+    $("btn-send-test").setAttribute("aria-busy", "true");
+    hide("btn-retry-test");
+    show("test-log");
+    $("test-log").innerHTML = "";
+    hide("test-result");
+
+    const form = buildJobFormData("test_email");
+    form.set("test_email", testAddr);
+
+    try {
+        const resp = await apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } });
+        const data = await resp.json();
+        if (!resp.ok) {
+            showTestResult(false, data.error || "Failed to start job");
+            return;
+        }
+        currentJobId = data.job_id;
+        streamEvents(data.job_id, "test-log", (result) => {
+            if (result.status === "completed") {
+                testPassed = true;
+                $("btn-next-3").disabled = false;
+                showTestResult(true, "Test email sent successfully!");
+            } else {
+                showTestResult(false, result.error || "Test email failed");
+                show("btn-retry-test");
+            }
+        });
+    } catch (e) {
+        showTestResult(false, "Error: " + e.message);
+    }
+}
+
+function showTestResult(success, msg) {
+    $("btn-send-test").disabled = false;
+    $("btn-send-test").removeAttribute("aria-busy");
+    const el = $("test-result");
+    show(el);
+    el.className = success ? "callout callout-info" : "callout callout-danger";
+    el.textContent = msg;
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: Verify (Dry Run)
+// ---------------------------------------------------------------------------
+function startVerify() {
+    $("verify-count").textContent = allRecipients ? allRecipients.length : "?";
+    $("verify-log").innerHTML = "";
+    hide("verify-result");
+    $("btn-next-4").disabled = true;
+
+    const form = buildJobFormData("dry_run");
+
+    apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                showVerifyResult(false, data.error);
+                return;
+            }
+            currentJobId = data.job_id;
+            streamEvents(data.job_id, "verify-log", (result) => {
+                if (result.status === "completed") {
+                    verifyPassed = true;
+                    $("btn-next-4").disabled = false;
+                    const n = allRecipients ? allRecipients.length : "?";
+                    const est = allRecipients ? allRecipients.length * 2 : "?";
+                    showVerifyResult(true, `${n} emails ready to send. Estimated time: ~${est} seconds (2-second delay between sends).`);
+                } else {
+                    showVerifyResult(false, result.error || "Verification failed");
+                }
+            });
+        })
+        .catch(e => showVerifyResult(false, "Error: " + e.message));
+}
+
+function showVerifyResult(success, msg) {
+    const el = $("verify-result");
+    show(el);
+    el.className = success ? "callout callout-info" : "callout callout-danger";
+    el.textContent = msg;
+}
+
+// ---------------------------------------------------------------------------
+// Step 5: Send
+// ---------------------------------------------------------------------------
+function prepareSend() {
+    sendStarted = false;
+    sendResults = null;
+    const n = allRecipients ? allRecipients.length : "?";
+    $("send-count").textContent = n;
+
+    // Build details
+    let details = "";
+    const emailCol = $("email-column").value;
+    details += `<strong>Email column:</strong> ${escapeHtml(emailCol)}<br>`;
+    if ($("cc-input").value) details += `<strong>CC:</strong> ${escapeHtml($("cc-input").value)}<br>`;
+    if ($("bcc-input").value) details += `<strong>BCC:</strong> ${escapeHtml($("bcc-input").value)}<br>`;
+    $("send-confirm-details").innerHTML = details;
+
+    show("send-confirm");
+    hide("send-progress");
+    hide("send-log");
+    hide("send-result");
+    show("send-nav");
+    hide("send-done-nav");
+    $("send-confirm-input").value = "";
+    $("btn-do-send").disabled = true;
+}
+
+$("send-confirm-input").addEventListener("input", () => {
+    $("btn-do-send").disabled = $("send-confirm-input").value.trim().toUpperCase() !== "SEND";
+});
+
+async function startSend() {
+    sendStarted = true;
+    hide("send-confirm");
+    show("send-progress");
+    show("send-log");
+    $("send-log").innerHTML = "";
+    $("btn-back-5").disabled = true;
+
+    // beforeunload warning
+    window.addEventListener("beforeunload", beforeUnloadWarn);
+
+    const form = buildJobFormData("send");
+
+    try {
+        const resp = await apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } });
+        const data = await resp.json();
+        if (!resp.ok) {
+            showSendResult(false, data.error || "Failed to start send");
+            return;
+        }
+        currentJobId = data.job_id;
+        streamEvents(data.job_id, "send-log", (result) => {
+            window.removeEventListener("beforeunload", beforeUnloadWarn);
+            if (result.status === "completed" || result.status === "stopped") {
+                fetchAndShowSendResults(data.job_id);
+            } else {
+                showSendResult(false, result.error || "Send failed");
+            }
+        });
+    } catch (e) {
+        window.removeEventListener("beforeunload", beforeUnloadWarn);
+        showSendResult(false, "Error: " + e.message);
+    }
+}
+
+function beforeUnloadWarn(e) {
+    e.preventDefault();
+    e.returnValue = "";
+}
+
+async function stopSend() {
+    if (!currentJobId) return;
+    await apiFetch(`/api/job/${currentJobId}/stop`, {
+        method: "POST",
+        headers: { "X-CSRF-Token": CSRF_TOKEN },
+    });
+}
+
+async function fetchAndShowSendResults(jobId) {
+    try {
+        const resp = await apiFetch(`/api/job/${jobId}/status`);
+        const data = await resp.json();
+        sendResults = data.results || [];
+        const summary = data.summary || {};
+
+        hide("send-progress");
+        show("send-result");
+        hide("send-nav");
+        show("send-done-nav");
+
+        let html = `<h4>Results</h4>`;
+        html += `<p><strong>Total:</strong> ${summary.total || 0} | `;
+        html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
+        html += `<span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`;
+
+        if (sendResults.length > 0) {
+            html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>`;
+            for (const r of sendResults) {
+                const cls = r.success ? "success" : "failure";
+                html += `<tr class="${cls}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${escapeHtml(r.error || "")}</td></tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+
+        $("send-result").innerHTML = html;
+    } catch (e) {
+        showSendResult(false, "Error fetching results: " + e.message);
+    }
+}
+
+function showSendResult(success, msg) {
+    hide("send-progress");
+    show("send-result");
+    hide("send-nav");
+    show("send-done-nav");
+    $("send-result").innerHTML = `<div class="callout ${success ? "callout-info" : "callout-danger"}">${escapeHtml(msg)}</div>`;
+    window.removeEventListener("beforeunload", beforeUnloadWarn);
+}
+
+function downloadCsv() {
+    if (!sendResults || sendResults.length === 0) return;
+    let csv = "email,success,status_code,error\n";
+    for (const r of sendResults) {
+        csv += `"${r.email}",${r.success},${r.status_code || ""},"${(r.error || "").replace(/"/g, '""')}"\n`;
+    }
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "mail-merge-results.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function newMerge() {
+    spreadsheetData = null;
+    allRecipients = null;
+    sendResults = null;
+    testPassed = false;
+    verifyPassed = false;
+    sendStarted = false;
+    $("spreadsheet-file").value = "";
+    hide("spreadsheet-info");
+    $("btn-next-3").disabled = true;
+    $("btn-next-4").disabled = true;
+    goToStep(1);
+}
+
+// ---------------------------------------------------------------------------
+// SSE streaming
+// ---------------------------------------------------------------------------
+function streamEvents(jobId, logPanelId, onComplete) {
+    const panel = $(logPanelId);
+    const evtSource = new EventSource(`/api/job/${jobId}/events`);
+
+    evtSource.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        if (event.type === "done") {
+            evtSource.close();
+            // Fetch final status
+            apiFetch(`/api/job/${jobId}/status`)
+                .then(r => r.json())
+                .then(data => onComplete(data));
+            return;
+        }
+        if (event.type === "log") {
+            const entry = document.createElement("div");
+            entry.className = "log-entry " + (event.data.level || "INFO");
+            entry.textContent = `[${event.data.timestamp}] ${event.data.message}`;
+            panel.appendChild(entry);
+            panel.scrollTop = panel.scrollHeight;
+        }
+        if (event.type === "completed" || event.type === "error") {
+            // Will be followed by "done"
+        }
+    };
+
+    evtSource.onerror = () => {
+        evtSource.close();
+        apiFetch(`/api/job/${jobId}/status`)
+            .then(r => r.json())
+            .then(data => onComplete(data))
+            .catch(() => onComplete({ status: "failed", error: "Connection lost" }));
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Build form data for job
+// ---------------------------------------------------------------------------
+function buildJobFormData(mode) {
+    const form = new FormData();
+    form.set("mode", mode);
+    form.set("email_column", $("email-column").value);
+    form.set("subject", $("subject-input").value);
+    form.set("body", $("body-input").value);
+
+    if ($("name-column").value) form.set("name_column", $("name-column").value);
+    if ($("sheet-select").value) form.set("sheet", $("sheet-select").value);
+    if ($("importance-select").value) form.set("importance", $("importance-select").value);
+    if ($("cc-input").value) form.set("cc", $("cc-input").value);
+    if ($("bcc-input").value) form.set("bcc", $("bcc-input").value);
+    if ($("reply-to-input").value) form.set("reply_to", $("reply-to-input").value);
+    if ($("html-toggle").checked) form.set("html", "true");
+    if ($("no-save-sent").checked) form.set("save_to_sent_items", "false");
+    if ($("filter-input").value.trim()) form.set("filters", $("filter-input").value.trim());
+
+    if (sendMode === "bcc") {
+        form.set("bcc_blast", "true");
+        form.set("bcc_blast_to", $("bcc-blast-to").value);
+    }
+
+    // Attachments
+    const attInput = $("attachment-input");
+    if (attInput.files.length > 0) {
+        for (const f of attInput.files) {
+            form.append("attachments", f);
+        }
+    }
+
+    return form;
+}
+
+// ---------------------------------------------------------------------------
+// Auth hash handling (after callback redirect)
+// ---------------------------------------------------------------------------
+function handleAuthHash() {
+    const hash = window.location.hash;
+    if (hash.startsWith("#auth-success")) {
+        checkAuthStatus();
+        history.replaceState(null, "", window.location.pathname);
+    } else if (hash.startsWith("#auth-error=")) {
+        const error = decodeURIComponent(hash.substring("#auth-error=".length));
+        alert("Authentication error: " + error);
+        history.replaceState(null, "", window.location.pathname);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+document.addEventListener("DOMContentLoaded", () => {
+    loadConfig();
+    checkAuthStatus();
+    handleAuthHash();
+
+    // Auto-save to localStorage
+    setInterval(() => {
+        try {
+            localStorage.setItem("mm_subject", $("subject-input").value);
+            localStorage.setItem("mm_body", $("body-input").value);
+        } catch (e) { /* ignore */ }
+    }, 5000);
+
+    // Restore from localStorage
+    try {
+        const savedSubject = localStorage.getItem("mm_subject");
+        const savedBody = localStorage.getItem("mm_body");
+        if (savedSubject && !$("subject-input").value) $("subject-input").value = savedSubject;
+        if (savedBody && !$("body-input").value) $("body-input").value = savedBody;
+    } catch (e) { /* ignore */ }
+});

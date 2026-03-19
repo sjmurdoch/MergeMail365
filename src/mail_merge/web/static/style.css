@@ -1,0 +1,321 @@
+/* Mail-merge web UI custom styles */
+
+:root {
+    --step-active: var(--pico-primary);
+    --step-completed: var(--pico-ins-color);
+    --step-inactive: var(--pico-muted-color);
+    --log-bg: var(--pico-code-background-color);
+}
+
+/* Layout */
+body > main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1rem 1.5rem;
+}
+
+/* Header bar */
+.header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+.header-bar .identity {
+    font-size: 0.9rem;
+    color: var(--pico-muted-color);
+}
+
+.header-bar .identity .email {
+    color: var(--pico-color);
+    font-weight: 600;
+}
+
+/* Step indicator */
+.step-indicator {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin: 1.5rem 0;
+    padding: 0;
+    list-style: none;
+}
+
+.step-indicator li {
+    display: flex;
+    align-items: center;
+    font-size: 0.85rem;
+    color: var(--step-inactive);
+    font-weight: 500;
+}
+
+.step-indicator li .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    border: 2px solid var(--step-inactive);
+    margin-right: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.step-indicator li.active {
+    color: var(--step-active);
+}
+
+.step-indicator li.active .step-num {
+    border-color: var(--step-active);
+    background: var(--step-active);
+    color: var(--pico-background-color);
+}
+
+.step-indicator li.completed {
+    color: var(--step-completed);
+}
+
+.step-indicator li.completed .step-num {
+    border-color: var(--step-completed);
+    background: var(--step-completed);
+    color: var(--pico-background-color);
+}
+
+.step-indicator li .step-arrow {
+    margin: 0 0.75rem;
+    color: var(--pico-muted-border-color);
+}
+
+/* Step panels */
+.step-panel {
+    display: none;
+}
+
+.step-panel.active {
+    display: block;
+}
+
+/* Placeholder chips */
+.chip-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.5rem 0;
+}
+
+.chip {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 1rem;
+    background: var(--pico-secondary-background);
+    color: var(--pico-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    border: 1px solid var(--pico-secondary-border);
+    transition: background 0.15s;
+}
+
+.chip:hover {
+    background: var(--pico-secondary-hover-background);
+}
+
+/* Log panel */
+.log-panel {
+    background: var(--log-bg);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    max-height: 350px;
+    overflow-y: auto;
+    font-family: var(--pico-font-family-monospace);
+    font-size: 0.8rem;
+    line-height: 1.6;
+}
+
+.log-panel .log-entry {
+    padding: 0.1rem 0;
+    animation: fadeIn 0.2s ease-in;
+}
+
+.log-panel .log-entry.WARNING {
+    color: #d97706;
+}
+
+.log-panel .log-entry.ERROR {
+    color: var(--pico-del-color);
+    font-weight: 600;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Preview panel */
+.preview-box {
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: var(--pico-card-background-color);
+}
+
+.preview-box .preview-label {
+    font-size: 0.75rem;
+    color: var(--pico-muted-color);
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+/* Results table */
+.results-table {
+    font-size: 0.85rem;
+}
+
+.results-table .success {
+    color: var(--pico-ins-color);
+}
+
+.results-table .failure {
+    color: var(--pico-del-color);
+}
+
+/* Recipient count badge */
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge-info {
+    background: var(--pico-primary-background);
+    color: var(--pico-primary);
+}
+
+.badge-success {
+    background: var(--pico-ins-color);
+    color: white;
+}
+
+.badge-warning {
+    background: #fbbf24;
+    color: #78350f;
+}
+
+.badge-danger {
+    background: var(--pico-del-color);
+    color: white;
+}
+
+/* Confirmation input */
+.confirm-input {
+    max-width: 200px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+}
+
+/* Navigation buttons */
+.nav-buttons {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--pico-muted-border-color);
+}
+
+/* Collapsible options */
+.collapsible-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.collapsible-content {
+    display: none;
+}
+
+.collapsible-content.open {
+    display: block;
+}
+
+/* Sending mode toggle */
+.mode-toggle {
+    display: flex;
+    gap: 0.5rem;
+    margin: 1rem 0;
+}
+
+.mode-toggle button {
+    flex: 1;
+}
+
+.mode-toggle button.outline:not(.active-mode) {
+    opacity: 0.6;
+}
+
+/* Warning callout */
+.callout {
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+}
+
+.callout-warning {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    color: #92400e;
+}
+
+.callout-info {
+    background: var(--pico-primary-background);
+    border: 1px solid var(--pico-primary-border);
+}
+
+.callout-danger {
+    background: #fef2f2;
+    border: 1px solid var(--pico-del-color);
+    color: #991b1b;
+}
+
+/* Progress bar */
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+}
+
+/* Hidden */
+.hidden {
+    display: none !important;
+}
+
+/* Recipient preview table wrapper */
+.table-wrap {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Auth status inline */
+.auth-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.auth-indicator .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.auth-indicator .dot.green { background: #22c55e; }
+.auth-indicator .dot.red { background: #ef4444; }
+.auth-indicator .dot.gray { background: #9ca3af; }

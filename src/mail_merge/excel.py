@@ -6,6 +6,47 @@ import openpyxl
 logger = logging.getLogger(__name__)
 
 
+def read_preview(
+    path: str | Path,
+    sheet_name: str | None = None,
+    max_rows: int = 5,
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Read column headers and first N rows. Returns (columns, rows).
+
+    Does not require an email_column — used for spreadsheet preview in the web UI.
+    """
+    path = Path(path)
+    max_size = 50 * 1024 * 1024  # 50 MB
+    file_size = path.stat().st_size
+    if file_size > max_size:
+        raise ValueError(
+            f"Spreadsheet too large: {file_size / (1024 * 1024):.0f} MB "
+            f"(limit: {max_size // (1024 * 1024)} MB)"
+        )
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb[sheet_name] if sheet_name else wb.active
+
+        rows_iter = ws.iter_rows()
+        header_row = next(rows_iter, None)
+        if header_row is None:
+            raise ValueError("Spreadsheet is empty")
+
+        headers = [str(cell.value).strip() if cell.value is not None else "" for cell in header_row]
+        columns = [h for h in headers if h]
+
+        preview_rows: list[dict[str, str]] = []
+        for _, row in zip(range(max_rows), rows_iter):
+            values = [str(cell.value).strip() if cell.value is not None else "" for cell in row]
+            while len(values) < len(headers):
+                values.append("")
+            record = {headers[i]: values[i] for i in range(len(headers)) if headers[i]}
+            preview_rows.append(record)
+    finally:
+        wb.close()
+    return columns, preview_rows
+
+
 def read_recipients(
     path: str | Path,
     email_column: str,

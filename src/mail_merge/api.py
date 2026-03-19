@@ -6,6 +6,7 @@ import base64
 import logging
 import mimetypes
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from email.utils import parseaddr
 from pathlib import Path
@@ -178,9 +179,9 @@ def _apply_filters(
 
 def send_merge(
     spreadsheet: str | Path,
-    body: str | Path,
-    subject: str,
-    email_column: str,
+    body: str | Path | None = None,
+    subject: str = "",
+    email_column: str = "",
     client_id: str | None = None,
     tenant_id: str | None = None,
     sheet: str | None = None,
@@ -203,6 +204,8 @@ def send_merge(
     bcc_blast: bool = False,
     bcc_blast_to: str | None = None,
     name_column: str | None = None,
+    body_text: str | None = None,
+    token_provider: Callable[[], str] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -256,6 +259,11 @@ def send_merge(
             each email's ``To:`` header includes the name (e.g.
             ``"Alice <alice@example.com>"``). In BCC blast mode this is
             ignored (use ``bcc_blast_to`` with display name format instead).
+        body_text: Use directly as body template string. Takes precedence
+            over ``body`` file path if both provided. At least one of
+            ``body`` or ``body_text`` must be provided.
+        token_provider: Callable that returns an access token string.
+            When provided, skips the built-in auth block (device code flow).
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -355,11 +363,16 @@ def send_merge(
                 return previous_results
 
     # --- Read body template ---
-    body_path = Path(body)
-    try:
-        body_template = body_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Body template not found: {body_path}")
+    if body_text is not None:
+        body_template = body_text
+    elif body is not None:
+        body_path = Path(body)
+        try:
+            body_template = body_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Body template not found: {body_path}")
+    else:
+        raise ValueError("At least one of 'body' or 'body_text' must be provided")
 
     # --- Validate placeholders ---
     if bcc_blast:
@@ -453,40 +466,43 @@ def send_merge(
     # --- Authenticate (skip for dry run, but always for test email) ---
     get_token = None
     if send or test_email:
-        if not client_id:
-            raise RuntimeError(
-                "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
-                f"or add to config file {_config.DEFAULT_PATH})"
-            )
-        from mail_merge.auth import acquire_token, token_expires_at
-
-        try:
-            # Eager call to trigger device-code flow if needed
-            token = acquire_token(client_id, tenant_id)
-        except Exception as exc:
-            raise RuntimeError(f"Authentication failed: {exc}") from exc
-
-        # Subsequent calls will use silent acquisition (cached refresh token)
-        def get_token() -> str:
-            return acquire_token(client_id, tenant_id)
-
-        # --- Pre-flight token expiry check ---
-        expires = token_expires_at(token)
-        if expires:
-            remaining = (expires - datetime.now(timezone.utc)).total_seconds()
-            estimated = len(recipients) * delay
-            min_token_lifetime = 5 * 60  # 5 minutes
-            if estimated > remaining or remaining < min_token_lifetime:
-                logger.warning(
-                    "Token expires in %d min but send may take ~%d min; "
-                    "refreshing token before sending",
-                    remaining // 60,
-                    estimated // 60,
+        if token_provider is not None:
+            get_token = token_provider
+        else:
+            if not client_id:
+                raise RuntimeError(
+                    "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
+                    f"or add to config file {_config.DEFAULT_PATH})"
                 )
-                try:
-                    token = acquire_token(client_id, tenant_id)
-                except Exception:
-                    logger.warning("Token refresh failed, continuing with current token")
+            from mail_merge.auth import acquire_token, token_expires_at
+
+            try:
+                # Eager call to trigger device-code flow if needed
+                token = acquire_token(client_id, tenant_id)
+            except Exception as exc:
+                raise RuntimeError(f"Authentication failed: {exc}") from exc
+
+            # Subsequent calls will use silent acquisition (cached refresh token)
+            def get_token() -> str:
+                return acquire_token(client_id, tenant_id)
+
+            # --- Pre-flight token expiry check ---
+            expires = token_expires_at(token)
+            if expires:
+                remaining = (expires - datetime.now(timezone.utc)).total_seconds()
+                estimated = len(recipients) * delay
+                min_token_lifetime = 5 * 60  # 5 minutes
+                if estimated > remaining or remaining < min_token_lifetime:
+                    logger.warning(
+                        "Token expires in %d min but send may take ~%d min; "
+                        "refreshing token before sending",
+                        remaining // 60,
+                        estimated // 60,
+                    )
+                    try:
+                        token = acquire_token(client_id, tenant_id)
+                    except Exception:
+                        logger.warning("Token refresh failed, continuing with current token")
 
     # --- Test email (always sends, regardless of --send flag) ---
     if test_email:

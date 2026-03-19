@@ -12,8 +12,13 @@ dependencies = [
     "tomli>=1.0.0; python_version < '3.11'",
 ]
 
+[project.optional-dependencies]
+web = ["flask>=3.0"]
+desktop = ["flask>=3.0", "pywebview>=5.0"]
+
 [project.scripts]
 mail-merge = "mail_merge.cli:main"
+mail-merge-web = "mail_merge.web:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -46,5 +51,5 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
 [[tool.mypy.overrides]]
-module = ["msal", "openpyxl", "tomli"]
+module = ["msal", "openpyxl", "tomli", "flask", "flask.*", "webview"]
 ignore_missing_imports = true
