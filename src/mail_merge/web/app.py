@@ -465,6 +465,24 @@ def create_app(
         if not email_column or not subject:
             return jsonify({"error": "email_column and subject are required"}), 400  # type: ignore[return-value]
 
+        # Enforce recipient cap (defense-in-depth: api_get_recipients checks
+        # this during the wizard, but api_start_job must not trust the client
+        # flow).  Uses the same read → validate → filter pipeline.
+        filters_list = data["filters"].split("\n") if data.get("filters") else None
+        try:
+            count = _validated_recipient_count(
+                spreadsheet_path, email_column,
+                sheet=data.get("sheet"), filters=filters_list,
+            )
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
+        if count > MAX_WEB_RECIPIENTS:
+            return jsonify({
+                "error": f"Too many recipients ({count}). "
+                         f"The web UI supports up to {MAX_WEB_RECIPIENTS}. "
+                         "Use the CLI for larger sends."
+            }), 400  # type: ignore[return-value]
+
         # Build kwargs
         client_id, tenant_id = _get_client_tenant()
 
@@ -649,6 +667,24 @@ def create_app(
             except EmailNotValidError as exc:
                 invalid.append({"address": addr, "reason": str(exc)})
         return valid, invalid
+
+    def _validated_recipient_count(
+        filepath: str, email_column: str,
+        sheet: str | None = None, filters: list[str] | None = None,
+    ) -> int:
+        """Read, validate, and filter recipients — return the count.
+
+        Used by both api_get_recipients (full results) and api_start_job
+        (defense-in-depth cap check) to ensure consistent counting.
+        """
+        from mail_merge.api import apply_filters
+        from mail_merge.excel import read_recipients
+
+        recipients = read_recipients(filepath, email_column, sheet_name=sheet)
+        valid, _invalid = _partition_emails(recipients, email_column)
+        if filters:
+            valid = apply_filters(valid, filters)
+        return len(valid)
 
     _cached_config: dict[str, str] | None = None
 

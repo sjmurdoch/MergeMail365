@@ -570,6 +570,23 @@ class TestJobs:
         data = resp.get_json()
         assert "99" in data["error"] or "Too many" in data["error"]
 
+    def test_start_job_rejects_over_99(self, web_client, sample_xlsx_100):
+        """api_start_job enforces the cap independently of api_get_recipients."""
+        csrf = self._setup_upload(web_client, sample_xlsx_100)
+        resp = web_client.post(
+            "/api/start-job",
+            data={
+                "mode": "dry_run",
+                "email_column": "email",
+                "subject": "Hello {{name}}",
+                "body": "Body.",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "Too many" in data["error"]
+
     @responses.activate
     @patch("mail_merge.auth.acquire_token", return_value="fake-token")
     def test_test_email_job(self, mock_auth, web_client, sample_xlsx_web):

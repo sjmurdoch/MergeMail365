@@ -142,10 +142,12 @@ function validateSetup() {
         alert("BCC Blast mode requires a To: address.");
         return false;
     }
-    // 99-recipient cap
-    const recipients = getRecipients();
-    if (recipients && recipients.length > 99) {
-        alert(`Too many recipients (${recipients.length}). The web interface supports up to 99 recipients. For larger sends, use the command-line tool.`);
+    // Quick pre-check using the total row count from the spreadsheet.
+    // The authoritative cap check happens server-side in api_get_recipients
+    // (after email validation and filtering), but this gives early feedback
+    // when the spreadsheet is clearly too large and no filters are set.
+    if (spreadsheetData.total_rows > 99 && !$("filter-input").value.trim()) {
+        alert(`Too many recipients (${spreadsheetData.total_rows}). The web interface supports up to 99 recipients. Add filters to reduce the count, or use the command-line tool.`);
         return false;
     }
     return true;

@@ -272,7 +272,7 @@ class TestRecipientCap:
         page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
         page.fill("#subject-input", "Hello {{name}}")
         page.fill("#body-input", "Body")
-        # Clicking Next triggers /api/get-recipients which rejects >99 recipients
+        # Clicking Next triggers client-side check (total_rows > 99, no filters)
         alert_text = []
         page.on("dialog", lambda dialog: (alert_text.append(dialog.message), dialog.accept()))
         page.click("#btn-next-1")
