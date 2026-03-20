@@ -425,10 +425,6 @@ function buildPreviewTable(columns, rows, totalRows) {
     const caption = document.querySelector("#preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
         caption.textContent = `Showing ${rows.length} of ${totalRows} rows`;
-        caption.style.captionSide = "bottom";
-        caption.style.textAlign = "right";
-        caption.style.fontStyle = "italic";
-        caption.style.padding = "0.5rem 0";
         if (!caption.parentNode) document.querySelector("#preview-table").prepend(caption);
     } else {
         caption.remove();

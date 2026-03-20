@@ -5,6 +5,41 @@
     --step-completed: var(--pico-ins-color);
     --step-inactive: var(--pico-muted-color);
     --log-bg: var(--pico-code-background-color);
+    --color-warning: #d97706;
+    --color-success: #166534;
+    --callout-warning-bg: #fef3c7;
+    --callout-warning-border: #f59e0b;
+    --callout-warning-text: #92400e;
+    --callout-danger-bg: #fef2f2;
+    --callout-danger-text: #991b1b;
+    --badge-warning-bg: #fbbf24;
+    --badge-warning-text: #78350f;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --color-warning: #fbbf24;
+        --color-success: #4ade80;
+        --callout-warning-bg: #78350f;
+        --callout-warning-border: #d97706;
+        --callout-warning-text: #fef3c7;
+        --callout-danger-bg: #450a0a;
+        --callout-danger-text: #fecaca;
+        --badge-warning-bg: #92400e;
+        --badge-warning-text: #fef3c7;
+    }
+}
+
+[data-theme="dark"] {
+    --color-warning: #fbbf24;
+    --color-success: #4ade80;
+    --callout-warning-bg: #78350f;
+    --callout-warning-border: #d97706;
+    --callout-warning-text: #fef3c7;
+    --callout-danger-bg: #450a0a;
+    --callout-danger-text: #fecaca;
+    --badge-warning-bg: #92400e;
+    --badge-warning-text: #fef3c7;
 }
 
 fieldset legend {
@@ -16,6 +51,24 @@ input:focus::placeholder,
 textarea:focus::placeholder {
     opacity: 0;
     transition: opacity 0.1s ease;
+}
+
+/* File input — style the button to match Pico */
+input[type="file"]::file-selector-button {
+    background-color: var(--pico-primary);
+    color: var(--pico-primary-inverse);
+    border: 1px solid var(--pico-primary);
+    border-radius: var(--pico-border-radius);
+    padding: 0.4rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-right: 0.75rem;
+    transition: background-color 0.15s, border-color 0.15s, filter 0.15s;
+}
+
+input[type="file"]::file-selector-button:hover {
+    filter: brightness(1.1);
 }
 
 /* Layout */
@@ -153,7 +206,7 @@ body > main {
 }
 
 .log-panel .log-entry.WARNING {
-    color: #d97706;
+    color: var(--color-warning);
 }
 
 .log-panel .log-entry.ERROR {
@@ -172,6 +225,7 @@ body > main {
     border-radius: 0.5rem;
     padding: 1rem;
     background: var(--pico-card-background-color);
+    margin-bottom: 1rem;
 }
 
 .preview-box .preview-label {
@@ -182,23 +236,49 @@ body > main {
     margin-bottom: 0.25rem;
 }
 
+.preview-box .preview-subject {
+    font-weight: 600;
+}
+
+.preview-box .preview-body {
+    white-space: pre-wrap;
+    margin: 0;
+}
+
+.preview-box .preview-iframe {
+    width: 100%;
+    min-height: 200px;
+    border: none;
+}
+
+.preview-box .preview-header {
+    margin-bottom: 0;
+    row-gap: 0.5rem;
+}
+
+/* Preview navigation */
+.preview-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* Table caption (truncation indicator) */
+table caption {
+    caption-side: bottom;
+    text-align: right;
+    font-style: italic;
+    padding: 0.5rem 0;
+}
+
 /* Results table */
 .results-table {
     font-size: 0.85rem;
 }
 
-.results-table .success {
-    color: #166534; /* Darker green for better contrast */
-    font-weight: 600;
-}
-
-.results-table .failure {
-    color: var(--pico-del-color);
-    font-weight: 600;
-}
-
 .success {
-    color: #166534;
+    color: var(--color-success);
     font-weight: 600;
 }
 
@@ -217,8 +297,8 @@ body > main {
 }
 
 .badge-warning {
-    background: #fbbf24;
-    color: #78350f;
+    background: var(--badge-warning-bg);
+    color: var(--badge-warning-text);
 }
 
 /* Confirmation input */
@@ -290,7 +370,33 @@ details summary:hover {
     opacity: 0.6;
 }
 
-/* Warning callout */
+/* Button row — horizontal group of buttons */
+.button-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Action result — test/verify/send result areas */
+.action-result {
+    margin-top: 1rem;
+}
+
+/* Auth diagnostics */
+.auth-diagnostics-content {
+    font-size: 0.8rem;
+    max-height: 200px;
+    overflow: auto;
+}
+
+/* Stop send button */
+.btn-stop {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+/* Callouts */
 .callout {
     padding: 0.75rem 1rem;
     border-radius: 0.5rem;
@@ -299,9 +405,9 @@ details summary:hover {
 }
 
 .callout-warning {
-    background: #fef3c7;
-    border: 1px solid #f59e0b;
-    color: #92400e;
+    background: var(--callout-warning-bg);
+    border: 1px solid var(--callout-warning-border);
+    color: var(--callout-warning-text);
 }
 
 .callout-info {
@@ -311,9 +417,9 @@ details summary:hover {
 }
 
 .callout-danger {
-    background: #fef2f2;
+    background: var(--callout-danger-bg);
     border: 1px solid var(--pico-del-color);
-    color: #991b1b;
+    color: var(--callout-danger-text);
 }
 
 /* Progress bar */
@@ -360,6 +466,6 @@ details summary:hover {
 }
 
 .session-timer.session-warn {
-    color: #d97706;
+    color: var(--color-warning);
     font-weight: 600;
 }
