@@ -161,3 +161,76 @@ class TestTenantIdValidation:
             from mail_merge.auth import acquire_token
             token = acquire_token("fake-client", tenant_id="contoso.onmicrosoft.com")
         assert token == "tok"
+
+
+class TestAcquireTokenEdgeCases:
+    """Test uncovered paths in acquire_token."""
+
+    def test_silent_acquisition_from_cache(self):
+        """When a cached account exists, silent acquisition is tried first."""
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
+        mock_app.acquire_token_silent.return_value = {"access_token": "cached-tok"}
+
+        with patch("msal.PublicClientApplication", return_value=mock_app), \
+             patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
+            from mail_merge.auth import acquire_token
+            token = acquire_token("fake-client")
+
+        assert token == "cached-tok"
+        mock_app.acquire_token_silent.assert_called_once()
+        mock_app.initiate_device_flow.assert_not_called()
+
+    def test_device_code_flow_failure(self):
+        """When device code flow returns no user_code, RuntimeError is raised."""
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = []
+        mock_app.initiate_device_flow.return_value = {"error": "something went wrong"}
+
+        with patch("msal.PublicClientApplication", return_value=mock_app), \
+             patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
+            from mail_merge.auth import acquire_token
+            with pytest.raises(RuntimeError, match="Device code flow failed"):
+                acquire_token("fake-client")
+
+    def test_missing_access_token(self):
+        """When token result has no access_token, RuntimeError is raised."""
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = []
+        mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
+        mock_app.acquire_token_by_device_flow.return_value = {
+            "error": "auth_failed",
+            "error_description": "User cancelled",
+        }
+
+        with patch("msal.PublicClientApplication", return_value=mock_app), \
+             patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
+            from mail_merge.auth import acquire_token
+            with pytest.raises(RuntimeError, match="Authentication failed"):
+                acquire_token("fake-client")
+
+
+class TestDiagnoseAuthEdgeCases:
+    """Test uncovered paths in diagnose_auth."""
+
+    def test_authority_unreachable(self):
+        """When authority check raises an exception, authority_reachable is False."""
+        from mail_merge.auth import diagnose_auth
+
+        with patch("requests.get", side_effect=ConnectionError("network down")):
+            info = diagnose_auth("fake-client", "common")
+
+        assert info["authority_reachable"] is False
+
+    def test_msal_app_build_failure(self):
+        """When MSAL app operations raise, client_id_valid is False."""
+        from mail_merge.auth import diagnose_auth
+
+        with patch("requests.get") as mock_get, \
+             patch("msal.PublicClientApplication", side_effect=Exception("bad client")), \
+             patch.object(auth_module, "_load_cache", return_value=MagicMock()):
+            mock_get.return_value = MagicMock(status_code=200)
+            info = diagnose_auth("bad-client", "common")
+
+        assert info["client_id_valid"] is False
+        assert "bad client" in info["error"]

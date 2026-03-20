@@ -248,6 +248,87 @@ class TestEmailValidation:
         assert "user@mail.sub.example.com" in emails
 
 
+class TestEmptyRecipients:
+    def test_empty_spreadsheet_raises(self, tmp_path, body_template_file):
+        """Spreadsheet with headers but no data rows raises ValueError."""
+        path = tmp_path / "headers_only.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email", "company"])
+        wb.save(path)
+
+        with pytest.raises(ValueError, match="No recipients found"):
+            send_merge(
+                spreadsheet=path,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+            )
+
+    def test_apply_filters_empty_recipients(self):
+        """apply_filters with empty list returns empty list."""
+        from mail_merge.api import apply_filters
+        result = apply_filters([], ["company=Acme"])
+        assert result == []
+
+
+class TestParseAddressEntries:
+    def test_empty_string_returns_none(self):
+        from mail_merge.api import _parse_address_entries
+        assert _parse_address_entries("") is None
+
+    def test_whitespace_only_returns_none(self):
+        from mail_merge.api import _parse_address_entries
+        assert _parse_address_entries("  ,  , ") is None
+
+    def test_empty_list_returns_none(self):
+        from mail_merge.api import _parse_address_entries
+        assert _parse_address_entries(["", " "]) is None
+
+
+class TestBatchSizeEmptyBatch:
+    def test_batch_size_zero_returns_previous(self, sample_xlsx, body_template_file, tmp_path):
+        """batch_size=0 means no recipients in this batch."""
+        output = tmp_path / "report.csv"
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+        ], output)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            output=output,
+            resume=True,
+            batch_size=0,
+        )
+        # Only the previous result (Alice), no new sends
+        assert len(results) == 1
+        assert results[0].email == "alice@example.com"
+
+
+class TestAuthFailure:
+    def test_auth_exception_wrapped_in_runtime_error(
+        self, sample_xlsx, body_template_file, monkeypatch
+    ):
+        """When acquire_token raises, it's wrapped in a RuntimeError."""
+        monkeypatch.setattr(
+            "mail_merge.auth.acquire_token",
+            lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("network down")),
+        )
+        with pytest.raises(RuntimeError, match="Authentication failed.*network down"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                client_id="fake-client-id",
+                send=True,
+                confirm=False,
+            )
+
+
 class TestAuthError:
     def test_missing_client_id(self, sample_xlsx, body_template_file, monkeypatch):
         monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)

@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 import responses
 
 from mail_merge.sender import (
@@ -274,6 +275,21 @@ class TestSendAll:
         assert results[1].success
         # After throttled send, delay should have doubled to 2.0
         assert sleep_values[-1] == 2.0
+
+
+class TestSendAllGetTokenRequired:
+    def test_no_get_token_in_live_mode_raises(self):
+        """Passing get_token=None with dry_run=False raises RuntimeError."""
+        recipients = [{"name": "Alice", "email": "alice@example.com"}]
+        with pytest.raises(RuntimeError, match="get_token is required"):
+            send_all(
+                get_token=None,
+                recipients=recipients,
+                email_column="email",
+                subject_template="Hi",
+                body_template="Hello",
+                dry_run=False,
+            )
 
 
 class TestSendAllNameColumn:

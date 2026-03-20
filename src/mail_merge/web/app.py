@@ -756,7 +756,7 @@ def create_app(
         # Fixed values (from --client-id / --tenant-id) take highest priority
         fixed_key = f"FIXED_{key.upper()}"
         if app.config.get(fixed_key):
-            return app.config[fixed_key]
+            return str(app.config[fixed_key])
         nonlocal _cached_config
         if _cached_config is None:
             _cached_config = load_config()

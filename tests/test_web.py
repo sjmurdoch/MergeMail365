@@ -899,3 +899,186 @@ class TestReadPreview:
 
         with pytest.raises(ValueError, match="empty"):
             read_preview(path)
+
+
+# ---- Web route error paths ----
+
+class TestWebRouteErrors:
+    """Tests for web route error paths not covered by other tests."""
+
+    def test_preview_template_no_data(self, web_client):
+        """POST to /api/preview-template with no JSON body is rejected."""
+        csrf = get_csrf(web_client)
+        # Flask rejects non-JSON content type before the route handler runs
+        resp = web_client.post(
+            "/api/preview-template",
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+            data="",
+        )
+        assert resp.status_code in (400, 415)
+
+    def test_get_recipients_without_upload(self, web_client):
+        """POST to /api/get-recipients without uploading a spreadsheet returns 400."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/get-recipients",
+            data={"email_column": "email"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400
+        assert "No spreadsheet" in resp.get_json()["error"]
+
+    def test_start_job_without_upload(self, web_client):
+        """POST to /api/start-job without uploading a spreadsheet returns 400."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/start-job",
+            data={"mode": "dry_run", "email_column": "email", "subject": "Hi", "body": "Body"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400
+        assert "No spreadsheet" in resp.get_json()["error"]
+
+    def test_start_job_missing_required_fields(self, web_client, sample_xlsx_web):
+        """POST to /api/start-job without email_column or subject returns 400."""
+        csrf = get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        resp = web_client.post(
+            "/api/start-job",
+            data={"mode": "dry_run", "body": "Body"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400
+        assert "required" in resp.get_json()["error"]
+
+    def test_job_status_not_found(self, web_client):
+        """GET /api/job/<nonexistent>/status returns 404."""
+        resp = web_client.get("/api/job/nonexistent-id/status")
+        assert resp.status_code == 404
+        assert "not found" in resp.get_json()["error"].lower()
+
+    def test_job_stop_not_found(self, web_client):
+        """POST /api/job/<nonexistent>/stop returns 404."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/job/nonexistent-id/stop",
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 404
+        assert "not found" in resp.get_json()["error"].lower()
+
+    def test_job_stop_success(self, web_client, sample_xlsx_web):
+        """POST /api/job/<id>/stop sets stop_requested flag."""
+        csrf = get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        resp = web_client.post(
+            "/api/start-job",
+            data={
+                "mode": "dry_run",
+                "email_column": "email",
+                "subject": "Hello",
+                "body": "Body.",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        job_id = resp.get_json()["job_id"]
+        resp = web_client.post(
+            f"/api/job/{job_id}/stop",
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        assert "Stop requested" in resp.get_json()["message"]
+
+    def test_auth_login_missing_client_id(self, web_client):
+        """GET /auth/login without client_id returns 400."""
+        with web_client.session_transaction() as sess:
+            sess.pop("client_id", None)
+        with patch("mail_merge.web.app.load_config", return_value={}):
+            resp = web_client.get("/auth/login")
+        assert resp.status_code == 400
+        assert "client_id" in resp.get_json()["error"]
+
+    def test_auth_callback_without_flow(self, web_client):
+        """GET /auth/callback without a prior auth flow returns 400."""
+        with web_client.session_transaction() as sess:
+            sess.pop("auth_flow", None)
+        resp = web_client.get("/auth/callback?code=xyz")
+        assert resp.status_code == 400
+
+    @patch("mail_merge.auth.acquire_token_by_auth_code", side_effect=RuntimeError("token exchange failed"))
+    def test_auth_callback_exchange_failure(self, mock_acquire, web_client):
+        """When token exchange raises RuntimeError, redirect with error hash."""
+        with web_client.session_transaction() as sess:
+            sess["auth_flow"] = {"state": "abc"}
+            sess["client_id"] = "test-client-id"
+            sess["tenant_id"] = "common"
+        resp = web_client.get("/auth/callback?code=xyz", follow_redirects=False)
+        assert resp.status_code == 302
+        assert "#auth-error=" in resp.headers["Location"]
+        assert "token%20exchange%20failed" in resp.headers["Location"]
+
+    def test_send_mode_without_client_id(self, web_client, sample_xlsx_web):
+        """Starting a send job without client_id returns 400."""
+        csrf = get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        with web_client.session_transaction() as sess:
+            sess.pop("client_id", None)
+        with patch("mail_merge.web.app.load_config", return_value={}):
+            resp = web_client.post(
+                "/api/start-job",
+                data={
+                    "mode": "send",
+                    "email_column": "email",
+                    "subject": "Test",
+                    "body": "Body.",
+                },
+                headers={"X-CSRF-Token": csrf},
+            )
+        assert resp.status_code == 400
+        assert "client_id" in resp.get_json()["error"]
+
+    def test_preview_html_empty_body(self, web_client):
+        """Empty HTML body returns no warnings."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "   ",
+                "sample_data": {},
+                "columns": [],
+                "html": True,
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert data["html_warnings"] == []
+
+    def test_upload_no_file(self, web_client):
+        """POST to /api/upload-spreadsheet with no file returns 400."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/upload-spreadsheet",
+            data={},
+            headers={"X-CSRF-Token": csrf},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 400

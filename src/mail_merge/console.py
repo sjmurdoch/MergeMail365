@@ -19,7 +19,7 @@ class _StripAnsiFilter(logging.Filter):
         if isinstance(record.msg, str):
             record.msg = _ANSI_RE.sub("", record.msg)
         if record.args:
-            new_args = []
+            new_args: list[object] = []
             for arg in record.args:
                 if isinstance(arg, str):
                     new_args.append(_ANSI_RE.sub("", arg))

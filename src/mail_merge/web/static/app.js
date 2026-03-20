@@ -365,7 +365,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         }
 
         // Build preview table
-        buildPreviewTable(data.columns, data.rows);
+        buildPreviewTable(data.columns, data.rows, data.total_rows);
 
         // Show placeholder chips
         showPlaceholderChips(data.columns);
@@ -389,13 +389,25 @@ function populateSheetSelect(sheets) {
     ).join("");
 }
 
-function buildPreviewTable(columns, rows) {
+function buildPreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#preview-table thead");
     const tbody = document.querySelector("#preview-table tbody");
     thead.innerHTML = "<tr>" + columns.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
     tbody.innerHTML = rows.map(row =>
         "<tr>" + columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
     ).join("");
+    // Show truncation notice if not all rows are displayed
+    const caption = document.querySelector("#preview-table caption") || document.createElement("caption");
+    if (totalRows > rows.length) {
+        caption.textContent = `Showing ${rows.length} of ${totalRows} rows`;
+        caption.style.captionSide = "bottom";
+        caption.style.textAlign = "right";
+        caption.style.fontStyle = "italic";
+        caption.style.padding = "0.5rem 0";
+        if (!caption.parentNode) document.querySelector("#preview-table").prepend(caption);
+    } else {
+        caption.remove();
+    }
 }
 
 function showPlaceholderChips(columns) {
