@@ -229,6 +229,9 @@ async function loadConfig() {
         if (data.client_id_locked && data.tenant_id_locked) {
             hide("auth-config-fields");
         }
+        if (data.desktop_mode) {
+            __desktopMode = true;
+        }
 
         // Restore session spreadsheet if it exists
         if (data.spreadsheet) {
@@ -317,7 +320,8 @@ async function checkAuthStatus() {
 }
 
 // Sign in
-$("btn-sign-in").addEventListener("click", () => {
+let __desktopMode = false;
+$("btn-sign-in").addEventListener("click", async () => {
     // Save client_id/tenant_id to session first
     const clientId = $("client-id").value.trim();
     const tenantId = $("tenant-id").value.trim() || "common";
@@ -325,8 +329,55 @@ $("btn-sign-in").addEventListener("click", () => {
         alert("Please enter a Client ID first.");
         return;
     }
-    // Store in session via query params on the login redirect
-    window.location.href = `/auth/login?client_id=${encodeURIComponent(clientId)}&tenant_id=${encodeURIComponent(tenantId)}`;
+
+    if (__desktopMode) {
+        // Desktop mode: use interactive auth via system browser
+        const btn = $("btn-sign-in");
+        const origText = btn.textContent;
+        btn.textContent = "Waiting for browser sign-in...";
+        btn.disabled = true;
+        btn.setAttribute("aria-busy", "true");
+
+        try {
+            await apiFetch("/auth/interactive", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({client_id: clientId, tenant_id: tenantId}),
+            });
+
+            // Poll auth status until authenticated or timeout
+            const deadline = Date.now() + 5 * 60 * 1000; // 5 minutes
+            const poll = setInterval(async () => {
+                if (Date.now() > deadline) {
+                    clearInterval(poll);
+                    btn.textContent = origText;
+                    btn.disabled = false;
+                    btn.removeAttribute("aria-busy");
+                    alert("Sign-in timed out. Please try again.");
+                    return;
+                }
+                try {
+                    const resp = await apiFetch("/auth/status");
+                    const data = await resp.json();
+                    if (data.authenticated) {
+                        clearInterval(poll);
+                        btn.textContent = origText;
+                        btn.disabled = false;
+                        btn.removeAttribute("aria-busy");
+                        checkAuthStatus();
+                    }
+                } catch (e) { /* ignore poll errors */ }
+            }, 2000);
+        } catch (e) {
+            btn.textContent = origText;
+            btn.disabled = false;
+            btn.removeAttribute("aria-busy");
+            alert("Failed to start interactive sign-in: " + e.message);
+        }
+    } else {
+        // Browser mode: redirect to auth login
+        window.location.href = `/auth/login?client_id=${encodeURIComponent(clientId)}&tenant_id=${encodeURIComponent(tenantId)}`;
+    }
 });
 
 // Test connection

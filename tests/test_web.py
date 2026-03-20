@@ -1144,3 +1144,63 @@ class TestWebRouteErrors:
             content_type="multipart/form-data",
         )
         assert resp.status_code == 400
+
+
+class TestDesktopMode:
+    """Tests for desktop mode interactive auth."""
+
+    @pytest.fixture
+    def desktop_app(self):
+        """Create a Flask app in desktop mode."""
+        application = create_app(
+            startup_token="test-token-abc", port=5050, desktop_mode=True,
+        )
+        application.config["TESTING"] = True
+        return application
+
+    @pytest.fixture
+    def desktop_client(self, desktop_app):
+        """Flask test client pre-authenticated in desktop mode."""
+        c = desktop_app.test_client()
+        resp = c.get("/?token=test-token-abc", follow_redirects=False)
+        assert resp.status_code == 302
+        return c
+
+    def test_auth_interactive_returns_400_in_browser_mode(self, web_client):
+        """POST /auth/interactive returns 400 when not in desktop mode."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/auth/interactive",
+            json={"client_id": "test-client", "tenant_id": "common"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400
+        assert "desktop" in resp.get_json()["error"].lower()
+
+    @patch("mail_merge.auth.acquire_token_interactive_flow")
+    def test_auth_interactive_starts_in_desktop_mode(self, mock_flow, desktop_client):
+        """POST /auth/interactive returns 200 and starts auth in desktop mode."""
+        mock_flow.return_value = "fake-token"
+        csrf = get_csrf(desktop_client)
+        with desktop_client.session_transaction() as sess:
+            sess["client_id"] = "test-client"
+            sess["tenant_id"] = "common"
+        resp = desktop_client.post(
+            "/auth/interactive",
+            json={"client_id": "test-client", "tenant_id": "common"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "started"
+
+    def test_api_config_includes_desktop_mode_false(self, web_client):
+        """/api/config includes desktop_mode: false for browser mode."""
+        resp = web_client.get("/api/config")
+        data = resp.get_json()
+        assert data["desktop_mode"] is False
+
+    def test_api_config_includes_desktop_mode_true(self, desktop_client):
+        """/api/config includes desktop_mode: true for desktop mode."""
+        resp = desktop_client.get("/api/config")
+        data = resp.get_json()
+        assert data["desktop_mode"] is True

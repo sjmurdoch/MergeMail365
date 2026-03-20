@@ -60,6 +60,7 @@ def main(argv: list[str] | None = None) -> None:
         port=port,
         client_id=args.client_id,
         tenant_id=args.tenant_id,
+        desktop_mode=desktop,
     )
 
     url = f"http://{args.host}:{port}/?token={startup_token}"

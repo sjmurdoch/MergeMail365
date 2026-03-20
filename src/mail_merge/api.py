@@ -206,6 +206,7 @@ def send_merge(
     name_column: str | None = None,
     body_text: str | None = None,
     token_provider: Callable[[], str] | None = None,
+    device_code: bool = False,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -264,6 +265,10 @@ def send_merge(
             ``body`` or ``body_text`` must be provided.
         token_provider: Callable that returns an access token string.
             When provided, skips the built-in auth block (device code flow).
+        device_code: If ``True``, use device code flow for authentication
+            (user copies a code to a browser). If ``False`` (the default),
+            use interactive browser flow (opens system browser automatically).
+            Falls back to device code flow if interactive fails.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -474,11 +479,27 @@ def send_merge(
                     "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
                     f"or add to config file {_config.DEFAULT_PATH})"
                 )
-            from mail_merge.auth import acquire_token, token_expires_at
+            from mail_merge.auth import (
+                acquire_token,
+                acquire_token_interactive_flow,
+                token_expires_at,
+            )
 
             try:
-                # Eager call to trigger device-code flow if needed
-                token = acquire_token(client_id, tenant_id)
+                if device_code:
+                    token = acquire_token(client_id, tenant_id)
+                else:
+                    try:
+                        token = acquire_token_interactive_flow(
+                            client_id, tenant_id,
+                        )
+                    except Exception as interactive_exc:
+                        logger.info(
+                            "Interactive auth unavailable (%s), "
+                            "falling back to device code flow",
+                            interactive_exc,
+                        )
+                        token = acquire_token(client_id, tenant_id)
             except Exception as exc:
                 raise RuntimeError(f"Authentication failed: {exc}") from exc
 

@@ -130,6 +130,7 @@ def create_app(
     port: int = 5050,
     client_id: str = "",
     tenant_id: str = "",
+    desktop_mode: bool = False,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -147,6 +148,7 @@ def create_app(
     app.config["PORT"] = port
     app.config["FIXED_CLIENT_ID"] = client_id
     app.config["FIXED_TENANT_ID"] = tenant_id
+    app.config["DESKTOP_MODE"] = desktop_mode
 
     # ----- Auth middleware -----
 
@@ -301,6 +303,32 @@ def create_app(
         from mail_merge.auth import diagnose_auth
         return jsonify(diagnose_auth(client_id, tenant_id))
 
+    @app.route("/auth/interactive", methods=["POST"])
+    def auth_interactive() -> Response:
+        if not app.config["DESKTOP_MODE"]:
+            return jsonify({"error": "Interactive auth is only available in desktop mode"}), 400  # type: ignore[return-value]
+
+        data = request.get_json() or {}
+        cid = data.get("client_id") or session.get("client_id") or _get_config_value("client_id")
+        tid = data.get("tenant_id") or session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+
+        if not cid:
+            return jsonify({"error": "client_id is required"}), 400  # type: ignore[return-value]
+
+        session["client_id"] = cid
+        session["tenant_id"] = tid
+
+        def _run_interactive() -> None:
+            try:
+                from mail_merge.auth import acquire_token_interactive_flow
+                acquire_token_interactive_flow(cid, tid, timeout=300)
+            except Exception as exc:
+                logger.warning("Interactive auth failed: %s", exc)
+
+        thread = threading.Thread(target=_run_interactive, daemon=True)
+        thread.start()
+        return jsonify({"status": "started"})
+
     # ----- Config route -----
 
     @app.route("/api/config")
@@ -319,6 +347,7 @@ def create_app(
             "tenant_id": fixed_tid or _get_config_value("tenant_id") or "",
             "client_id_locked": bool(fixed_cid),
             "tenant_id_locked": bool(fixed_tid),
+            "desktop_mode": app.config["DESKTOP_MODE"],
             "spreadsheet": session.get("spreadsheet_info"),
             "current_step": session.get("current_step", 1),
             "test_passed": session.get("test_passed", False),

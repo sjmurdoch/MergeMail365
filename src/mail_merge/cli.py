@@ -29,6 +29,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--name-column", default=None, help="Column name containing recipient display names (included in the To: header)")
     parser.add_argument("--test-email", default=None, help="Send a single test email to this address using the first recipient's data, then exit")
     parser.add_argument("--send", action="store_true", help="Actually send emails (default is dry-run)")
+    parser.add_argument("--device-code", action="store_true", help="Use device code flow for headless/SSH environments (default: opens system browser)")
     parser.add_argument("--output", default=None, help="Path to write CSV report")
     parser.add_argument("--delay", type=float, default=2.0, help="Base seconds between sends (default 2s; Exchange Online allows ~30 msgs/min; adaptive throttling increases this on rate limits)")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per recipient for 5xx errors")
@@ -91,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
             bcc_blast=args.bcc_blast,
             bcc_blast_to=args.bcc_blast_to,
             name_column=args.name_column,
+            device_code=args.device_code,
         )
     except KeyboardInterrupt:
         logger.info("Aborted")

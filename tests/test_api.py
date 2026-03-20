@@ -29,6 +29,7 @@ class TestDryRun:
         """test_email sends even without send=True."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
         results = send_merge(
             spreadsheet=sample_xlsx,
             body=body_template_file,
@@ -60,6 +61,7 @@ class TestDryRun:
         """No prompt should happen for test_email even if confirm=True."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
         def fail_on_input(prompt: str) -> str:
             pytest.fail("console.input was called during test_email!")
 
@@ -349,6 +351,7 @@ class TestPassThrough:
     def test_html_attachment_reply_to(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         att = tmp_path / "file.txt"
         att.write_text("data", encoding="utf-8")
@@ -380,6 +383,7 @@ class TestPassThrough:
     def test_cc_bcc_as_lists(self, sample_xlsx, body_template_file, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         results = send_merge(
             spreadsheet=sample_xlsx,
@@ -734,6 +738,7 @@ class TestConfirmDisplay:
         """Confirmation prompt prints CC, BCC, and attachment lines when present."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         att = tmp_path / "report.pdf"
         att.write_bytes(b"PDF content")
@@ -794,6 +799,7 @@ class TestTokenRefreshFailure:
             return "fresh-token"          # subsequent get_token calls in send_one
 
         monkeypatch.setattr("mail_merge.auth.acquire_token", fake_acquire)
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", fake_acquire)
 
         with caplog.at_level(logging.WARNING):
             results = send_merge(
@@ -817,6 +823,7 @@ class TestBccBlast:
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         body = tmp_path / "body.txt"
@@ -925,6 +932,9 @@ class TestBccBlast:
             auth_module, "acquire_token", lambda *a, **kw: "fake-tok"
         )
         monkeypatch.setattr(
+            auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok"
+        )
+        monkeypatch.setattr(
             "mail_merge.auth.token_expires_at", lambda tok: None
         )
 
@@ -958,6 +968,7 @@ class TestBccBlast:
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         body = tmp_path / "body.txt"
@@ -986,6 +997,7 @@ class TestBccBlast:
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         body = tmp_path / "body.txt"
@@ -1097,6 +1109,7 @@ class TestBccBlastResume:
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         body = tmp_path / "body.txt"
@@ -1149,6 +1162,7 @@ class TestAddressDisplayNames:
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         send_merge(
@@ -1174,6 +1188,7 @@ class TestAddressDisplayNames:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         send_merge(
@@ -1199,6 +1214,7 @@ class TestAddressDisplayNames:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         send_merge(
@@ -1224,6 +1240,7 @@ class TestAddressDisplayNames:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         send_merge(
@@ -1255,6 +1272,7 @@ class TestNameColumn:
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         send_merge(

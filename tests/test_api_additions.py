@@ -1,4 +1,4 @@
-"""Tests for new send_merge() parameters: body_text and token_provider."""
+"""Tests for new send_merge() parameters: body_text, token_provider, device_code."""
 
 from pathlib import Path
 from unittest.mock import patch
@@ -123,3 +123,100 @@ class TestTokenProvider:
         )
         assert len(results) == 1
         assert results[0].email == "test@example.com"
+
+
+class TestDeviceCodeParam:
+    """Tests for the device_code parameter on send_merge()."""
+
+    @responses.activate
+    def test_interactive_is_default(self, sample_xlsx, monkeypatch):
+        """When device_code=False (default), interactive flow is tried first."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        interactive_calls = []
+
+        def fake_interactive(*a, **kw):
+            interactive_calls.append(1)
+            return "interactive-token"
+
+        monkeypatch.setattr(
+            "mail_merge.auth.acquire_token_interactive_flow", fake_interactive,
+        )
+        monkeypatch.setattr(
+            "mail_merge.auth.acquire_token", lambda *a, **kw: "device-token",
+        )
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            subject="Hello {{name}}",
+            email_column="email",
+            body_text="Body.",
+            client_id="fake-client",
+            test_email="test@example.com",
+            confirm=False,
+        )
+        assert len(results) == 1
+        assert len(interactive_calls) == 1
+
+    @responses.activate
+    def test_device_code_true_skips_interactive(self, sample_xlsx, monkeypatch):
+        """When device_code=True, device code flow is used directly."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        device_calls = []
+
+        def fake_device(*a, **kw):
+            device_calls.append(1)
+            return "device-token"
+
+        monkeypatch.setattr(
+            "mail_merge.auth.acquire_token_interactive_flow",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not be called")),
+        )
+        monkeypatch.setattr("mail_merge.auth.acquire_token", fake_device)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            subject="Hello {{name}}",
+            email_column="email",
+            body_text="Body.",
+            client_id="fake-client",
+            test_email="test@example.com",
+            confirm=False,
+            device_code=True,
+        )
+        assert len(results) == 1
+        # Called once for initial auth, plus once via get_token during send
+        assert len(device_calls) >= 1
+
+    @responses.activate
+    def test_interactive_failure_falls_back_to_device_code(self, sample_xlsx, monkeypatch):
+        """When interactive flow fails, falls back to device code."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+
+        device_calls = []
+
+        def fake_interactive(*a, **kw):
+            raise OSError("No browser available")
+
+        def fake_device(*a, **kw):
+            device_calls.append(1)
+            return "device-token"
+
+        monkeypatch.setattr(
+            "mail_merge.auth.acquire_token_interactive_flow", fake_interactive,
+        )
+        monkeypatch.setattr("mail_merge.auth.acquire_token", fake_device)
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            subject="Hello {{name}}",
+            email_column="email",
+            body_text="Body.",
+            client_id="fake-client",
+            test_email="test@example.com",
+            confirm=False,
+        )
+        assert len(results) == 1
+        # Called once for fallback auth, plus once via get_token during send
+        assert len(device_calls) >= 1

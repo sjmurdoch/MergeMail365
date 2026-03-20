@@ -67,6 +67,44 @@ def _build_msal_app(
     return app, cache
 
 
+def acquire_token_interactive_flow(
+    client_id: str,
+    tenant_id: str = "common",
+    timeout: int | None = 120,
+) -> str:
+    """Acquire an access token via MSAL interactive browser flow.
+
+    Opens the system browser for Microsoft login; a temporary local HTTP server
+    catches the callback.  Tries silent acquisition first (cached refresh token),
+    then falls back to the interactive prompt.
+
+    Returns the access token string.
+    """
+    app, cache = _build_msal_app(client_id, tenant_id)
+
+    accounts: list[dict[str, Any]] = app.get_accounts()
+    result: dict[str, Any] | None = None
+
+    if accounts:
+        logger.info("🔑 Found cached account, attempting silent token acquisition")
+        result = app.acquire_token_silent(SCOPES, account=accounts[0])
+
+    if not result:
+        logger.info("🔑 Opening system browser for authentication")
+        kwargs: dict[str, Any] = {"scopes": SCOPES, "port": None}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        result = app.acquire_token_interactive(**kwargs)
+
+    _save_cache(cache)
+
+    if "access_token" not in result:
+        raise RuntimeError(f"Authentication failed: {_extract_msal_error(result)}")
+
+    token: str = result["access_token"]
+    return token
+
+
 def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     """Acquire an access token via MSAL device code flow.
 

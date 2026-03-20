@@ -43,13 +43,13 @@ Source lives under `src/mail_merge/` (src layout). There are three entry points:
 2. **Python API** (`api.py:send_merge()`) — single function mirroring all CLI flags. Raises exceptions (`FileNotFoundError`, `ValueError`, `RuntimeError`) instead of returning exit codes. Returns `list[SendResult]`.
 3. **Web UI** (`web/__init__.py:main()`) — Flask app with a 5-step wizard (Setup → Preview → Test → Verify → Send). Runs on localhost, opens browser automatically. See "Web UI" section below.
 
-The orchestration flow (in `api.py`) is strictly ordered: resolve config → read spreadsheet → validate emails → apply filters → resume (skip previous successes) → apply batch size → read body template → validate all placeholders (abort if any unresolvable) → parse CC/BCC/reply-to → validate recipient count → process attachments → confirm → authenticate (MSAL device code) → send → merge results → report. All validation happens before any sending. Resume and batch size are skipped for `--test-email` (which only needs one recipient's data for rendering). Resume works for both individual sends and BCC blast mode.
+The orchestration flow (in `api.py`) is strictly ordered: resolve config → read spreadsheet → validate emails → apply filters → resume (skip previous successes) → apply batch size → read body template → validate all placeholders (abort if any unresolvable) → parse CC/BCC/reply-to → validate recipient count → process attachments → confirm → authenticate → send → merge results → report. All validation happens before any sending. Resume and batch size are skipped for `--test-email` (which only needs one recipient's data for rendering). Resume works for both individual sends and BCC blast mode.
 
 Key design decisions:
 - **`config.py`** reads `~/.mail-merge.toml` for persistent `client-id` / `tenant-id`. Precedence: CLI flag → env var → config file → default (`"common"` for tenant-id).
 - **`EmailAddress`** dataclass (in `sender.py`) is the unified internal representation for email addresses throughout the codebase. It holds `address: str` and `name: str | None`, and provides `to_graph()` to convert to the Microsoft Graph API wire format (`{"emailAddress": {"address": ..., "name": ...}}`). Three representation layers are used consistently: user-facing strings (`"Display Name <email>"`) at the CLI/API boundary, `EmailAddress` objects internally, and Graph API dicts only at the point of HTTP serialisation in `send_one`.
 - **`api.py`** contains `send_merge()`, the shared orchestration function used by both CLI and Python callers. Accepts `str | Path` for file args, `str | list[str]` for address lists. `_parse_one_addr()` parses a single RFC 2822 address string into an `EmailAddress`. `_parse_address_entries()` normalises all address inputs (cc/bcc/reply-to) into `list[EmailAddress]`; parsed values are bundled into a `MessageOptions` dataclass and passed to sender functions. `sender.py` functions (`send_one`, `send_bcc_blast`, `send_all`) accept `opts: MessageOptions` for shared message-formatting parameters (max_retries, importance, cc, bcc, html, save_to_sent_items, attachments, reply_to). The primary recipient is passed as an `EmailAddress` parameter `to` (bundling address and display name together). `send_all` accepts `name_column` to look up per-recipient names from the spreadsheet and construct an `EmailAddress` per recipient.
-- **`auth.py`** uses lazy import in `api.py` — only imported when authentication is actually needed (skipped for dry runs)
+- **`auth.py`** uses lazy import in `api.py` — only imported when authentication is actually needed (skipped for dry runs). Three auth flows: **interactive browser** (default for CLI — opens system browser via `acquire_token_interactive_flow()`), **device code** (opt-in via `--device-code` — user copies a code to a browser, for headless/SSH), and **auth code with PKCE** (web UI — redirect to Microsoft and back). All flows share the same MSAL token cache file. If interactive flow fails (e.g. no display), it falls back to device code automatically.
 - **`sender.py`** has two retry strategies: 429 (rate limit) honours `Retry-After` with a cap of 20 attempts; 5xx retries use exponential backoff capped at `--max-retries`. 4xx errors (non-429) fail immediately. `--delay` defaults to 2s (Exchange Online limit: ~30 msgs/min) with adaptive throttling: delay doubles (up to 30s) on 429s and halves back to the base when clear.
 - **Email validation** uses `email-validator` (`_validate_emails` in `api.py`) to reject malformed and non-ASCII addresses before sending. Invalid recipients are skipped with a warning; if none remain, a `ValueError` is raised.
 - **`template.py`** uses case-insensitive matching — `{{Name}}` matches a column called `name`
@@ -63,6 +63,7 @@ Key design decisions:
 - **`--reply-to`** comma-separated reply-to addresses (plain or `"Display Name <email>"`) added to the message `replyTo` field
 - **Safe defaults** — `send=False`, `confirm=True`, `resume=True` in the API; CLI requires `--send` to actually deliver. Resume silently skips when `--output` is not set.
 - **`--send`** opts into actual sending (default is dry run)
+- **`--device-code`** uses device code flow for authentication (headless/SSH environments). Default behaviour opens the system browser via `acquire_token_interactive_flow()`
 - **`--filter`** (repeatable) filters recipients by column values (`column=value` or `column!=value`, AND logic, case-insensitive)
 - **`--no-resume`** disables automatic resume; by default with `--output`, previous successes in the CSV are automatically skipped
 - **`--batch-size N`** limits how many emails are sent per invocation
@@ -84,7 +85,7 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mail-me
 - `web/static/pico.min.css` — bundled Pico CSS v2 (no CDN)
 
 **Architecture:**
-- **Auth:** OAuth 2.0 Authorization Code flow with PKCE (browser-native), vs device code flow for CLI. Both share the same MSAL token cache. Auth functions in `auth.py`: `initiate_auth_code_flow()`, `acquire_token_by_auth_code()`, `diagnose_auth()`, `token_expires_at()`.
+- **Auth:** Three flows, all sharing the same MSAL token cache. **Browser mode:** OAuth 2.0 Authorization Code flow with PKCE (redirect to Microsoft and back). **Desktop mode (pywebview):** `acquire_token_interactive_flow()` opens the system browser (not the embedded webview) via `POST /auth/interactive`; JS polls `/auth/status` until authenticated. **CLI:** Interactive browser flow by default, device code via `--device-code`. Auth functions in `auth.py`: `acquire_token_interactive_flow()`, `initiate_auth_code_flow()`, `acquire_token_by_auth_code()`, `diagnose_auth()`, `token_expires_at()`.
 - **`send_merge()` integration:** The web UI calls `send_merge()` with two web-specific parameters: `body_text` (inline string, no temp file) and `token_provider` (callable for silent token acquisition, bypasses device code flow). Always passes `confirm=False`, `resume=False`.
 - **Background jobs:** `send_merge()` runs in a daemon thread. `JobLogHandler` captures `mail_merge` logger output into an event queue. SSE (`/api/job/<id>/events`) streams log entries to the browser. Job results are fetched via `/api/job/<id>/status` which calls `report.summarize()`.
 - **Safety limits:** 99-recipient cap (enforced server-side), fixed 2s send delay, mandatory test email and dry run steps, "SEND" confirmation typing.
@@ -100,7 +101,8 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mail-me
 | `/auth/callback` | GET | Exchange auth code for token |
 | `/auth/status` | GET | Check if authenticated, return email + token expiry |
 | `/auth/debug` | GET | Auth diagnostics (cache, token, authority) |
-| `/api/config` | GET | Config + full session state for recovery |
+| `/auth/interactive` | POST | Start interactive auth via system browser (desktop mode only) |
+| `/api/config` | GET | Config + full session state for recovery (includes `desktop_mode`) |
 | `/api/state` | POST | Save wizard step/validation state |
 | `/api/upload-spreadsheet` | POST | Upload .xlsx, return columns + preview rows |
 | `/api/get-recipients` | POST | Filtered, validated recipient list |
@@ -143,7 +145,7 @@ Implication for BCC blast: it is safe to send with `toRecipients: []` or omit th
 
 ## Testing
 
-Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge.auth.acquire_token`) is monkeypatched in CLI tests that need authentication. The `sample_xlsx` and `body_template_file` fixtures in `conftest.py` create temporary test files.
+Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge.auth.acquire_token` and `mail_merge.auth.acquire_token_interactive_flow`) is monkeypatched in CLI/API tests that need authentication. The `sample_xlsx` and `body_template_file` fixtures in `conftest.py` create temporary test files.
 
 **Web UI tests** span four files:
 - `test_web.py` — Flask test client tests for all routes, CSRF, auth, job lifecycle, options pass-through. Uses `web_client` fixture (pre-authenticated test client).
@@ -151,4 +153,4 @@ Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge
 - `test_web_cli.py` — entry point and argument parsing for `mail-merge-web`.
 - `test_web_robustness.py` — edge cases (empty uploads, malformed requests).
 - `test_auth_additions.py` — auth code flow, `diagnose_auth()`, `token_expires_at()`.
-- `test_api_additions.py` — `body_text` and `token_provider` parameters on `send_merge()`.
+- `test_api_additions.py` — `body_text`, `token_provider`, and `device_code` parameters on `send_merge()`.

@@ -2,7 +2,7 @@
 
 ## Implementation Status
 
-> Last updated: 2026-03-19 (HTML validation, recipient cap fixes, desktop mode fix, /simplify refactoring)
+> Last updated: 2026-03-20 (interactive browser auth for CLI and desktop mode)
 
 ### Completed
 
@@ -50,6 +50,8 @@ All core features from this plan have been implemented. The implementation close
 **Desktop mode architecture:** Plan specified passing the Flask app directly to pywebview's internal server. This broke OAuth because pywebview serves on a random internal port that doesn't match the auth callback redirect URI. Fixed by running Flask in a background thread on the real port and passing the URL (with startup token) to pywebview. Desktop auto-auth was removed — with Flask on a known port, any local process could access the server without a token, so the startup token is now required in desktop mode too.
 
 **Config precedence fix:** `_get_config_value()` checked the config file before environment variables, opposite to `api.py`'s documented precedence (CLI flag > env var > config file > default). Fixed by swapping the `or` operands so env vars take priority.
+
+**Interactive browser auth (CLI + desktop):** Plan specified device code flow for CLI and auth code redirect for the web UI. Implementation adds `acquire_token_interactive_flow()` as a third auth method using MSAL's `acquire_token_interactive()`, which opens the system browser and runs a temporary local HTTP server to catch the callback. This is now the **default for CLI** (better UX — no code copying; `--device-code` flag opts into the old flow for headless/SSH). For **desktop/pywebview mode**, a new `POST /auth/interactive` route spawns the interactive flow in a background thread; JS polls `/auth/status` until the token lands in the shared MSAL cache. Browser-mode web UI is unchanged (auth code + PKCE redirect). `create_app()` accepts `desktop_mode: bool` and `/api/config` exposes it so JS can switch sign-in behaviour. `send_merge()` accepts `device_code: bool = False`; when False, interactive flow is tried first with automatic fallback to device code on failure. Azure AD app registration needs `http://localhost` added as a "Mobile and desktop applications" redirect URI (no port — MSAL uses auto-allocated ports).
 
 **Refactored JS helpers:** `updateStepUI()`, `renderSpreadsheetSummary()`, and `populateDropdowns()` were extracted from duplicated inline code in `app.js`. `populateSelect` was fixed to build the options string before assigning innerHTML (was appending in a loop). `populateSheetSelect` uses `.map().join()`.
 
@@ -413,7 +415,9 @@ The existing app registration uses the device code flow (CLI). The web UI uses t
 6. Click **Configure**.
 7. Verify under **Advanced settings** that **Allow public client flows** is still set to **Yes** (needed for the CLI's device code flow to continue working).
 
-Both flows (device code for CLI, authorization code for web) will work with the same app registration and the same client ID. They share the same token cache, so authenticating via the web UI also enables the CLI (and vice versa).
+All three flows (interactive browser for CLI/desktop, device code for headless CLI, authorization code for web) work with the same app registration and the same client ID. They share the same token cache, so authenticating via any flow enables the others.
+
+**Additional redirect URI for interactive flow:** The CLI's default interactive browser flow (`acquire_token_interactive()`) requires a **"Mobile and desktop applications"** redirect URI of `http://localhost` (no port) in the Azure AD app registration. This allows MSAL to use system-allocated ports for the temporary callback server. The existing web platform redirect (`http://localhost:5050/auth/callback`) stays for the browser web UI flow.
 
 ### If creating a new app registration
 

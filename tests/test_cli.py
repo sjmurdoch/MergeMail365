@@ -54,6 +54,7 @@ class TestCLIDryRun:
     def test_csv_output(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
         report_path = tmp_path / "report.csv"
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -88,6 +89,7 @@ class TestTestEmail:
         """Verify the test email is sent to --test-email address, not the spreadsheet address."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -111,6 +113,7 @@ class TestTestEmail:
     def test_test_email_failure(self, sample_xlsx, body_template_file, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=403, body="Forbidden")
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -142,6 +145,7 @@ class TestImportanceCcBcc:
     def test_importance_cc_bcc_in_payload(self, sample_xlsx, body_template_file, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -179,6 +183,7 @@ class TestConfigFilePrecedence:
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -236,6 +241,7 @@ class TestConfigFilePrecedence:
             return "fake-token"
 
         monkeypatch.setattr("mail_merge.auth.acquire_token", fake_acquire)
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", fake_acquire)
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
 
         exit_code = main([
@@ -266,6 +272,27 @@ class TestConfigFilePrecedence:
         assert exit_code == 1
 
 
+class TestDeviceCodeFlag:
+    def test_device_code_default_false(self):
+        args = parse_args([
+            "--spreadsheet", "x.xlsx",
+            "--body", "b.txt",
+            "--subject", "s",
+            "--email-column", "e",
+        ])
+        assert args.device_code is False
+
+    def test_device_code_flag_true(self):
+        args = parse_args([
+            "--spreadsheet", "x.xlsx",
+            "--body", "b.txt",
+            "--subject", "s",
+            "--email-column", "e",
+            "--device-code",
+        ])
+        assert args.device_code is True
+
+
 class TestDelayDefault:
     def test_delay_default_is_two(self):
         args = parse_args([
@@ -282,6 +309,7 @@ class TestHTMLFlag:
     def test_html_flag_sets_content_type(self, sample_xlsx, body_template_file, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -304,6 +332,7 @@ class TestNoSaveToSent:
     def test_no_save_to_sent_flag(self, sample_xlsx, body_template_file, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -326,6 +355,7 @@ class TestAttachment:
     def test_attachment_included_in_payload(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         att_file = tmp_path / "doc.txt"
         att_file.write_text("hello", encoding="utf-8")
@@ -365,6 +395,7 @@ class TestReplyTo:
     def test_reply_to_in_payload(self, sample_xlsx, body_template_file, monkeypatch):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -452,6 +483,7 @@ class TestConfirm:
         """Typing 'y' at the prompt proceeds with sending."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
         monkeypatch.setattr("mail_merge.console.console.input", lambda prompt: "y")
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -479,6 +511,7 @@ class TestConfirm:
         """--test-email should not prompt for confirmation."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
             "--body", str(body_template_file),
@@ -494,6 +527,7 @@ class TestConfirm:
         """--yes should skip confirmation and go straight to sending."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
             "--body", str(body_template_file),
@@ -512,6 +546,7 @@ class TestResumeBatchSize:
         """--batch-size sends one batch, then auto-resumes on next run."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
         report = tmp_path / "report.csv"
         # First run: batch of 1
         exit_code = main([
@@ -635,6 +670,7 @@ class TestBccBlastCLI:
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr(auth_module, "acquire_token", lambda *a, **kw: "fake-tok")
+        monkeypatch.setattr(auth_module, "acquire_token_interactive_flow", lambda *a, **kw: "fake-tok")
         monkeypatch.setattr("mail_merge.auth.token_expires_at", lambda tok: None)
 
         body = tmp_path / "body.txt"
