@@ -10,7 +10,8 @@
       "WebSearch",
       "WebFetch(domain:devblogs.microsoft.com)",
       "WebFetch(domain:www.emailonacid.com)",
-      "WebFetch(domain:dev.to)"
+      "WebFetch(domain:dev.to)",
+      "Bash(git:*)"
     ]
   }
 }
