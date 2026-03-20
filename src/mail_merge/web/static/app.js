@@ -97,20 +97,29 @@ async function goToStep(n) {
     updateStepUI(n);
 }
 
+function resetTestAndVerify() {
+    testPassed = false;
+    verifyPassed = false;
+    $("btn-next-3").disabled = true;
+    $("btn-next-4").disabled = true;
+    $("test-log").innerHTML = "";
+    hide("test-log");
+    hide("test-result");
+    $("verify-log").innerHTML = "";
+    hide("verify-result");
+}
+
 function confirmGoBack(targetStep) {
     if (currentStep >= 3 && (testPassed || verifyPassed)) {
         if (!confirm("Going back will discard your test and verification results. You will need to complete these steps again. Continue?")) {
             return;
         }
-        testPassed = false;
-        verifyPassed = false;
-        $("btn-next-3").disabled = true;
-        $("btn-next-4").disabled = true;
-        $("test-log").innerHTML = "";
-        hide("test-log");
-        hide("test-result");
-        $("verify-log").innerHTML = "";
-        hide("verify-result");
+        resetTestAndVerify();
+    }
+    // Going back to step 1 from step 2 also invalidates test/verify
+    // since the user may change inputs that affect the merge
+    if (currentStep === 2 && targetStep === 1) {
+        resetTestAndVerify();
     }
     goToStep(targetStep);
 }
@@ -240,10 +249,12 @@ async function loadConfig() {
             }
         }
 
-        // Restore wizard state
-        testPassed = data.test_passed;
-        verifyPassed = data.verify_passed;
-        
+        // Restore wizard state — test and verify results don't survive
+        // a page reload because the server-side job results are transient.
+        // Only trust these flags when reconnecting to an active job.
+        testPassed = false;
+        verifyPassed = false;
+
         if (data.active_job_id) {
             currentJobId = data.active_job_id;
             sendStarted = true;
@@ -268,7 +279,17 @@ async function loadConfig() {
                 $("send-progress-text").textContent = `Sending ${current} of ${total}...`;
             });
         } else if (data.current_step > 1) {
-            await goToStep(data.current_step);
+            // On reload, we have the spreadsheet in session but not the
+            // filtered recipients list.  We can only safely restore to
+            // step 1 (let the user re-advance) or step 2 (re-run the
+            // preview fetch).  Steps 3-5 require test/verify to have
+            // actually run in this page session, so fall back to step 1.
+            if (data.current_step >= 2 && spreadsheetData) {
+                // Restore to step 1 — the user can re-advance with one click
+                // since all their inputs are still populated.
+                currentStep = 1;
+                updateStepUI(1);
+            }
         }
     } catch (e) { console.error("Error loading config:", e); }
 }
@@ -998,20 +1019,51 @@ function downloadCsv() {
 }
 
 function newMerge() {
+    // Reset all state
     spreadsheetData = null;
     sendResults = null;
     testPassed = false;
     verifyPassed = false;
     sendStarted = false;
     currentJobId = null;
+    previewIndex = 0;
     currentStep = 1;
     saveState();
-    
-    // Clear Step 1
+
+    // Clear Step 1 — spreadsheet
     $("spreadsheet-file").value = "";
     hide("spreadsheet-info");
     $("btn-next-1").disabled = false;
-    
+
+    // Clear Step 1 — message fields
+    $("subject-input").value = "";
+    $("body-input").value = "";
+    $("email-column").innerHTML = '<option value="">-- select --</option>';
+    $("name-column").innerHTML = '<option value="">-- none --</option>';
+    $("html-toggle").checked = false;
+    hide("placeholder-chips");
+    hide("placeholder-errors");
+    hide("html-warnings");
+
+    // Clear Step 1 — options
+    $("cc-input").value = "";
+    $("bcc-input").value = "";
+    $("reply-to-input").value = "";
+    $("importance-select").value = "";
+    $("filter-input").value = "";
+    $("attachment-input").value = "";
+
+    // Reset send mode to individual
+    setSendMode("individual");
+
+    // Clear Step 2 (Preview)
+    $("preview-subject").textContent = "";
+    $("preview-body").textContent = "";
+    hide("preview-body-html");
+    hide("invalid-email-warning");
+    document.querySelector("#recipients-table thead").innerHTML = "";
+    document.querySelector("#recipients-table tbody").innerHTML = "";
+
     // Clear Step 3 (Test)
     $("test-email-input").value = "";
     $("test-log").innerHTML = "";
@@ -1019,14 +1071,15 @@ function newMerge() {
     $("test-result").innerHTML = "";
     hide("test-result");
     $("btn-next-3").disabled = true;
-    
+    hide("btn-retry-test");
+
     // Clear Step 4 (Verify)
     $("verify-log").innerHTML = "";
     hide("verify-log");
     $("verify-result").innerHTML = "";
     hide("verify-result");
     $("btn-next-4").disabled = true;
-    
+
     // Clear Step 5 (Send)
     $("send-confirm-input").value = "";
     $("send-log").innerHTML = "";
@@ -1034,7 +1087,19 @@ function newMerge() {
     $("send-result").innerHTML = "";
     hide("send-result");
     $("send-progress-bar").value = 0;
-    
+    show("send-confirm");
+    hide("send-progress");
+    show("send-nav");
+    hide("send-done-nav");
+
+    // Clear localStorage
+    try {
+        localStorage.removeItem("mm_subject");
+        localStorage.removeItem("mm_body");
+        localStorage.removeItem("mm_email_col");
+        localStorage.removeItem("mm_name_col");
+    } catch (e) { /* ignore */ }
+
     goToStep(1);
 }
 
