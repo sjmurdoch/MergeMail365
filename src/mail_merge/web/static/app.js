@@ -338,6 +338,12 @@ $("btn-sign-in").addEventListener("click", async () => {
         btn.disabled = true;
         btn.setAttribute("aria-busy", "true");
 
+        function resetSignInBtn() {
+            btn.textContent = origText;
+            btn.disabled = false;
+            btn.removeAttribute("aria-busy");
+        }
+
         try {
             await apiFetch("/auth/interactive", {
                 method: "POST",
@@ -347,31 +353,29 @@ $("btn-sign-in").addEventListener("click", async () => {
 
             // Poll auth status until authenticated or timeout
             const deadline = Date.now() + 5 * 60 * 1000; // 5 minutes
+            let pollBusy = false;
             const poll = setInterval(async () => {
+                if (pollBusy) return;
                 if (Date.now() > deadline) {
                     clearInterval(poll);
-                    btn.textContent = origText;
-                    btn.disabled = false;
-                    btn.removeAttribute("aria-busy");
+                    resetSignInBtn();
                     alert("Sign-in timed out. Please try again.");
                     return;
                 }
+                pollBusy = true;
                 try {
                     const resp = await apiFetch("/auth/status");
                     const data = await resp.json();
                     if (data.authenticated) {
                         clearInterval(poll);
-                        btn.textContent = origText;
-                        btn.disabled = false;
-                        btn.removeAttribute("aria-busy");
+                        resetSignInBtn();
                         checkAuthStatus();
                     }
                 } catch (e) { /* ignore poll errors */ }
+                finally { pollBusy = false; }
             }, 2000);
         } catch (e) {
-            btn.textContent = origText;
-            btn.disabled = false;
-            btn.removeAttribute("aria-busy");
+            resetSignInBtn();
             alert("Failed to start interactive sign-in: " + e.message);
         }
     } else {

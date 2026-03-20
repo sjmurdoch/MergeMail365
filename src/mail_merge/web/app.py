@@ -309,8 +309,9 @@ def create_app(
             return jsonify({"error": "Interactive auth is only available in desktop mode"}), 400  # type: ignore[return-value]
 
         data = request.get_json() or {}
-        cid = data.get("client_id") or session.get("client_id") or _get_config_value("client_id")
-        tid = data.get("tenant_id") or session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        fallback_cid, fallback_tid = _get_client_tenant()
+        cid = data.get("client_id") or fallback_cid
+        tid = data.get("tenant_id") or fallback_tid
 
         if not cid:
             return jsonify({"error": "client_id is required"}), 400  # type: ignore[return-value]
