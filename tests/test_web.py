@@ -1,5 +1,6 @@
 """Tests for the web interface."""
 
+import os
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -170,6 +171,67 @@ class TestUpload:
             )
         assert resp.status_code == 400
 
+    def test_reupload_cleans_previous_temp_dir(self, web_client, sample_xlsx_web):
+        """Re-uploading a spreadsheet removes the previous temp directory."""
+        csrf = get_csrf(web_client)
+        # First upload
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        with web_client.session_transaction() as sess:
+            first_tmp = sess["spreadsheet_tmp_dir"]
+        assert os.path.exists(first_tmp)
+
+        # Second upload
+        with open(sample_xlsx_web, "rb") as f:
+            resp = web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test2.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        assert resp.status_code == 200
+        # First temp dir should be cleaned up
+        assert not os.path.exists(first_tmp)
+        with web_client.session_transaction() as sess:
+            assert sess["spreadsheet_tmp_dir"] != first_tmp
+
+
+# ---- Reset / cleanup ----
+
+class TestReset:
+    def test_reset_cleans_temp_dir(self, web_client, sample_xlsx_web):
+        """POST /api/reset cleans up temp files and resets session state."""
+        csrf = get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        with web_client.session_transaction() as sess:
+            tmp_dir = sess["spreadsheet_tmp_dir"]
+        assert os.path.exists(tmp_dir)
+
+        resp = web_client.post("/api/reset", headers={"X-CSRF-Token": csrf})
+        assert resp.status_code == 200
+        assert not os.path.exists(tmp_dir)
+
+        with web_client.session_transaction() as sess:
+            assert "spreadsheet_tmp_dir" not in sess
+            assert "spreadsheet_path" not in sess
+            assert "spreadsheet_info" not in sess
+
+    def test_reset_without_upload(self, web_client):
+        """POST /api/reset succeeds even with no prior upload."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post("/api/reset", headers={"X-CSRF-Token": csrf})
+        assert resp.status_code == 200
 
 
 # ---- Template preview ----

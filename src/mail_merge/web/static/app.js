@@ -1028,7 +1028,9 @@ function newMerge() {
     currentJobId = null;
     previewIndex = 0;
     currentStep = 1;
-    saveState();
+
+    // Clean up server-side temp files and session state
+    apiFetch("/api/reset", { method: "POST" }).catch(() => {});
 
     // Clear Step 1 — spreadsheet
     $("spreadsheet-file").value = "";

@@ -337,6 +337,28 @@ def create_app(
             session["verify_passed"] = data["verify_passed"]
         return jsonify({"success": True})
 
+    # ----- Session cleanup -----
+
+    def _cleanup_session_temp() -> None:
+        """Remove temp files associated with the current session."""
+        tmp_dir = session.get("spreadsheet_tmp_dir")
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            _unregister_temp_dir(tmp_dir)
+        session.pop("spreadsheet_tmp_dir", None)
+        session.pop("spreadsheet_path", None)
+        session.pop("spreadsheet_info", None)
+
+    @app.route("/api/reset", methods=["POST"])
+    def api_reset() -> Response:
+        """Clean up temp files and reset session state for a new merge."""
+        _cleanup_session_temp()
+        session.pop("current_step", None)
+        session.pop("test_passed", None)
+        session.pop("verify_passed", None)
+        session.pop("job_id", None)
+        return jsonify({"success": True})
+
     # ----- Spreadsheet upload -----
 
     @app.route("/api/upload-spreadsheet", methods=["POST"])
@@ -347,6 +369,9 @@ def create_app(
 
         if not file.filename.endswith(".xlsx"):
             return jsonify({"error": "Only .xlsx files are supported"}), 400  # type: ignore[return-value]
+
+        # Clean up previous upload if re-uploading
+        _cleanup_session_temp()
 
         tmp_dir = tempfile.mkdtemp()
         os.chmod(tmp_dir, 0o700)
@@ -529,7 +554,12 @@ def create_app(
         # Handle attachments
         attachments = request.files.getlist("attachments")
         if attachments:
-            tmp_dir = session.get("spreadsheet_tmp_dir", tempfile.mkdtemp())
+            tmp_dir = session.get("spreadsheet_tmp_dir")
+            if not tmp_dir:
+                tmp_dir = tempfile.mkdtemp()
+                os.chmod(tmp_dir, 0o700)
+                _register_temp_dir(tmp_dir)
+                session["spreadsheet_tmp_dir"] = tmp_dir
             att_paths: list[str] = []
             for att in attachments:
                 if att.filename:
