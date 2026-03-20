@@ -142,6 +142,10 @@ function validateSetup() {
         alert("BCC mode requires a To: address.");
         return false;
     }
+    if (sendMode === "bcc" && /\{\{\w+\}\}/.test(subject + body)) {
+        alert("BCC blast mode does not support {{placeholders}} in the subject or body. All recipients receive the same message.");
+        return false;
+    }
     // Quick pre-check using the total row count from the spreadsheet.
     // The authoritative cap check happens server-side in api_get_recipients
     // (after email validation and filtering), but this gives early feedback
@@ -618,8 +622,9 @@ function renderPreviewRecipient() {
     const body = $("body-input").value;
 
     // Client-side template rendering for preview
-    const rendered_subject = renderTemplate(subject, row);
-    const rendered_body = renderTemplate(body, row);
+    // In BCC mode all recipients get the same message — no substitution
+    const rendered_subject = sendMode === "bcc" ? subject : renderTemplate(subject, row);
+    const rendered_body = sendMode === "bcc" ? body : renderTemplate(body, row);
 
     $("preview-subject").textContent = rendered_subject;
     const isHtml = $("html-toggle").checked;
