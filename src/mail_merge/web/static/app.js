@@ -342,6 +342,7 @@ let __signInPoll = null;  // interval ID for polling during sign-in
 
 function updateSignInButton() {
     const btn = $("btn-sign-in");
+    const progress = $("auth-progress");
     btn.removeAttribute("aria-busy");
 
     if (__signInPoll) {
@@ -349,14 +350,17 @@ function updateSignInButton() {
         btn.textContent = "Cancel sign-in";
         btn.className = "outline contrast";
         btn.disabled = false;
+        progress.classList.remove("hidden");
     } else if (__isSignedIn) {
         btn.textContent = "Sign out";
         btn.className = "outline secondary";
         btn.disabled = false;
+        progress.classList.add("hidden");
     } else {
         btn.textContent = "Sign in with Microsoft";
         btn.className = "outline";
         btn.disabled = false;
+        progress.classList.add("hidden");
     }
 }
 
