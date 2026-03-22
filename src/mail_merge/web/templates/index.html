@@ -52,8 +52,10 @@
                 <button type="button" id="btn-sign-in" class="outline">Sign in with Microsoft</button>
                 <button type="button" id="btn-test-connection" class="outline secondary">Test connection</button>
             </div>
-            <progress id="auth-progress" class="auth-progress hidden"></progress>
-            <div id="auth-message" class="auth-message hidden"></div>
+            <div class="auth-feedback">
+                <progress id="auth-progress" class="auth-progress hidden"></progress>
+                <div id="auth-message" class="auth-message hidden"></div>
+            </div>
             <div id="auth-diagnostics" class="hidden">
                 <pre id="auth-diag-content" class="auth-diagnostics-content"></pre>
             </div>

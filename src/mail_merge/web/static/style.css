@@ -458,17 +458,24 @@ details summary:hover {
 .auth-indicator .dot.green { background: #22c55e; }
 .auth-indicator .dot.gray { background: #9ca3af; }
 
+/* Auth feedback area — fixed height to prevent layout shift */
+.auth-feedback {
+    min-height: 2rem;
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+}
+
 /* Auth progress bar */
 .auth-progress {
-    margin-top: 0.5rem;
-    margin-bottom: 0;
+    margin: 0;
     height: 0.4rem;
+    width: 100%;
 }
 
 /* Auth message below sign-in button */
 .auth-message {
     font-size: 0.875rem;
-    margin-top: 0.5rem;
     padding: 0.4rem 0.75rem;
     border-radius: 0.25rem;
 }
