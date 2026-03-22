@@ -1,4 +1,4 @@
-"""Tests for new auth functions: initiate_auth_code_flow, acquire_token_by_auth_code, diagnose_auth."""
+"""Tests for new auth functions: initiate_auth_code_flow, acquire_token_by_auth_code, diagnose_auth, sign_out."""
 
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +8,7 @@ from mail_merge.auth import (
     acquire_token_by_auth_code,
     diagnose_auth,
     initiate_auth_code_flow,
+    sign_out,
 )
 
 
@@ -149,3 +150,35 @@ class TestDiagnoseAuth:
         assert info["token_valid"] is False
         assert len(info["accounts"]) == 1
         assert info["authority_reachable"] is True
+
+
+class TestSignOut:
+    @patch("mail_merge.auth._save_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth._load_cache")
+    def test_removes_accounts(self, mock_cache, mock_app_cls, mock_save):
+        mock_cache.return_value = MagicMock()
+        mock_app = MagicMock()
+        account1 = {"username": "user@example.com"}
+        mock_app.get_accounts.return_value = [account1]
+        mock_app_cls.return_value = mock_app
+
+        result = sign_out("test-client-id", "common")
+
+        assert result is True
+        mock_app.remove_account.assert_called_once_with(account1)
+        mock_save.assert_called_once()
+
+    @patch("mail_merge.auth._save_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth._load_cache")
+    def test_returns_false_when_no_accounts(self, mock_cache, mock_app_cls, mock_save):
+        mock_cache.return_value = MagicMock()
+        mock_app = MagicMock()
+        mock_app.get_accounts.return_value = []
+        mock_app_cls.return_value = mock_app
+
+        result = sign_out("test-client-id", "common")
+
+        assert result is False
+        mock_app.remove_account.assert_not_called()

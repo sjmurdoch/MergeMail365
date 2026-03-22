@@ -299,12 +299,14 @@ async function loadConfig() {
 
 // Check auth status
 let tokenExpiresAt = null;
+let __isSignedIn = false;
 async function checkAuthStatus() {
     try {
         const resp = await apiFetch("/auth/status");
         const data = await resp.json();
         const el = $("auth-display");
         if (data.authenticated) {
+            __isSignedIn = true;
             el.innerHTML = '<span class="dot green"></span> Signed in as <span class="email">' + escapeHtml(data.email) + '</span>';
             if ($("test-email-input") && !$("test-email-input").value) {
                 $("test-email-input").value = data.email;
@@ -313,16 +315,70 @@ async function checkAuthStatus() {
                 tokenExpiresAt = new Date(data.token_expires_at);
             }
         } else {
+            __isSignedIn = false;
             el.innerHTML = '<span class="dot gray"></span> Not signed in';
             tokenExpiresAt = null;
         }
+        updateSignInButton();
     } catch (e) { /* ignore */ }
 }
 
-// Sign in
+// Sign-in button state management
 let __desktopMode = false;
+let __signInPoll = null;  // interval ID for polling during sign-in
+
+function updateSignInButton() {
+    const btn = $("btn-sign-in");
+    btn.removeAttribute("aria-busy");
+
+    if (__signInPoll) {
+        // Currently waiting for sign-in to complete
+        btn.textContent = "Cancel sign-in";
+        btn.className = "outline contrast";
+        btn.disabled = false;
+    } else if (__isSignedIn) {
+        btn.textContent = "Sign out";
+        btn.className = "outline secondary";
+        btn.disabled = false;
+    } else {
+        btn.textContent = "Sign in with Microsoft";
+        btn.className = "outline";
+        btn.disabled = false;
+    }
+}
+
+function cancelSignIn() {
+    if (__signInPoll) {
+        clearInterval(__signInPoll);
+        __signInPoll = null;
+    }
+    updateSignInButton();
+}
+
+async function doSignOut() {
+    const btn = $("btn-sign-in");
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    try {
+        await apiFetch("/auth/logout", { method: "POST" });
+    } catch (e) { /* ignore */ }
+    await checkAuthStatus();
+}
+
 $("btn-sign-in").addEventListener("click", async () => {
-    // Save client_id/tenant_id to session first
+    // If currently waiting for sign-in, cancel it
+    if (__signInPoll) {
+        cancelSignIn();
+        return;
+    }
+
+    // If signed in, sign out
+    if (__isSignedIn) {
+        await doSignOut();
+        return;
+    }
+
+    // Otherwise, start sign-in
     const clientId = $("client-id").value.trim();
     const tenantId = $("tenant-id").value.trim() || "common";
     if (!clientId) {
@@ -332,18 +388,6 @@ $("btn-sign-in").addEventListener("click", async () => {
 
     if (__desktopMode) {
         // Desktop mode: use interactive auth via system browser
-        const btn = $("btn-sign-in");
-        const origText = btn.textContent;
-        btn.textContent = "Waiting for browser sign-in...";
-        btn.disabled = true;
-        btn.setAttribute("aria-busy", "true");
-
-        function resetSignInBtn() {
-            btn.textContent = origText;
-            btn.disabled = false;
-            btn.removeAttribute("aria-busy");
-        }
-
         try {
             await apiFetch("/auth/interactive", {
                 method: "POST",
@@ -354,11 +398,10 @@ $("btn-sign-in").addEventListener("click", async () => {
             // Poll auth status until authenticated or timeout
             const deadline = Date.now() + 5 * 60 * 1000; // 5 minutes
             let pollBusy = false;
-            const poll = setInterval(async () => {
+            __signInPoll = setInterval(async () => {
                 if (pollBusy) return;
                 if (Date.now() > deadline) {
-                    clearInterval(poll);
-                    resetSignInBtn();
+                    cancelSignIn();
                     alert("Sign-in timed out. Please try again.");
                     return;
                 }
@@ -367,15 +410,15 @@ $("btn-sign-in").addEventListener("click", async () => {
                     const resp = await apiFetch("/auth/status");
                     const data = await resp.json();
                     if (data.authenticated) {
-                        clearInterval(poll);
-                        resetSignInBtn();
+                        cancelSignIn();
                         checkAuthStatus();
                     }
                 } catch (e) { /* ignore poll errors */ }
                 finally { pollBusy = false; }
             }, 2000);
+            updateSignInButton();
         } catch (e) {
-            resetSignInBtn();
+            cancelSignIn();
             alert("Failed to start interactive sign-in: " + e.message);
         }
     } else {

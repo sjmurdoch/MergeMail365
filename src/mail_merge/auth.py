@@ -140,6 +140,21 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     return token
 
 
+def sign_out(client_id: str, tenant_id: str = "common") -> bool:
+    """Remove cached accounts for the given client/tenant.
+
+    Returns True if any accounts were removed, False otherwise.
+    """
+    app, cache = _build_msal_app(client_id, tenant_id)
+    accounts = app.get_accounts()
+    if not accounts:
+        return False
+    for account in accounts:
+        app.remove_account(account)
+    _save_cache(cache)
+    return True
+
+
 def initiate_auth_code_flow(
     client_id: str,
     tenant_id: str = "common",

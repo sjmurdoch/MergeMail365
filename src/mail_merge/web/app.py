@@ -154,6 +154,14 @@ def create_app(
 
     @app.before_request
     def _check_auth() -> Any:
+        # Desktop mode: native window is the access control — no localhost
+        # listener, so auto-authenticate without a startup token.
+        if desktop_mode:
+            if not session.get("authenticated"):
+                session["authenticated"] = True
+                session.permanent = True
+            return None
+
         # Allow static files and auth routes without session auth
         if request.endpoint == "static":
             return None
@@ -190,9 +198,12 @@ def create_app(
 
     @app.before_request
     def _check_csrf() -> Response | None:
+        # Desktop mode has no localhost listener — CSRF is not possible.
+        if desktop_mode:
+            return None
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return None
-        if request.endpoint and request.endpoint.startswith("auth_"):
+        if request.endpoint in ("auth_login", "auth_callback"):
             return None
         csrf_token = request.headers.get("X-CSRF-Token") or ""
         if not csrf_token or csrf_token != session.get("csrf_token"):
@@ -293,6 +304,15 @@ def create_app(
         except Exception:
             pass
         return jsonify({"authenticated": False, "email": None})
+
+    @app.route("/auth/logout", methods=["POST"])
+    def auth_logout() -> Response:
+        client_id, tenant_id = _get_client_tenant()
+        if client_id:
+            from mail_merge.auth import sign_out
+            sign_out(client_id, tenant_id)
+        session.pop("ms_authenticated", None)
+        return jsonify({"success": True})
 
     @app.route("/auth/debug")
     def auth_debug() -> Response:

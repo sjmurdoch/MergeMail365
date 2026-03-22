@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import os
-
 import argparse
 import logging
 import secrets
 import socket
 import sys
 import threading
-import time
 import webbrowser
 
 from mail_merge.console import setup_logging
@@ -44,28 +41,9 @@ def main(argv: list[str] | None = None) -> None:
     setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     logger = logging.getLogger(__name__)
 
-    port = _find_open_port(args.port)
-    if port != args.port:
-        logger.info("Port %d in use, using %d instead", args.port, port)
-
     # Auto-enable desktop mode when running as a PyInstaller bundle
     is_bundled = getattr(sys, "frozen", False)
     desktop = args.desktop or is_bundled
-
-    from mail_merge.web.app import create_app
-
-    startup_token = secrets.token_urlsafe(32)
-    app = create_app(
-        startup_token=startup_token,
-        port=port,
-        client_id=args.client_id,
-        tenant_id=args.tenant_id,
-        desktop_mode=desktop,
-    )
-
-    url = f"http://{args.host}:{port}/?token={startup_token}"
-    logger.info("Starting mail-merge web UI on http://%s:%d", args.host, port)
-    logger.info("Access URL: %s", url)
 
     if desktop:
         try:
@@ -78,27 +56,36 @@ def main(argv: list[str] | None = None) -> None:
                 logger.error("pywebview is required for --desktop mode. Install with: uv pip install 'mail-merge[desktop]'")
                 sys.exit(1)
 
+    from mail_merge.web.app import create_app
+
     if desktop:
-        # Run Flask on a real HTTP port so OAuth redirect callbacks work.
-        # (Passing the WSGI app directly to pywebview uses a random internal
-        # port, which breaks the OAuth redirect_uri.)
-        flask_thread = threading.Thread(
-            target=app.run,
-            kwargs={"host": args.host, "port": port, "debug": False, "use_reloader": False},
-            daemon=True,
+        # Pass the Flask app directly to pywebview — no localhost listener,
+        # so no CSRF risk.  Auth happens via the system browser
+        # (acquire_token_interactive_flow), not via OAuth redirect callbacks.
+        app = create_app(
+            client_id=args.client_id,
+            tenant_id=args.tenant_id,
+            desktop_mode=True,
         )
-        flask_thread.start()
-        # Wait for Flask to be ready before opening the window
-        for _ in range(50):
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.connect(("127.0.0.1", port))
-                    break
-            except OSError:
-                time.sleep(0.1)
-        webview.create_window("Mail Merge", url, width=1100, height=800)
+        webview.create_window("Mail Merge", app, width=1100, height=800)
         webview.start()
     else:
+        port = _find_open_port(args.port)
+        if port != args.port:
+            logger.info("Port %d in use, using %d instead", args.port, port)
+
+        startup_token = secrets.token_urlsafe(32)
+        app = create_app(
+            startup_token=startup_token,
+            port=port,
+            client_id=args.client_id,
+            tenant_id=args.tenant_id,
+        )
+
+        url = f"http://{args.host}:{port}/?token={startup_token}"
+        logger.info("Starting mail-merge web UI on http://%s:%d", args.host, port)
+        logger.info("Access URL: %s", url)
+
         # Open browser after a short delay
         threading.Timer(1.0, webbrowser.open, args=[url]).start()
         app.run(host=args.host, port=port, debug=False)

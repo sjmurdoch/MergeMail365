@@ -560,6 +560,30 @@ class TestAuth:
         assert "cache_exists" in data
         assert data["authority_reachable"] is True
 
+    @patch("mail_merge.auth.sign_out")
+    def test_auth_logout(self, mock_sign_out, web_client):
+        """POST /auth/logout clears the MSAL cache."""
+        mock_sign_out.return_value = True
+        csrf = get_csrf(web_client)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+            sess["tenant_id"] = "common"
+            sess["ms_authenticated"] = True
+        resp = web_client.post(
+            "/auth/logout",
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["success"] is True
+        mock_sign_out.assert_called_once_with("test-client-id", "common")
+        with web_client.session_transaction() as sess:
+            assert "ms_authenticated" not in sess
+
+    def test_auth_logout_requires_csrf(self, web_client):
+        """POST /auth/logout without CSRF token is rejected."""
+        resp = web_client.post("/auth/logout")
+        assert resp.status_code == 403
+
     @patch("mail_merge.auth.initiate_auth_code_flow")
     @patch("mail_merge.web.app.load_config", return_value={})
     def test_auth_login_reads_client_id_from_query(self, mock_config, mock_flow, web_client):
@@ -1152,18 +1176,17 @@ class TestDesktopMode:
     @pytest.fixture
     def desktop_app(self):
         """Create a Flask app in desktop mode."""
-        application = create_app(
-            startup_token="test-token-abc", port=5050, desktop_mode=True,
-        )
+        application = create_app(desktop_mode=True)
         application.config["TESTING"] = True
         return application
 
     @pytest.fixture
     def desktop_client(self, desktop_app):
-        """Flask test client pre-authenticated in desktop mode."""
+        """Flask test client auto-authenticated in desktop mode."""
         c = desktop_app.test_client()
-        resp = c.get("/?token=test-token-abc", follow_redirects=False)
-        assert resp.status_code == 302
+        # Desktop mode auto-authenticates on first request
+        resp = c.get("/")
+        assert resp.status_code == 200
         return c
 
     def test_auth_interactive_returns_400_in_browser_mode(self, web_client):
@@ -1181,14 +1204,13 @@ class TestDesktopMode:
     def test_auth_interactive_starts_in_desktop_mode(self, mock_flow, desktop_client):
         """POST /auth/interactive returns 200 and starts auth in desktop mode."""
         mock_flow.return_value = "fake-token"
-        csrf = get_csrf(desktop_client)
         with desktop_client.session_transaction() as sess:
             sess["client_id"] = "test-client"
             sess["tenant_id"] = "common"
+        # Desktop mode skips CSRF — no X-CSRF-Token header needed
         resp = desktop_client.post(
             "/auth/interactive",
             json={"client_id": "test-client", "tenant_id": "common"},
-            headers={"X-CSRF-Token": csrf},
         )
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "started"
