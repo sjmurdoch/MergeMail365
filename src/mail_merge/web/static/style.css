@@ -449,6 +449,13 @@ details summary:hover {
     color: var(--feedback-danger-text);
 }
 
+.callout-success *,
+.callout-info *,
+.callout-warning *,
+.callout-danger * {
+    color: inherit;
+}
+
 /* Progress bar */
 .progress-info {
     display: flex;
