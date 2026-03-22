@@ -5,13 +5,20 @@
     --step-completed: var(--pico-ins-color);
     --step-inactive: var(--pico-muted-color);
     --log-bg: var(--pico-code-background-color);
-    --color-warning: #d97706;
+    --color-warning: #b45309;
     --color-success: #166534;
-    --callout-warning-bg: #fef3c7;
-    --callout-warning-border: #f59e0b;
-    --callout-warning-text: #92400e;
-    --callout-danger-bg: #fef2f2;
-    --callout-danger-text: #991b1b;
+    --feedback-success-bg: #dcfce7;
+    --feedback-success-border: #22c55e;
+    --feedback-success-text: #166534;
+    --feedback-info-bg: #dbeafe;
+    --feedback-info-border: #3b82f6;
+    --feedback-info-text: #1e40af;
+    --feedback-warning-bg: #fef3c7;
+    --feedback-warning-border: #f59e0b;
+    --feedback-warning-text: #92400e;
+    --feedback-danger-bg: #fee2e2;
+    --feedback-danger-border: #ef4444;
+    --feedback-danger-text: #991b1b;
     --badge-warning-bg: #fbbf24;
     --badge-warning-text: #78350f;
 }
@@ -20,11 +27,18 @@
     :root:not([data-theme="light"]) {
         --color-warning: #fbbf24;
         --color-success: #4ade80;
-        --callout-warning-bg: #78350f;
-        --callout-warning-border: #d97706;
-        --callout-warning-text: #fef3c7;
-        --callout-danger-bg: #450a0a;
-        --callout-danger-text: #fecaca;
+        --feedback-success-bg: #14532d;
+        --feedback-success-border: #22c55e;
+        --feedback-success-text: #bbf7d0;
+        --feedback-info-bg: #1e3a5f;
+        --feedback-info-border: #3b82f6;
+        --feedback-info-text: #bfdbfe;
+        --feedback-warning-bg: #78350f;
+        --feedback-warning-border: #d97706;
+        --feedback-warning-text: #fef3c7;
+        --feedback-danger-bg: #450a0a;
+        --feedback-danger-border: #ef4444;
+        --feedback-danger-text: #fecaca;
         --badge-warning-bg: #92400e;
         --badge-warning-text: #fef3c7;
     }
@@ -33,11 +47,18 @@
 [data-theme="dark"] {
     --color-warning: #fbbf24;
     --color-success: #4ade80;
-    --callout-warning-bg: #78350f;
-    --callout-warning-border: #d97706;
-    --callout-warning-text: #fef3c7;
-    --callout-danger-bg: #450a0a;
-    --callout-danger-text: #fecaca;
+    --feedback-success-bg: #14532d;
+    --feedback-success-border: #22c55e;
+    --feedback-success-text: #bbf7d0;
+    --feedback-info-bg: #1e3a5f;
+    --feedback-info-border: #3b82f6;
+    --feedback-info-text: #bfdbfe;
+    --feedback-warning-bg: #78350f;
+    --feedback-warning-border: #d97706;
+    --feedback-warning-text: #fef3c7;
+    --feedback-danger-bg: #450a0a;
+    --feedback-danger-border: #ef4444;
+    --feedback-danger-text: #fecaca;
     --badge-warning-bg: #92400e;
     --badge-warning-text: #fef3c7;
 }
@@ -404,22 +425,28 @@ details summary:hover {
     font-size: 0.9rem;
 }
 
-.callout-warning {
-    background: var(--callout-warning-bg);
-    border: 1px solid var(--callout-warning-border);
-    color: var(--callout-warning-text);
+.callout-success {
+    background: var(--feedback-success-bg);
+    border: 1px solid var(--feedback-success-border);
+    color: var(--feedback-success-text);
 }
 
 .callout-info {
-    background-color: var(--pico-primary);
-    border: 1px solid var(--pico-primary);
-    color: var(--pico-primary-inverse);
+    background: var(--feedback-info-bg);
+    border: 1px solid var(--feedback-info-border);
+    color: var(--feedback-info-text);
+}
+
+.callout-warning {
+    background: var(--feedback-warning-bg);
+    border: 1px solid var(--feedback-warning-border);
+    color: var(--feedback-warning-text);
 }
 
 .callout-danger {
-    background: var(--callout-danger-bg);
-    border: 1px solid var(--pico-del-color);
-    color: var(--callout-danger-text);
+    background: var(--feedback-danger-bg);
+    border: 1px solid var(--feedback-danger-border);
+    color: var(--feedback-danger-text);
 }
 
 /* Progress bar */
@@ -480,21 +507,16 @@ details summary:hover {
     border-radius: 0.25rem;
 }
 .auth-message.success {
-    color: #166534;
-    background: #dcfce7;
+    color: var(--feedback-success-text);
+    background: var(--feedback-success-bg);
 }
 .auth-message.error {
-    color: #991b1b;
-    background: #fee2e2;
+    color: var(--feedback-danger-text);
+    background: var(--feedback-danger-bg);
 }
 .auth-message.info {
-    color: #1e40af;
-    background: #dbeafe;
-}
-@media (prefers-color-scheme: dark) {
-    .auth-message.success { color: #86efac; background: #14532d; }
-    .auth-message.error { color: #fca5a5; background: #7f1d1d; }
-    .auth-message.info { color: #93c5fd; background: #1e3a5f; }
+    color: var(--feedback-info-text);
+    background: var(--feedback-info-bg);
 }
 
 /* Session timer */

@@ -465,7 +465,7 @@ $("btn-test-connection").addEventListener("click", async () => {
         if (data.error) {
             summary = `<div class="callout callout-danger" style="margin-top:0;"><strong>Connection Error:</strong> ${escapeHtml(data.error)}</div>`;
         } else if (data.token_valid) {
-            summary = `<div class="callout callout-info" style="margin-top:0; background-color: #166534; border-color: #166534;"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
+            summary = `<div class="callout callout-success" style="margin-top:0;"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
         } else if (data.authority_reachable) {
             summary = `<div class="callout callout-warning" style="margin-top:0;"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
         } else {
