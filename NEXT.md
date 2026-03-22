@@ -1,3 +1,8 @@
+After sign in completes show confirmation in the app that sign in has been completed successfully.
+
+If the signin fails the app will get stuck at "Waiting for browser sign-in" for a long time. Allow the user to abort the sign-in and try again.
+
+Now that authentication happens in the system browser there's no need to have the desktop application listen on localhost. In desktop mode, pass the Flask application directly to pywebview so there is no risk of CSRF. For example, consider reverting the changes in commit b33867444c27c9a6058396683c5df279e8d9fd29.
 
 -----
 
