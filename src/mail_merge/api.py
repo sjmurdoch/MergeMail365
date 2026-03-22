@@ -308,9 +308,6 @@ def send_merge(
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
-    if not spreadsheet_path.exists():
-        raise FileNotFoundError(f"Spreadsheet not found: {spreadsheet_path}")
-
     recipients = read_recipients(spreadsheet_path, email_column, sheet)
     if not recipients:
         raise ValueError("No recipients found in spreadsheet")

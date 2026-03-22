@@ -32,7 +32,6 @@ class _StripAnsiFilter(logging.Filter):
 def setup_logging(level: int) -> None:
     """Configure root logging with a RichHandler on stderr."""
     handler = RichHandler(console=console, show_path=False, markup=False)
-    #handler.addFilter(_StripAnsiFilter())
 
     logging.basicConfig(
         level=level,

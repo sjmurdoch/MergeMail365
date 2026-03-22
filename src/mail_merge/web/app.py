@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import shutil
 import tempfile
@@ -39,6 +40,18 @@ logger = logging.getLogger(__name__)
 
 MAX_WEB_RECIPIENTS = 99
 WEB_SEND_DELAY = 2.0
+
+_HTML_TAG_RE = re.compile(r"<[a-zA-Z][^>]*>")
+_BLOCK_OR_BR_RE = re.compile(
+    r"<(br|p|div|table|tr|td|li|ul|ol|h[1-6])\b", re.IGNORECASE,
+)
+_STRIPPED_TAGS_RE = re.compile(
+    r"<(script|iframe|form|embed|object)\b", re.IGNORECASE,
+)
+_EXT_STYLESHEET_RE = re.compile(
+    r"""<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>""", re.IGNORECASE,
+)
+_GMAIL_CLIP_BYTES = 102 * 1024  # ~102 KB
 
 
 # ---------------------------------------------------------------------------
@@ -736,20 +749,6 @@ def create_app(
 
     # ----- Helpers -----
 
-    import re as _re
-
-    _HTML_TAG_RE = _re.compile(r"<[a-zA-Z][^>]*>")
-    _BLOCK_OR_BR_RE = _re.compile(
-        r"<(br|p|div|table|tr|td|li|ul|ol|h[1-6])\b", _re.IGNORECASE,
-    )
-    _STRIPPED_TAGS_RE = _re.compile(
-        r"<(script|iframe|form|embed|object)\b", _re.IGNORECASE,
-    )
-    _EXT_STYLESHEET_RE = _re.compile(
-        r"""<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>""", _re.IGNORECASE,
-    )
-    _GMAIL_CLIP_BYTES = 102 * 1024  # ~102 KB
-
     def _validate_html_body(body: str) -> list[str]:
         """Return a list of warning strings for HTML email body content."""
         if not body.strip():
@@ -772,7 +771,7 @@ def create_app(
         if m:
             found = [
                 tag for tag in ("script", "iframe", "form", "embed", "object")
-                if _re.search(rf"<{tag}\b", body, _re.IGNORECASE)
+                if re.search(rf"<{tag}\b", body, re.IGNORECASE)
             ]
             warnings.append(
                 f"Unsupported tags: <{'>, <'.join(found)}> will be stripped "

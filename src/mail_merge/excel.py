@@ -5,6 +5,29 @@ import openpyxl
 
 logger = logging.getLogger(__name__)
 
+_MAX_SPREADSHEET_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def _check_file_size(path: Path) -> None:
+    try:
+        file_size = path.stat().st_size
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Spreadsheet not found: {path}")
+    if file_size > _MAX_SPREADSHEET_SIZE:
+        raise ValueError(
+            f"Spreadsheet too large: {file_size / (1024 * 1024):.0f} MB "
+            f"(limit: {_MAX_SPREADSHEET_SIZE // (1024 * 1024)} MB)"
+        )
+
+
+def _cell_str(cell: object) -> str:
+    """Convert a cell value to a stripped string, treating None as empty."""
+    return str(cell.value).strip() if cell.value is not None else ""  # type: ignore[attr-defined]
+
+
+def _parse_headers(header_row: tuple) -> list[str]:  # type: ignore[type-arg]
+    return [_cell_str(cell) for cell in header_row]
+
 
 def read_preview(
     path: str | Path,
@@ -17,13 +40,7 @@ def read_preview(
     Does not require an email_column — used for spreadsheet preview in the web UI.
     """
     path = Path(path)
-    max_size = 50 * 1024 * 1024  # 50 MB
-    file_size = path.stat().st_size
-    if file_size > max_size:
-        raise ValueError(
-            f"Spreadsheet too large: {file_size / (1024 * 1024):.0f} MB "
-            f"(limit: {max_size // (1024 * 1024)} MB)"
-        )
+    _check_file_size(path)
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         sheet_names = wb.sheetnames
@@ -37,12 +54,12 @@ def read_preview(
         if header_row is None:
             raise ValueError("Spreadsheet is empty")
 
-        headers = [str(cell.value).strip() if cell.value is not None else "" for cell in header_row]
+        headers = _parse_headers(header_row)
         columns = [h for h in headers if h]
 
         preview_rows: list[dict[str, str]] = []
         for _, row in zip(range(max_rows), rows_iter):
-            values = [str(cell.value).strip() if cell.value is not None else "" for cell in row]
+            values = [_cell_str(cell) for cell in row]
             while len(values) < len(headers):
                 values.append("")
             record = {headers[i]: values[i] for i in range(len(headers)) if headers[i]}
@@ -64,13 +81,7 @@ def read_recipients(
     Raises ValueError if the email column is not found.
     """
     path = Path(path)
-    max_size = 50 * 1024 * 1024  # 50 MB
-    file_size = path.stat().st_size
-    if file_size > max_size:
-        raise ValueError(
-            f"Spreadsheet too large: {file_size / (1024 * 1024):.0f} MB "
-            f"(limit: {max_size // (1024 * 1024)} MB)"
-        )
+    _check_file_size(path)
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         ws = wb[sheet_name] if sheet_name else wb.active
@@ -80,7 +91,7 @@ def read_recipients(
         if header_row is None:
             raise ValueError("Spreadsheet is empty")
 
-        headers = [str(cell.value).strip() if cell.value is not None else "" for cell in header_row]
+        headers = _parse_headers(header_row)
 
         # Find the email column (case-insensitive)
         email_col_idx = None
@@ -97,12 +108,10 @@ def read_recipients(
 
         recipients = []
         for row_num, row in enumerate(rows, start=2):
-            values = [str(cell.value).strip() if cell.value is not None else "" for cell in row]
-            # Pad values if row is shorter than headers
+            values = [_cell_str(cell) for cell in row]
             while len(values) < len(headers):
                 values.append("")
 
-            # Skip entirely empty rows silently; warn only for partial rows
             email_value = values[email_col_idx]
             if not email_value:
                 if any(v for v in values):
