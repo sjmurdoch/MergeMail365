@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for bundling mail-merge web UI as a standalone app.
+"""PyInstaller spec for bundling MergeMail365 as a standalone app.
 
 To hard-code Azure AD credentials into the built app, set these environment
 variables before running PyInstaller:
 
     MAIL_MERGE_CLIENT_ID=your-client-id \\
     MAIL_MERGE_TENANT_ID=your-tenant-id \\
-    uv run pyinstaller mail_merge_web.spec
+    uv run pyinstaller mergemail365.spec
 
 When set, the corresponding fields in the UI are pre-filled and read-only.
 When not set, users can enter them manually (or they are loaded from the
@@ -87,7 +87,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="mail-merge-web",
+    name="mergemail365",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -108,19 +108,19 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="mail-merge-web",
+    name="mergemail365",
 )
 
 # macOS .app bundle
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="Mail Merge.app",
+        name="MergeMail365.app",
         icon=None,
-        bundle_identifier="com.mail-merge.web",
+        bundle_identifier="is.murdoch.mergemail365",
         info_plist={
-            "CFBundleName": "Mail Merge",
-            "CFBundleDisplayName": "Mail Merge",
+            "CFBundleName": "MergeMail365",
+            "CFBundleDisplayName": "MergeMail365",
             "CFBundleVersion": "0.1.0",
             "CFBundleShortVersionString": "0.1.0",
             "NSHighResolutionCapable": True,

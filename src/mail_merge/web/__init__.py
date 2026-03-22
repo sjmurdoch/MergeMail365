@@ -1,4 +1,4 @@
-"""Web interface for mail-merge."""
+"""Web interface for MergeMail365."""
 
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ def _find_open_port(start: int = 5050, end: int = 5099) -> int:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="mail-merge-web",
-        description="Web interface for mail-merge",
+        prog="mergemail365-web",
+        description="MergeMail365 web interface",
     )
     parser.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
     parser.add_argument("--port", type=int, default=5050, help="Port to bind to (default: 5050)")
@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> None:
                 logger.error("pywebview not found in bundle — falling back to browser mode")
                 desktop = False
             else:
-                logger.error("pywebview is required for --desktop mode. Install with: uv pip install 'mail-merge[desktop]'")
+                logger.error("pywebview is required for --desktop mode. Install with: uv pip install 'mergemail365[desktop]'")
                 sys.exit(1)
 
     from mail_merge.web.app import create_app
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> None:
             tenant_id=args.tenant_id,
             desktop_mode=True,
         )
-        webview.create_window("Mail Merge", app, width=1100, height=800)
+        webview.create_window("MergeMail365", app, width=1100, height=800)
         webview.start()
     else:
         port = _find_open_port(args.port)
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> None:
         )
 
         url = f"http://{args.host}:{port}/?token={startup_token}"
-        logger.info("Starting mail-merge web UI on http://%s:%d", args.host, port)
+        logger.info("Starting MergeMail365 web UI on http://%s:%d", args.host, port)
         logger.info("Access URL: %s", url)
 
         # Open browser after a short delay

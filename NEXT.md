@@ -2,6 +2,8 @@ After sign in completes show confirmation in the app that sign in has been compl
 
 If the signin fails the app will get stuck at "Waiting for browser sign-in" for a long time. Allow the user to abort the sign-in and try again.
 
+Improve the way the sign in button works. When the user is signed out, it should be sign-in. Once the user has signed in it should change to sign out. While the sign in process is running, it should allow the sign in process to be cancelled, for example due to the browser stage failing. The state of the sign in button should also be indicated by color.
+
 Now that authentication happens in the system browser there's no need to have the desktop application listen on localhost. In desktop mode, pass the Flask application directly to pywebview so there is no risk of CSRF. For example, consider reverting the changes in commit b33867444c27c9a6058396683c5df279e8d9fd29.
 
 -----

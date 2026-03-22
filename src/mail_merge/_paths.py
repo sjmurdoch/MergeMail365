@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def data_dir() -> Path:
-    """Return the platform-appropriate data directory for mail-merge.
+    """Return the platform-appropriate data directory for MergeMail365.
 
     Windows: %LOCALAPPDATA%/mail-merge  (falls back to ~/mail-merge)
     macOS/Linux: ~ (preserves existing dotfile behaviour)

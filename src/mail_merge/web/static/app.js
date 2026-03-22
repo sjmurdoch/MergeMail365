@@ -1,4 +1,4 @@
-/* Mail Merge — Wizard UI */
+/* MergeMail365 — Wizard UI */
 
 // ---------------------------------------------------------------------------
 // State
@@ -1128,7 +1128,7 @@ function downloadCsv() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "mail-merge-results.csv";
+    a.download = "mergemail365-results.csv";
     a.click();
     URL.revokeObjectURL(url);
 }

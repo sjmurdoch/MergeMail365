@@ -8,7 +8,7 @@ from mail_merge.console import setup_logging
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="mail-merge",
+        prog="mergemail365",
         description="Send personalised emails via Microsoft Graph API",
     )
     parser.add_argument("--spreadsheet", required=True, help="Path to .xlsx file with recipients")

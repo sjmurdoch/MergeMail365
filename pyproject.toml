@@ -1,5 +1,5 @@
 [project]
-name = "mail-merge"
+name = "mergemail365"
 version = "0.1.0"
 description = "Office 365 mail merge CLI using Microsoft Graph API"
 requires-python = ">=3.10"
@@ -17,8 +17,8 @@ web = ["flask>=3.0"]
 desktop = ["flask>=3.0", "pywebview>=5.0"]
 
 [project.scripts]
-mail-merge = "mail_merge.cli:main"
-mail-merge-web = "mail_merge.web:main"
+mergemail365 = "mail_merge.cli:main"
+mergemail365-web = "mail_merge.web:main"
 
 [build-system]
 requires = ["hatchling"]

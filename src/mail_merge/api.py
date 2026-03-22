@@ -1,4 +1,4 @@
-"""Python API for mail-merge — mirrors the CLI in a single function call."""
+"""Python API for MergeMail365 — mirrors the CLI in a single function call."""
 
 from __future__ import annotations
 

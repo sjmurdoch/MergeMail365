@@ -11,7 +11,11 @@
       "WebFetch(domain:devblogs.microsoft.com)",
       "WebFetch(domain:www.emailonacid.com)",
       "WebFetch(domain:dev.to)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(find /Users/smurdoch/w/mail-merge -type f -name *.spec -o -name *.spec.py)",
+      "Bash(find /Users/smurdoch/w/mail-merge -maxdepth 2 -type f \\\\\\(-name *.toml -o -name *.cfg -o -name *.ini -o -name *.json \\\\\\))",
+      "Bash(grep -rn \"mail-merge\\\\|Mail Merge\" /Users/smurdoch/w/mail-merge/src /Users/smurdoch/w/mail-merge/*.py /Users/smurdoch/w/mail-merge/*.md /Users/smurdoch/w/mail-merge/docs /Users/smurdoch/w/mail-merge/pyproject.toml /Users/smurdoch/w/mail-merge/mail_merge_web.spec)",
+      "Bash(uv sync:*)"
     ]
   }
 }

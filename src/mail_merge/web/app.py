@@ -1,4 +1,4 @@
-"""Flask application for mail-merge web UI."""
+"""Flask application for MergeMail365 web UI."""
 
 from __future__ import annotations
 
