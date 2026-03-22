@@ -4,8 +4,8 @@
 To hard-code Azure AD credentials into the built app, set these environment
 variables before running PyInstaller:
 
-    MAIL_MERGE_CLIENT_ID=your-client-id \\
-    MAIL_MERGE_TENANT_ID=your-tenant-id \\
+    MERGEMAIL365_CLIENT_ID=your-client-id \\
+    MERGEMAIL365_TENANT_ID=your-tenant-id \\
     uv run pyinstaller mergemail365.spec
 
 When set, the corresponding fields in the UI are pre-filled and read-only.
@@ -20,8 +20,8 @@ block_cipher = None
 
 # Optional: hard-code Azure AD credentials into the standalone app.
 # Set via environment variables at build time.
-FIXED_CLIENT_ID = os.environ.get("MAIL_MERGE_CLIENT_ID", "")
-FIXED_TENANT_ID = os.environ.get("MAIL_MERGE_TENANT_ID", "")
+FIXED_CLIENT_ID = os.environ.get("MERGEMAIL365_CLIENT_ID", "")
+FIXED_TENANT_ID = os.environ.get("MERGEMAIL365_TENANT_ID", "")
 
 # Locate source files
 src_dir = os.path.join("src", "mail_merge")

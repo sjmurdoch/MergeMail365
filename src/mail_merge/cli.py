@@ -18,12 +18,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--client-id",
         default=None,
-        help="Azure AD application (client) ID (or set MAIL_MERGE_CLIENT_ID env var, or config file)",
+        help="Azure AD application (client) ID (or set MERGEMAIL365_CLIENT_ID env var, or config file)",
     )
     parser.add_argument(
         "--tenant-id",
         default=None,
-        help="Azure AD tenant ID (or set MAIL_MERGE_TENANT_ID env var, or config file; default: 'common')",
+        help="Azure AD tenant ID (or set MERGEMAIL365_TENANT_ID env var, or config file; default: 'common')",
     )
     parser.add_argument("--sheet", default=None, help="Sheet name (default: first sheet)")
     parser.add_argument("--name-column", default=None, help="Column name containing recipient display names (included in the To: header)")

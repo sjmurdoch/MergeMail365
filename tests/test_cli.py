@@ -38,7 +38,7 @@ class TestCLIDryRun:
         assert exit_code == 1
 
     def test_missing_client_id_without_dry_run(self, sample_xlsx, body_template_file, monkeypatch):
-        monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_CLIENT_ID", raising=False)
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", sample_xlsx.parent / "nonexistent.toml")
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -128,7 +128,7 @@ class TestTestEmail:
 
     def test_test_email_requires_client_id(self, sample_xlsx, body_template_file, monkeypatch):
         """--test-email always sends, so it requires client-id even without --send."""
-        monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_CLIENT_ID", raising=False)
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", sample_xlsx.parent / "nonexistent.toml")
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -178,8 +178,8 @@ class TestConfigFilePrecedence:
         cfg = tmp_path / "config.toml"
         cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
-        monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
-        monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_CLIENT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_TENANT_ID", raising=False)
 
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
@@ -200,8 +200,8 @@ class TestConfigFilePrecedence:
         cfg = tmp_path / "config.toml"
         cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
-        monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
-        monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_CLIENT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_TENANT_ID", raising=False)
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -217,8 +217,8 @@ class TestConfigFilePrecedence:
         cfg = tmp_path / "config.toml"
         cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
-        monkeypatch.setenv("MAIL_MERGE_CLIENT_ID", "env-client")
-        monkeypatch.setenv("MAIL_MERGE_TENANT_ID", "env-tenant")
+        monkeypatch.setenv("MERGEMAIL365_CLIENT_ID", "env-client")
+        monkeypatch.setenv("MERGEMAIL365_TENANT_ID", "env-tenant")
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),
@@ -232,7 +232,7 @@ class TestConfigFilePrecedence:
     def test_tenant_defaults_to_common(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """When no tenant-id is set anywhere, it defaults to 'common'."""
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", tmp_path / "nonexistent.toml")
-        monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_TENANT_ID", raising=False)
 
         captured: dict[str, str] = {}
 
@@ -259,7 +259,7 @@ class TestConfigFilePrecedence:
     def test_missing_client_id_with_no_config(self, sample_xlsx, body_template_file, tmp_path, monkeypatch):
         """Without config file, env var, or CLI flag, client-id is None and send fails."""
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", tmp_path / "nonexistent.toml")
-        monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_CLIENT_ID", raising=False)
 
         exit_code = main([
             "--spreadsheet", str(sample_xlsx),

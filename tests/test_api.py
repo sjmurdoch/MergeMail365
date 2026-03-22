@@ -333,7 +333,7 @@ class TestAuthFailure:
 
 class TestAuthError:
     def test_missing_client_id(self, sample_xlsx, body_template_file, monkeypatch):
-        monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_CLIENT_ID", raising=False)
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", sample_xlsx.parent / "nope.toml")
         with pytest.raises(RuntimeError, match="client-id is required"):
             send_merge(
@@ -615,8 +615,8 @@ class TestConfigResolution:
         cfg = tmp_path / "config.toml"
         cfg.write_text('client-id = "cfg-client"\ntenant-id = "cfg-tenant"\n', encoding="utf-8")
         monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", cfg)
-        monkeypatch.delenv("MAIL_MERGE_CLIENT_ID", raising=False)
-        monkeypatch.delenv("MAIL_MERGE_TENANT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_CLIENT_ID", raising=False)
+        monkeypatch.delenv("MERGEMAIL365_TENANT_ID", raising=False)
 
         # dry run so no auth needed, but client_id should resolve
         results = send_merge(

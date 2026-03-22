@@ -24,7 +24,7 @@ _TENANT_ID_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 if sys.platform == "win32":
     CACHE_PATH = data_dir() / "token-cache.json"
 else:
-    CACHE_PATH = Path.home() / ".mail-merge-token-cache.json"
+    CACHE_PATH = Path.home() / ".mergemail365-token-cache.json"
 
 
 def _load_cache() -> msal.SerializableTokenCache:

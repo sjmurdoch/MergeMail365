@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 if sys.platform == "win32":
     DEFAULT_PATH = data_dir() / "config.toml"
 else:
-    DEFAULT_PATH = Path.home() / ".mail-merge.toml"
+    DEFAULT_PATH = Path.home() / ".mergemail365.toml"
 
 
 def load_config(path: Path | None = None) -> dict[str, str]:

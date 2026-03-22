@@ -840,7 +840,7 @@ def create_app(
         nonlocal _cached_config
         if _cached_config is None:
             _cached_config = load_config()
-        return os.environ.get(f"MAIL_MERGE_{key.upper()}") or _cached_config.get(key)
+        return os.environ.get(f"MERGEMAIL365_{key.upper()}") or _cached_config.get(key)
 
     def _get_client_tenant() -> tuple[str | None, str]:
         client_id = session.get("client_id") or _get_config_value("client_id")

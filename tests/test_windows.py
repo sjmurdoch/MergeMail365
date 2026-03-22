@@ -23,7 +23,7 @@ class TestDataDir:
 
         monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\test\AppData\Local")
         result = data_dir()
-        assert str(result) == r"C:\Users\test\AppData\Local\mail-merge"
+        assert str(result) == r"C:\Users\test\AppData\Local\mergemail365"
 
     def test_falls_back_to_home(self, monkeypatch):
         from pathlib import Path
@@ -32,7 +32,7 @@ class TestDataDir:
 
         monkeypatch.delenv("LOCALAPPDATA", raising=False)
         result = data_dir()
-        assert result == Path.home() / "mail-merge"
+        assert result == Path.home() / "mergemail365"
 
 
 class TestWindowsDefaultPaths:

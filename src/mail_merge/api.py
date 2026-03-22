@@ -219,9 +219,9 @@ def send_merge(
         subject: Email subject (supports ``{{placeholders}}``).
         email_column: Column name containing email addresses.
         client_id: Azure AD application (client) ID. Resolved from env var
-            ``MAIL_MERGE_CLIENT_ID``, config file, if not provided.
+            ``MERGEMAIL365_CLIENT_ID``, config file, if not provided.
         tenant_id: Azure AD tenant ID. Resolved from env var
-            ``MAIL_MERGE_TENANT_ID``, config file, or defaults to ``"common"``.
+            ``MERGEMAIL365_TENANT_ID``, config file, or defaults to ``"common"``.
         sheet: Worksheet name (default: first sheet).
         test_email: Send one email to this address using first recipient's data,
             then return. Always sends regardless of ``send`` flag.
@@ -284,11 +284,11 @@ def send_merge(
     config = load_config()
 
     if not client_id:
-        client_id = os.environ.get("MAIL_MERGE_CLIENT_ID") or config.get("client_id")
+        client_id = os.environ.get("MERGEMAIL365_CLIENT_ID") or config.get("client_id")
 
     if not tenant_id:
         tenant_id = (
-            os.environ.get("MAIL_MERGE_TENANT_ID")
+            os.environ.get("MERGEMAIL365_TENANT_ID")
             or config.get("tenant_id")
             or "common"
         )
@@ -476,7 +476,7 @@ def send_merge(
         else:
             if not client_id:
                 raise RuntimeError(
-                    "--client-id is required (or set MAIL_MERGE_CLIENT_ID env var, "
+                    "--client-id is required (or set MERGEMAIL365_CLIENT_ID env var, "
                     f"or add to config file {_config.DEFAULT_PATH})"
                 )
             from mail_merge.auth import (
