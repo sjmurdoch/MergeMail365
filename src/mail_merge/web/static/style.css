@@ -458,6 +458,31 @@ details summary:hover {
 .auth-indicator .dot.green { background: #22c55e; }
 .auth-indicator .dot.gray { background: #9ca3af; }
 
+/* Auth message below sign-in button */
+.auth-message {
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 0.25rem;
+}
+.auth-message.success {
+    color: #166534;
+    background: #dcfce7;
+}
+.auth-message.error {
+    color: #991b1b;
+    background: #fee2e2;
+}
+.auth-message.info {
+    color: #1e40af;
+    background: #dbeafe;
+}
+@media (prefers-color-scheme: dark) {
+    .auth-message.success { color: #86efac; background: #14532d; }
+    .auth-message.error { color: #fca5a5; background: #7f1d1d; }
+    .auth-message.info { color: #93c5fd; background: #1e3a5f; }
+}
+
 /* Session timer */
 .session-timer {
     font-size: 0.75rem;

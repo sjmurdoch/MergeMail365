@@ -323,6 +323,19 @@ async function checkAuthStatus() {
     } catch (e) { /* ignore */ }
 }
 
+// Auth message below sign-in button
+function showAuthMessage(text, type) {
+    const el = $("auth-message");
+    el.textContent = text;
+    el.className = "auth-message " + type;
+    el.classList.remove("hidden");
+}
+
+function hideAuthMessage() {
+    const el = $("auth-message");
+    el.classList.add("hidden");
+}
+
 // Sign-in button state management
 let __desktopMode = false;
 let __signInPoll = null;  // interval ID for polling during sign-in
@@ -347,10 +360,13 @@ function updateSignInButton() {
     }
 }
 
-function cancelSignIn() {
+function cancelSignIn(reason) {
     if (__signInPoll) {
         clearInterval(__signInPoll);
         __signInPoll = null;
+    }
+    if (reason) {
+        showAuthMessage(reason, "error");
     }
     updateSignInButton();
 }
@@ -361,14 +377,17 @@ async function doSignOut() {
     btn.setAttribute("aria-busy", "true");
     try {
         await apiFetch("/auth/logout", { method: "POST" });
-    } catch (e) { /* ignore */ }
+        showAuthMessage("Signed out successfully.", "info");
+    } catch (e) {
+        showAuthMessage("Sign-out failed: " + e.message, "error");
+    }
     await checkAuthStatus();
 }
 
 $("btn-sign-in").addEventListener("click", async () => {
     // If currently waiting for sign-in, cancel it
     if (__signInPoll) {
-        cancelSignIn();
+        cancelSignIn("Sign-in cancelled.");
         return;
     }
 
@@ -379,10 +398,11 @@ $("btn-sign-in").addEventListener("click", async () => {
     }
 
     // Otherwise, start sign-in
+    hideAuthMessage();
     const clientId = $("client-id").value.trim();
     const tenantId = $("tenant-id").value.trim() || "common";
     if (!clientId) {
-        alert("Please enter a Client ID first.");
+        showAuthMessage("Please enter a Client ID first.", "error");
         return;
     }
 
@@ -401,8 +421,7 @@ $("btn-sign-in").addEventListener("click", async () => {
             __signInPoll = setInterval(async () => {
                 if (pollBusy) return;
                 if (Date.now() > deadline) {
-                    cancelSignIn();
-                    alert("Sign-in timed out. Please try again.");
+                    cancelSignIn("Sign-in timed out. Please try again.");
                     return;
                 }
                 pollBusy = true;
@@ -410,7 +429,10 @@ $("btn-sign-in").addEventListener("click", async () => {
                     const resp = await apiFetch("/auth/status");
                     const data = await resp.json();
                     if (data.authenticated) {
-                        cancelSignIn();
+                        clearInterval(__signInPoll);
+                        __signInPoll = null;
+                        updateSignInButton();
+                        showAuthMessage("Signed in successfully.", "success");
                         checkAuthStatus();
                     }
                 } catch (e) { /* ignore poll errors */ }
@@ -418,8 +440,7 @@ $("btn-sign-in").addEventListener("click", async () => {
             }, 2000);
             updateSignInButton();
         } catch (e) {
-            cancelSignIn();
-            alert("Failed to start interactive sign-in: " + e.message);
+            cancelSignIn("Failed to start sign-in: " + e.message);
         }
     } else {
         // Browser mode: redirect to auth login
@@ -1287,11 +1308,12 @@ function buildJobFormData(mode) {
 function handleAuthHash() {
     const hash = window.location.hash;
     if (hash.startsWith("#auth-success")) {
+        showAuthMessage("Signed in successfully.", "success");
         checkAuthStatus();
         history.replaceState(null, "", window.location.pathname + window.location.search);
     } else if (hash.startsWith("#auth-error=")) {
         const error = decodeURIComponent(hash.substring("#auth-error=".length));
-        alert("Authentication error: " + error);
+        showAuthMessage("Sign-in failed: " + error, "error");
         history.replaceState(null, "", window.location.pathname + window.location.search);
     }
 }
