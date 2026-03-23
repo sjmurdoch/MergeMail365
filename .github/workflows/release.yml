@@ -14,13 +14,8 @@ jobs:
         include:
           - os: macos-latest
             artifact: MergeMail365-macOS.zip
-            build_cmd: >-
-              cd dist &&
-              ditto -c -k --sequesterRsrc --keepParent MergeMail365.app MergeMail365-macOS.zip
           - os: windows-latest
             artifact: MergeMail365-Windows.zip
-            build_cmd: >-
-              Compress-Archive -Path dist\mergemail365 -DestinationPath dist\MergeMail365-Windows.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -54,9 +49,14 @@ jobs:
           MERGEMAIL365_TENANT_ID: ${{ secrets.MERGEMAIL365_TENANT_ID }}
         run: uv run pyinstaller mergemail365.spec
 
-      - name: Archive bundle
-        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
-        run: ${{ matrix.build_cmd }}
+      - name: Archive bundle (macOS)
+        if: runner.os == 'macOS'
+        run: cd dist && ditto -c -k --sequesterRsrc --keepParent MergeMail365.app MergeMail365-macOS.zip
+
+      - name: Archive bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\mergemail365 -DestinationPath dist\MergeMail365-Windows.zip
 
       - name: Upload release asset
         env:
