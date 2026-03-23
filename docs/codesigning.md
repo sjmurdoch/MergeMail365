@@ -27,6 +27,46 @@ codesign --deep --force --options runtime \
 codesign --verify --deep --strict dist/MergeMail365.app
 ```
 
+### Self-signing (no Apple Developer account)
+
+If you don't have an Apple Developer account, you can create a self-signed certificate for local use. This avoids the "app is damaged" error for unsigned apps, but users will still see a Gatekeeper warning on first launch (they must right-click > Open, or allow it in System Settings > Privacy & Security). Notarization is not possible with self-signed certificates.
+
+```bash
+# Create a self-signed certificate in the login keychain
+# (Keychain Access > Certificate Assistant > Create a Certificate can also do this)
+security create-identity-preference -s "MergeMail365" -c "MergeMail365 Self-Signed"
+
+# Or via the command line: create a self-signed code signing certificate
+cat > /tmp/cert.cfg <<EOF
+[ req ]
+distinguished_name = req_dn
+prompt = no
+[ req_dn ]
+CN = MergeMail365 Self-Signed
+[ ext ]
+keyUsage = digitalSignature
+extendedKeyUsage = codeSigning
+basicConstraints = CA:false
+EOF
+
+# Generate key and certificate, import into login keychain
+openssl req -x509 -newkey rsa:2048 -keyout /tmp/ss-key.pem -out /tmp/ss-cert.pem \
+  -days 365 -nodes -config /tmp/cert.cfg -extensions ext
+openssl pkcs12 -export -out /tmp/ss-cert.p12 -inkey /tmp/ss-key.pem -in /tmp/ss-cert.pem -passout pass:
+security import /tmp/ss-cert.p12 -k ~/Library/Keychains/login.keychain-db -P "" -T /usr/bin/codesign
+rm /tmp/cert.cfg /tmp/ss-key.pem /tmp/ss-cert.pem /tmp/ss-cert.p12
+
+# Sign the app with the self-signed certificate
+codesign --deep --force --sign "MergeMail365 Self-Signed" dist/MergeMail365.app
+
+# Verify
+codesign --verify --deep dist/MergeMail365.app
+```
+
+To run the self-signed app on another Mac, the user must either:
+- Right-click the app > **Open** (bypasses Gatekeeper for that app once), or
+- Go to **System Settings > Privacy & Security** and click **Open Anyway** after the first blocked launch
+
 ### Notarization
 
 Apple requires notarization for apps distributed outside the App Store. After signing:
@@ -180,6 +220,48 @@ signtool verify /pa dist\mergemail365\mergemail365.exe
 ```
 
 The `/tr` flag adds an RFC 3161 timestamp so the signature remains valid after the certificate expires.
+
+### Self-signing (no CA certificate)
+
+If you don't have a CA-issued certificate, you can create a self-signed certificate for local testing or internal distribution. Self-signed certificates will still trigger SmartScreen warnings for external users (Windows doesn't trust them by default), but they are useful for:
+
+- Development and testing
+- Internal distribution where you can install the certificate on target machines
+- Verifying that the signing process works before purchasing a CA certificate
+
+```powershell
+# Create a self-signed code signing certificate (PowerShell, run as Administrator)
+$cert = New-SelfSignedCertificate `
+  -Subject "CN=MergeMail365 Self-Signed" `
+  -Type CodeSigningCert `
+  -CertStoreLocation Cert:\CurrentUser\My `
+  -NotAfter (Get-Date).AddYears(3)
+
+# Export to .pfx for reuse (optional)
+$password = ConvertTo-SecureString -String "YourPassword" -Force -AsPlainText
+Export-PfxCertificate -Cert $cert -FilePath certificate.pfx -Password $password
+
+# Sign the exe
+signtool sign /fd sha256 /sha1 $cert.Thumbprint dist\mergemail365\mergemail365.exe
+
+# Verify
+signtool verify /pa dist\mergemail365\mergemail365.exe
+```
+
+To suppress SmartScreen warnings on target machines, install the certificate into the **Trusted Publishers** store:
+
+```powershell
+# On the target machine (run as Administrator)
+Import-PfxCertificate -FilePath certificate.pfx -CertStoreLocation Cert:\LocalMachine\TrustedPublisher -Password $password
+
+# Or import just the public certificate (no private key needed on target machines)
+# First export the public cert:
+Export-Certificate -Cert $cert -FilePath mergemail365.cer
+# Then on the target machine:
+Import-Certificate -FilePath mergemail365.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+This is practical for managed environments (e.g. deploying via Group Policy) but not for public distribution.
 
 ### Cloud signing (EV certificates)
 
