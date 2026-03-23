@@ -1,25 +1,74 @@
 # Code Signing
 
-This documents how to sign the MergeMail365 bundles so users don't see OS security warnings (macOS Gatekeeper / Windows SmartScreen).
+This documents how to sign the MergeMail365 PyInstaller bundles so users don't see OS security warnings (macOS Gatekeeper / Windows SmartScreen).
 
 ## macOS
 
 ### Prerequisites
 
+For full distribution (no Gatekeeper warnings):
 - An [Apple Developer Program](https://developer.apple.com/programs/) membership ($99/year)
 - A **Developer ID Application** certificate from the [Apple Developer portal](https://developer.apple.com/account/resources/certificates/list)
 - An [app-specific password](https://support.apple.com/en-us/102654) for your Apple ID (used for notarization)
 
-### Local signing
+### Entitlements
 
-If you have the certificate in your keychain:
+PyInstaller apps running Python need specific hardened runtime entitlements. MergeMail365 also uses pywebview (WKWebView), which requires network client access even for local content because WKWebView uses an out-of-process renderer.
+
+Create `entitlements.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>
+```
+
+What each entitlement does:
+- `allow-jit` -- Python uses JIT-like dynamic code execution
+- `allow-unsigned-executable-memory` -- **required for PyInstaller**; Python relies on dynamic code generation and the hardened runtime will kill the process without this
+- `disable-library-validation` -- allows loading bundled `.dylib`/`.so` files that aren't signed with the same Team ID (PyInstaller bundles libraries from many sources)
+- `network.client` -- **required for pywebview/WKWebView** even when only loading local content
+
+Do not put comments in the entitlements plist file -- recent macOS versions and the notary service are strict about this.
+
+### PyInstaller built-in signing
+
+PyInstaller can sign during the build via the spec file or command-line flags. When `codesign_identity` is set, PyInstaller automatically enables hardened runtime and signs all collected binaries, the executable, and the `.app` bundle (with `--deep`).
+
+In `mergemail365.spec`, set on the `EXE()` call:
+```python
+codesign_identity='Developer ID Application: Your Name (TEAMID)',
+entitlements_file='entitlements.plist',
+```
+
+Or pass command-line flags:
+```bash
+uv run pyinstaller --codesign-identity "Developer ID Application: Your Name (TEAMID)" \
+  --osx-entitlements-file entitlements.plist mergemail365.spec
+```
+
+### Post-build signing
+
+If you prefer to sign after building (e.g., in CI where the spec file doesn't have the identity):
 
 ```bash
 # Build the app
 uv run pyinstaller mergemail365.spec
 
-# Sign with hardened runtime (required for notarization)
-codesign --deep --force --options runtime \
+# Sign with hardened runtime and entitlements
+codesign --deep --force --options runtime --timestamp \
+  --entitlements entitlements.plist \
   --sign "Developer ID Application: Your Name (TEAMID)" \
   dist/MergeMail365.app
 
@@ -27,16 +76,31 @@ codesign --deep --force --options runtime \
 codesign --verify --deep --strict dist/MergeMail365.app
 ```
 
-### Self-signing (no Apple Developer account)
+Apple recommends signing inside-out (inner binaries first, then the bundle), but `--deep` is required for PyInstaller bundles because all the bundled Python libraries need to be signed. The `--timestamp` flag is required for notarization.
 
-If you don't have an Apple Developer account, you can create a self-signed certificate for local use. This avoids the "app is damaged" error for unsigned apps, but users will still see a Gatekeeper warning on first launch (they must right-click > Open, or allow it in System Settings > Privacy & Security). Notarization is not possible with self-signed certificates.
+### Ad-hoc signing
+
+PyInstaller ad-hoc signs all binaries by default (mandatory on Apple Silicon). Ad-hoc signing is sufficient for running on the machine where the app was built, but apps will be blocked by Gatekeeper when transferred to another Mac.
 
 ```bash
-# Create a self-signed certificate in the login keychain
-# (Keychain Access > Certificate Assistant > Create a Certificate can also do this)
-security create-identity-preference -s "MergeMail365" -c "MergeMail365 Self-Signed"
+# Ad-hoc sign (no identity needed)
+codesign -s - --force --deep dist/MergeMail365.app
 
-# Or via the command line: create a self-signed code signing certificate
+# Ad-hoc with hardened runtime (useful for testing entitlements locally)
+codesign -s - --force --deep --options runtime \
+  --entitlements entitlements.plist dist/MergeMail365.app
+```
+
+### Self-signing
+
+Self-signed certificates do **not** work with hardened runtime on macOS. When PyInstaller enables hardened runtime (which it does automatically with `codesign_identity`), self-signed certificates cause shared libraries to fail to load with: *"code signature not valid for use in process using Library Validation: mapped file has no Team ID"*.
+
+Self-signed certificates also cannot be notarized (Apple requires Developer ID). For local testing, ad-hoc signing (`codesign -s -`) is simpler and equally effective. For distribution, you need a paid Apple Developer account.
+
+If you still want a self-signed certificate (e.g., for signing **without** hardened runtime):
+
+```bash
+# Create a self-signed code signing certificate via openssl
 cat > /tmp/cert.cfg <<EOF
 [ req ]
 distinguished_name = req_dn
@@ -49,33 +113,27 @@ extendedKeyUsage = codeSigning
 basicConstraints = CA:false
 EOF
 
-# Generate key and certificate, import into login keychain
 openssl req -x509 -newkey rsa:2048 -keyout /tmp/ss-key.pem -out /tmp/ss-cert.pem \
   -days 365 -nodes -config /tmp/cert.cfg -extensions ext
 openssl pkcs12 -export -out /tmp/ss-cert.p12 -inkey /tmp/ss-key.pem -in /tmp/ss-cert.pem -passout pass:
 security import /tmp/ss-cert.p12 -k ~/Library/Keychains/login.keychain-db -P "" -T /usr/bin/codesign
 rm /tmp/cert.cfg /tmp/ss-key.pem /tmp/ss-cert.pem /tmp/ss-cert.p12
 
-# Sign the app with the self-signed certificate
+# Sign WITHOUT hardened runtime (--options runtime must be omitted)
 codesign --deep --force --sign "MergeMail365 Self-Signed" dist/MergeMail365.app
-
-# Verify
-codesign --verify --deep dist/MergeMail365.app
 ```
 
-To run the self-signed app on another Mac, the user must either:
-- Right-click the app > **Open** (bypasses Gatekeeper for that app once), or
-- Go to **System Settings > Privacy & Security** and click **Open Anyway** after the first blocked launch
+To run the self-signed app on another Mac, the user must right-click > **Open** or allow it in **System Settings > Privacy & Security**.
 
 ### Notarization
 
-Apple requires notarization for apps distributed outside the App Store. After signing:
+Apple requires notarization for apps distributed outside the App Store. After signing with a Developer ID certificate:
 
 ```bash
 # Create a zip for submission
 ditto -c -k --sequesterRsrc --keepParent dist/MergeMail365.app dist/MergeMail365-notarize.zip
 
-# Submit for notarization (uses app-specific password, not your main Apple ID password)
+# Submit for notarization (uses notarytool, NOT the deprecated altool)
 xcrun notarytool submit dist/MergeMail365-notarize.zip \
   --apple-id "your@email.com" \
   --password "app-specific-password" \
@@ -88,6 +146,12 @@ xcrun stapler staple dist/MergeMail365.app
 # Clean up
 rm dist/MergeMail365-notarize.zip
 ```
+
+Common notarization failures with PyInstaller:
+- Unsigned binaries inside the bundle (particularly `.dylib` from third-party packages)
+- Missing `--timestamp` flag during signing
+- Missing hardened runtime (`--options runtime`)
+- Entitlements not applied
 
 ### CI signing (GitHub Actions)
 
@@ -155,22 +219,19 @@ Add these steps to `.github/workflows/release.yml`:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
         run: |
-          # Sign all binaries inside the app bundle
-          codesign --deep --force --options runtime \
+          codesign --deep --force --options runtime --timestamp \
+            --entitlements entitlements.plist \
             --sign "$CODESIGN_IDENTITY" \
             dist/MergeMail365.app
 
-          # Create zip for notarization
           ditto -c -k --sequesterRsrc --keepParent dist/MergeMail365.app dist/MergeMail365-notarize.zip
 
-          # Submit for notarization
           xcrun notarytool submit dist/MergeMail365-notarize.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PWD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
 
-          # Staple the notarization ticket to the app
           xcrun stapler staple dist/MergeMail365.app
           rm dist/MergeMail365-notarize.zip
 ```
@@ -189,45 +250,58 @@ Add these steps to `.github/workflows/release.yml`:
 ### macOS notes
 
 - `--options runtime` enables the hardened runtime, which is required for notarization.
-- `--deep` signs all nested binaries (frameworks, dylibs) inside the `.app` bundle. For more control, you can sign individual binaries first and the app last.
+- `--deep` signs all nested binaries (frameworks, dylibs) inside the `.app` bundle. Apple recommends signing inside-out, but `--deep` is required for PyInstaller bundles because there can be hundreds of collected binaries.
+- `--timestamp` is required for notarization. Without it, the submission will be rejected.
 - Notarization typically takes 1-5 minutes. `--wait` blocks until Apple's service returns a result.
-- The `stapler staple` step embeds the notarization ticket in the app so it works offline (without Apple's servers needing to be reachable at launch).
+- The `stapler staple` step embeds the notarization ticket in the app so it works offline.
+- `--onedir` mode (which our spec uses via `COLLECT`) is strongly recommended over `--onefile` for signed/notarized apps. Onefile bundles cannot be post-signed (embedded binaries are inaccessible) and are incompatible with sandboxing.
+- If signing fails with `"no cdhash, completely unsigned?"`, ensure you're using `--force` to replace PyInstaller's default ad-hoc signatures.
 
 ## Windows
 
 ### Prerequisites
 
-A code signing certificate from a Certificate Authority (CA). Two types:
+`signtool.exe` from the [Windows SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/) (only the "Signing Tools for Desktop Apps" component is needed). Add it to your PATH or reference it absolutely from `C:\Program Files (x86)\Windows Kits\10\bin\10.0.xxxxx.0\x64\signtool.exe`.
 
-- **OV (Organization Validation)** -- identifies your organisation. Builds SmartScreen reputation over time. Issued as a `.pfx` file.
-- **EV (Extended Validation)** -- immediate SmartScreen trust (no reputation-building period). Since June 2023, CAs issue EV certificates on hardware security modules (HSMs) or cloud signing services, not as `.pfx` files.
+For public distribution, a code signing certificate from a CA:
+
+- **OV (Organization Validation)** -- identifies your organisation. Builds SmartScreen reputation over time. Since June 2023, CAs may require hardware-backed key storage even for OV.
+- **EV (Extended Validation)** -- higher initial SmartScreen trust (though as of March 2024, EV no longer *instantly* bypasses SmartScreen). Private key lives on a hardware token or cloud HSM.
 
 Common CAs: DigiCert, Sectigo, SSL.com, GlobalSign.
 
 ### Local signing
 
-With a certificate in a `.pfx` file (OV certificates):
+With a certificate in a `.pfx` file:
 
 ```powershell
 # Build
 uv run pyinstaller mergemail365.spec
 
-# Sign the exe (signtool is part of the Windows SDK)
-signtool sign /f certificate.pfx /p PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 dist\mergemail365\mergemail365.exe
+# Sign the exe and all DLLs in the output directory
+signtool sign /f certificate.pfx /p PASSWORD `
+  /fd sha256 /tr http://timestamp.digicert.com /td sha256 `
+  dist\mergemail365\mergemail365.exe
+
+# Optionally sign bundled DLLs (recommended for Smart App Control)
+signtool sign /f certificate.pfx /p PASSWORD `
+  /fd sha256 /tr http://timestamp.digicert.com /td sha256 `
+  dist\mergemail365\*.dll dist\mergemail365\*.pyd
 
 # Verify
 signtool verify /pa dist\mergemail365\mergemail365.exe
 ```
 
-The `/tr` flag adds an RFC 3161 timestamp so the signature remains valid after the certificate expires.
+Key flags:
+- `/f` -- path to the PFX certificate file
+- `/p` -- certificate password
+- `/fd sha256` -- digest algorithm (always use SHA256; SHA1 is deprecated)
+- `/tr` -- RFC 3161 timestamp server URL (essential -- without it, the signature becomes invalid when the certificate expires)
+- `/td sha256` -- timestamp digest algorithm
 
 ### Self-signing (no CA certificate)
 
-If you don't have a CA-issued certificate, you can create a self-signed certificate for local testing or internal distribution. Self-signed certificates will still trigger SmartScreen warnings for external users (Windows doesn't trust them by default), but they are useful for:
-
-- Development and testing
-- Internal distribution where you can install the certificate on target machines
-- Verifying that the signing process works before purchasing a CA certificate
+Self-signed certificates are useful for validating your signing pipeline before purchasing a CA certificate, and for internal distribution where you control target machines. They will still show "Unknown Publisher" SmartScreen warnings for external users.
 
 ```powershell
 # Create a self-signed code signing certificate (PowerShell, run as Administrator)
@@ -235,29 +309,34 @@ $cert = New-SelfSignedCertificate `
   -Subject "CN=MergeMail365 Self-Signed" `
   -Type CodeSigningCert `
   -CertStoreLocation Cert:\CurrentUser\My `
+  -KeyExportPolicy Exportable `
+  -HashAlgorithm SHA256 `
+  -KeyLength 2048 `
+  -KeyUsageProperty Sign `
+  -KeyUsage CertSign `
   -NotAfter (Get-Date).AddYears(3)
 
-# Export to .pfx for reuse (optional)
+# Export to .pfx for reuse
 $password = ConvertTo-SecureString -String "YourPassword" -Force -AsPlainText
-Export-PfxCertificate -Cert $cert -FilePath certificate.pfx -Password $password
+Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" `
+  -FilePath certificate.pfx -Password $password
 
 # Sign the exe
-signtool sign /fd sha256 /sha1 $cert.Thumbprint dist\mergemail365\mergemail365.exe
+signtool sign /f certificate.pfx /p YourPassword `
+  /fd sha256 /tr http://timestamp.digicert.com /td sha256 `
+  dist\mergemail365\mergemail365.exe
 
 # Verify
 signtool verify /pa dist\mergemail365\mergemail365.exe
 ```
 
-To suppress SmartScreen warnings on target machines, install the certificate into the **Trusted Publishers** store:
+To suppress SmartScreen warnings on managed target machines, install the certificate into the **Trusted Publishers** store:
 
 ```powershell
-# On the target machine (run as Administrator)
-Import-PfxCertificate -FilePath certificate.pfx -CertStoreLocation Cert:\LocalMachine\TrustedPublisher -Password $password
+# Export the public certificate (no private key)
+Export-Certificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath mergemail365.cer
 
-# Or import just the public certificate (no private key needed on target machines)
-# First export the public cert:
-Export-Certificate -Cert $cert -FilePath mergemail365.cer
-# Then on the target machine:
+# On the target machine (run as Administrator)
 Import-Certificate -FilePath mergemail365.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
 ```
 
@@ -265,13 +344,10 @@ This is practical for managed environments (e.g. deploying via Group Policy) but
 
 ### Cloud signing (EV certificates)
 
-EV certificates are typically stored on a cloud HSM. The exact signing command depends on the provider:
+Since June 2023, code signing private keys must be stored on FIPS 140-2 Level 3 hardware. For CI/CD, this means cloud HSM services.
 
-**SSL.com eSigner:**
+**SSL.com eSigner** (only file hashes are sent to SSL.com; your code never leaves the CI runner):
 ```powershell
-# Install eSigner CodeSignTool
-# https://www.ssl.com/guide/esigner-codesigntool-command-guide/
-
 CodeSignTool sign ^
   -username "your@email.com" ^
   -password "password" ^
@@ -280,9 +356,8 @@ CodeSignTool sign ^
   -override
 ```
 
-**DigiCert KeyLocker:**
+**DigiCert KeyLocker** (registers as a Windows KSP, so standard signtool works):
 ```powershell
-# Configure via environment variables
 smctl sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 ^
   /input "dist\mergemail365\mergemail365.exe"
 ```
@@ -314,17 +389,22 @@ Store the certificate as a base64-encoded GitHub secret and decode it at build t
           $certPath = "$env:RUNNER_TEMP\certificate.pfx"
           [IO.File]::WriteAllBytes($certPath, $certBytes)
 
-          & signtool sign /f $certPath /p $env:WINDOWS_CERTIFICATE_PWD `
-            /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
-            dist\mergemail365\mergemail365.exe
+          # Sign the main exe and all DLLs
+          Get-ChildItem dist\mergemail365\*.exe, dist\mergemail365\*.dll, dist\mergemail365\*.pyd |
+            ForEach-Object {
+              & signtool sign /f $certPath /p $env:WINDOWS_CERTIFICATE_PWD `
+                /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
+                $_.FullName
+            }
 
           Remove-Item $certPath
 ```
 
 #### Option B: EV certificate (cloud HSM)
 
-EV certificates can't be exported as `.pfx` files. Use the CA's GitHub Action or CLI tool instead. For example, with SSL.com:
+EV certificates can't be exported as `.pfx` files. Use the CA's GitHub Action instead.
 
+**SSL.com:**
 ```yaml
       - name: Sign executable (Windows, EV)
         if: runner.os == 'Windows'
@@ -338,11 +418,48 @@ EV certificates can't be exported as `.pfx` files. Use the CA's GitHub Action or
           override: true
 ```
 
-Other CAs have similar integrations (DigiCert KeyLocker has `digicert/cloud-sign-action`, etc.).
+**DigiCert KeyLocker** (use `digicert/code-signing-software-trust-action@v1.0.0`; the older `digicert/ssm-code-signing@v1.1.1` is deprecated, end-of-life May 2026).
+
+### Windows Defender and SmartScreen issues
+
+PyInstaller executables commonly trigger antivirus false positives and SmartScreen warnings. This is because PyInstaller's bootloader binary is shared by all PyInstaller apps (including malware), so antivirus heuristics flag the pattern.
+
+**Mitigations (in order of effectiveness):**
+
+1. **Code sign with a CA-issued certificate** -- the most important step.
+
+2. **Sign all binaries, not just the exe** -- sign `.dll` and `.pyd` files in `dist\mergemail365\` too. Windows 11 Smart App Control checks all loaded binaries, not just the main executable. This is why the CI workflow above signs everything.
+
+3. **Recompile PyInstaller's bootloader from source** -- creates a unique binary hash, avoiding pattern-matching:
+   ```bash
+   cd <pyinstaller-source>/bootloader
+   python ./waf all
+   cd ..
+   python setup.py install
+   ```
+
+4. **Submit false positives to Microsoft** -- upload your exe at https://www.microsoft.com/en-us/wdsi/filesubmission. Microsoft typically responds within hours.
+
+5. **Submit to VirusTotal** -- upload at https://www.virustotal.com, then report false positives to each flagging vendor.
 
 ### Windows notes
 
-- **SmartScreen reputation**: OV-signed binaries still trigger SmartScreen warnings until they build enough download reputation. EV certificates bypass this entirely.
+- **SmartScreen reputation**: OV-signed binaries trigger SmartScreen warnings until they build download reputation (weeks to months). As of March 2024, EV certificates also no longer *instantly* bypass SmartScreen, though they start with higher trust.
 - **Timestamping** (`/tr`) is essential -- without it, the signature becomes invalid when the certificate expires.
-- **What to sign**: Sign `mergemail365.exe` inside the `dist\mergemail365\` directory before creating the zip archive. You can also sign bundled `.dll` files for completeness, but the `.exe` is what Windows checks.
+- **Sign before archiving**: Sign all binaries inside `dist\mergemail365\` before creating the zip in the release workflow.
+- **`--onefile` vs `--onedir`**: Our spec uses `--onedir` (via `COLLECT`). This is important because `--onefile` embeds DLLs that are extracted unsigned at runtime, which Smart App Control blocks. With `--onedir`, you can sign every binary individually.
 - **Cost**: OV certificates are ~$70-200/year. EV certificates are ~$300-600/year. Some CAs offer open-source discounts.
+- **pywebview**: On Windows, pywebview uses Edge WebView2, which is already signed by Microsoft and requires no additional signing steps.
+
+## References
+
+- [PyInstaller Feature Notes: Code Signing](https://pyinstaller.org/en/stable/feature-notes.html)
+- [PyInstaller Wiki: Recipe OSX Code Signing](https://github.com/pyinstaller/pyinstaller/wiki/Recipe-OSX-Code-Signing)
+- [PyInstaller Wiki: Recipe Win Code Signing](https://github.com/pyinstaller/pyinstaller/wiki/Recipe-Win-Code-Signing)
+- [txoof's OS X Code Signing PyInstaller Guide](https://gist.github.com/txoof/0636835d3cc65245c6288b2374799c43)
+- [Signing and Notarizing a Python macOS UI Application (haim.dev)](https://haim.dev/posts/2020-08-08-python-macos-app)
+- [Automate PyInstaller Builds and Code Signing on Windows](https://johanneskinzig.com/automating-pyinstaller-builds-and-code-signing-with-powershell.html)
+- [Self-sign a Windows Executable (GitHub Gist)](https://gist.github.com/PaulCreusy/7fade8d5a8026f2228a97d31343b335e)
+- [PyInstaller Issue #6747: Sign files for Smart App Control](https://github.com/pyinstaller/pyinstaller/issues/6747)
+- [Apple: Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime)
+- [Apple: WKWebView requires network.client entitlement](https://developer.apple.com/forums/thread/116359)
