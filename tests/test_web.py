@@ -1226,3 +1226,64 @@ class TestDesktopMode:
         resp = desktop_client.get("/api/config")
         data = resp.get_json()
         assert data["desktop_mode"] is True
+
+
+class TestLogPath:
+    """Tests for the /api/log-path route."""
+
+    def test_log_path_returns_path(self, web_client):
+        """/api/log-path returns a path and exists flag."""
+        resp = web_client.get("/api/log-path")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "path" in data
+        assert "exists" in data
+        assert isinstance(data["exists"], bool)
+        assert data["path"].endswith("mergemail365.log")
+
+
+class TestDebugLogging:
+    """Tests that API error paths produce debug log records with tracebacks."""
+
+    def test_upload_bad_file_logs_debug(self, web_client, tmp_path, caplog):
+        """Upload a corrupt xlsx triggers debug log with traceback."""
+        csrf = get_csrf(web_client)
+        bad = tmp_path / "bad.xlsx"
+        bad.write_bytes(b"not a real spreadsheet")
+
+        with caplog.at_level("DEBUG", logger="mail_merge.web.app"):
+            with open(bad, "rb") as f:
+                resp = web_client.post(
+                    "/api/upload-spreadsheet",
+                    data={"spreadsheet": (f, "bad.xlsx")},
+                    headers={"X-CSRF-Token": csrf},
+                    content_type="multipart/form-data",
+                )
+        assert resp.status_code == 400
+        debug_records = [r for r in caplog.records if r.levelname == "DEBUG" and r.exc_info]
+        assert len(debug_records) >= 1
+        assert "read_preview" in debug_records[0].message
+
+    def test_get_recipients_bad_column_logs_debug(self, web_client, sample_xlsx_web, caplog):
+        """get-recipients with invalid column triggers debug log."""
+        csrf = get_csrf(web_client)
+
+        # Upload a valid spreadsheet first
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+
+        with caplog.at_level("DEBUG", logger="mail_merge.web.app"):
+            resp = web_client.post(
+                "/api/get-recipients",
+                data={"email_column": "nonexistent_column"},
+                headers={"X-CSRF-Token": csrf},
+            )
+        assert resp.status_code == 400
+        debug_records = [r for r in caplog.records if r.levelname == "DEBUG" and r.exc_info]
+        assert len(debug_records) >= 1
+        assert "get-recipients" in debug_records[0].message

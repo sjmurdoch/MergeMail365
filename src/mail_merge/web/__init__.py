@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--client-id", default="", help="Azure AD client ID (pre-fills and locks the field in the UI)")
     parser.add_argument("--tenant-id", default="", help="Azure AD tenant ID (pre-fills and locks the field in the UI)")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
+    parser.add_argument("--log-file", action="store_true", help="Enable debug logging to a file")
     args = parser.parse_args(argv)
 
     setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
@@ -43,6 +44,15 @@ def main(argv: list[str] | None = None) -> None:
 
     # Auto-enable desktop mode when running as a PyInstaller bundle
     is_bundled = getattr(sys, "frozen", False)
+
+    # Always enable file logging in bundled mode (no stderr visible),
+    # or when explicitly requested.
+    if is_bundled or args.log_file or args.log_level.upper() == "DEBUG":
+        from mail_merge.console import setup_file_logging
+        log_file = setup_file_logging()
+        if log_file:
+            logger.info("Log file: %s", log_file)
+
     desktop = args.desktop or is_bundled
 
     if desktop:

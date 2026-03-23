@@ -91,6 +91,7 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 - **Safety limits:** 99-recipient cap (enforced server-side), fixed 2s send delay, mandatory test email and dry run steps, "SEND" confirmation typing.
 - **Session:** Startup token (like Jupyter) for access control. CSRF token on all POST routes. 24-hour session lifetime with sliding window. Server-side state persistence (`/api/state`) + client-side localStorage auto-save.
 - **Preview:** Client-side template rendering in JS for immediate feedback. Server-side `/api/get-recipients` handles email validation and filtering. Server-side `/api/preview-template` available for placeholder validation.
+- **Logging:** Console logging via RichHandler on stderr (level controlled by `--log-level`, default INFO). Optional file logging via `RotatingFileHandler` (5 MB, 3 backups) at DEBUG level — always enabled in PyInstaller bundles (no stderr visible), or opt-in via `--log-file` or `--log-level DEBUG`. Log file location is platform-specific: `~/Library/Logs/mergemail365/mergemail365.log` on macOS, `%LOCALAPPDATA%/mergemail365/logs/mergemail365.log` on Windows. All API error paths (`upload-spreadsheet`, `get-recipients`, `start-job`, background job) log exceptions at DEBUG with full tracebacks via `logger.debug(..., exc_info=True)`. `GET /api/log-path` returns the log file path for discoverability. Setup in `console.py:setup_file_logging()`, path resolution in `_paths.py:log_dir()`.
 
 **Routes:**
 
@@ -111,6 +112,7 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 | `/api/job/<id>/events` | GET | SSE stream of log + completion events |
 | `/api/job/<id>/status` | GET | Job status + results (poll fallback) |
 | `/api/job/<id>/stop` | POST | Request graceful stop |
+| `/api/log-path` | GET | Log file path + exists flag (for troubleshooting) |
 
 **Design plan:** `docs/web-ui-plan.md` contains the full design document with implementation status, security assessment, and deferred features.
 

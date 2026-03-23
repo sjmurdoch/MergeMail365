@@ -61,6 +61,8 @@ All core features from this plan have been implemented. The implementation close
 
 **Dead CSS removed:** `.collapsible-header`, `.collapsible-content`, `.collapsible-content.open`, `.badge-info`, `.badge-success`, `.badge-danger`, and `.dot.red` were unused and removed from `style.css`.
 
+**Debug file logging:** Not in original plan. Added `setup_file_logging()` in `console.py` with a `RotatingFileHandler` (5 MB, 3 backups, DEBUG level). Always enabled in PyInstaller bundles (no stderr), opt-in via `--log-file` or `--log-level DEBUG` otherwise. Platform-specific log directories via `_paths.py:log_dir()` (`~/Library/Logs/mergemail365/` on macOS, `%LOCALAPPDATA%/mergemail365/logs/` on Windows). All API error paths in `app.py` now log exceptions at DEBUG with `exc_info=True` for full tracebacks. `GET /api/log-path` returns the log file location for discoverability.
+
 ### Not Implemented (deferred)
 
 **Searchable recipient table in Preview step:** The recipients table in Step 2 is not searchable. For the 99-recipient cap this is acceptable — all recipients are visible by scrolling.

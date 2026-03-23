@@ -460,6 +460,7 @@ def create_app(
         try:
             columns, rows, sheets, total_rows = read_preview(filepath)
         except Exception as exc:
+            logger.debug("upload-spreadsheet: read_preview failed", exc_info=True)
             shutil.rmtree(tmp_dir, ignore_errors=True)
             _unregister_temp_dir(tmp_dir)
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
@@ -501,6 +502,7 @@ def create_app(
             if filters:
                 recipients = apply_filters(recipients, filters)
         except Exception as exc:
+            logger.debug("get-recipients failed", exc_info=True)
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
 
         if not recipients:
@@ -582,6 +584,7 @@ def create_app(
                 sheet=data.get("sheet"), filters=filters_list,
             )
         except Exception as exc:
+            logger.debug("start-job: recipient validation failed", exc_info=True)
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
         if count > MAX_WEB_RECIPIENTS:
             return jsonify({
@@ -693,6 +696,7 @@ def create_app(
                     "data": {"message": "Job completed"},
                 })
             except Exception as exc:
+                logger.debug("send_merge job failed", exc_info=True)
                 job.error = str(exc)
                 job.status = JobStatus.FAILED
                 job.events.put({
@@ -760,6 +764,17 @@ def create_app(
             return jsonify({"error": "Job not found"}), 404  # type: ignore[return-value]
         job.stop_requested = True
         return jsonify({"message": "Stop requested"})
+
+    # ----- Diagnostics -----
+
+    @app.route("/api/log-path")
+    def api_log_path() -> Response:
+        from mail_merge._paths import log_dir
+        log_file = log_dir() / "mergemail365.log"
+        return jsonify({
+            "path": str(log_file),
+            "exists": log_file.exists(),
+        })
 
     # ----- Helpers -----
 

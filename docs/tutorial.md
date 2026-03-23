@@ -511,7 +511,57 @@ By default, the first sheet is used.
 5. **Review report** — check console summary or `--output report.csv`
 6. **Resume if needed** — re-run the same command (resume is automatic with `--output`)
 
-## 10. Python API
+## 10. Logging and troubleshooting
+
+### CLI logging
+
+Control console log verbosity with `--log-level`:
+
+```bash
+uv run mergemail365 --log-level DEBUG ...
+uv run mergemail365-web --log-level DEBUG
+```
+
+### Web UI and desktop app logging
+
+The web UI and desktop app support logging to a file. This is especially useful for the standalone desktop app (PyInstaller bundle), where there is no terminal to see console output.
+
+**When file logging is enabled:**
+
+| Scenario | File logging |
+|---|---|
+| **Desktop app (PyInstaller bundle)** | Always on automatically |
+| `mergemail365-web --log-file` | On (explicit opt-in) |
+| `mergemail365-web --log-level DEBUG` | On (enabled with debug level) |
+| `mergemail365-web` (default) | Off |
+
+**Log file locations:**
+
+| Platform | Path |
+|---|---|
+| **macOS** | `~/Library/Logs/mergemail365/mergemail365.log` |
+| **Windows** | `%LOCALAPPDATA%\mergemail365\logs\mergemail365.log` |
+| **Linux** | `~/.local/state/mergemail365/log/mergemail365.log` |
+
+On macOS, the log directory is indexed by Console.app — open Console and search for "mergemail365". On Windows, open File Explorer and paste `%LOCALAPPDATA%\mergemail365\logs` into the address bar.
+
+The log file rotates automatically at 5 MB with 3 backups (20 MB maximum disk usage).
+
+**File logging always captures at DEBUG level**, regardless of the console log level. This means that even with default INFO console output, the file will contain full details including exception tracebacks from API errors.
+
+**Finding the log file path programmatically:**
+
+The web UI exposes `GET /api/log-path` which returns the log file path and whether it exists:
+
+```json
+{"path": "/Users/you/Library/Logs/mergemail365/mergemail365.log", "exists": true}
+```
+
+### What gets logged
+
+When the web UI encounters an error (e.g. a corrupt spreadsheet, invalid column name, or send failure), the error message is shown in the browser. The full Python stack trace is logged at DEBUG level in the log file for troubleshooting. This applies to all API error paths: spreadsheet upload, recipient validation, job startup, and background send failures.
+
+## 11. Python API
 
 If you want to call MergeMail365 from Python code instead of the command line, use the `send_merge()` function. It mirrors the CLI flags and returns a list of `SendResult` objects.
 
