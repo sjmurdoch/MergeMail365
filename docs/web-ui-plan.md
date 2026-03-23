@@ -472,7 +472,7 @@ MERGEMAIL365_TENANT_ID=1faf88fe-a998-4c5b-93c9-210a11d9a5c2 \
 uv run pyinstaller mergemail365.spec
 ```
 
-- Windows: `uv run pyinstaller mail_merge_web.spec`
+- Windows: `$env:MERGEMAIL365_CLIENT_ID="61e79ae3-40af-4af5-b204-4794d05be0f6"; $env:MERGEMAIL365_TENANT_ID="1faf88fe-a998-4c5b-93c9-210a11d9a5c2"; uv run pyinstaller .\mergemail365.spec`
 
 The packaged app requires no Python installation, no CLI usage — user just double-clicks to start.
 
