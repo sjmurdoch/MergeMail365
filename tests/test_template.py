@@ -14,6 +14,12 @@ class TestExtractPlaceholders:
     def test_duplicate(self):
         assert extract_placeholders("{{x}} {{x}}") == {"x"}
 
+    def test_space_in_name(self):
+        assert extract_placeholders("{{first name}}") == {"first name"}
+
+    def test_multiple_spaces(self):
+        assert extract_placeholders("{{full legal name}}") == {"full legal name"}
+
 
 class TestValidateTemplate:
     def test_all_resolved(self):
@@ -24,6 +30,12 @@ class TestValidateTemplate:
 
     def test_case_insensitive(self):
         assert validate_template("Hi {{Name}}", ["name"]) == []
+
+    def test_space_in_name(self):
+        assert validate_template("Hi {{first name}}", ["first name"]) == []
+
+    def test_space_in_name_unresolvable(self):
+        assert validate_template("{{first name}}", ["email"]) == ["first name"]
 
 
 class TestRender:
@@ -42,3 +54,11 @@ class TestRender:
     def test_no_placeholders(self):
         result = render("Plain text", {"name": "Alice"})
         assert result == "Plain text"
+
+    def test_space_in_name(self):
+        result = render("Hello {{first name}}", {"first name": "Alice"})
+        assert result == "Hello Alice"
+
+    def test_space_case_insensitive(self):
+        result = render("Hello {{First Name}}", {"first name": "Alice"})
+        assert result == "Hello Alice"

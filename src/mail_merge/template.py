@@ -1,6 +1,6 @@
 import re
 
-PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+PLACEHOLDER_RE = re.compile(r"\{\{(\w[\w ]*\w|\w)\}\}")
 
 
 def extract_placeholders(template: str) -> set[str]:

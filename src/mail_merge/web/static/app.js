@@ -151,7 +151,7 @@ function validateSetup() {
         alert("BCC mode requires a To: address.");
         return false;
     }
-    if (sendMode === "bcc" && /\{\{\w+\}\}/.test(subject + body)) {
+    if (sendMode === "bcc" && /\{\{(\w[\w ]*\w|\w)\}\}/.test(subject + body)) {
         alert("BCC blast mode does not support {{placeholders}} in the subject or body. All recipients receive the same message.");
         return false;
     }
@@ -616,7 +616,7 @@ function validatePlaceholders() {
     const subject = $("subject-input").value;
     const body = $("body-input").value;
     const combined = subject + body;
-    const used = [...combined.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]);
+    const used = [...combined.matchAll(/\{\{(\w[\w ]*\w|\w)\}\}/g)].map(m => m[1]);
     const colsLower = spreadsheetData.columns.map(c => c.toLowerCase());
     const bad = used.filter(p => !colsLower.includes(p.toLowerCase()));
     const el = $("placeholder-errors");
@@ -805,7 +805,7 @@ function renderTemplate(template, data) {
     for (const [k, v] of Object.entries(data)) {
         lowerData[k.toLowerCase()] = v;
     }
-    return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    return template.replace(/\{\{(\w[\w ]*\w|\w)\}\}/g, (match, key) => {
         return lowerData[key.toLowerCase()] !== undefined ? lowerData[key.toLowerCase()] : match;
     });
 }
