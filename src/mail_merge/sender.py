@@ -98,9 +98,10 @@ def send_one(
     was_throttled = False
     while True:
         try:
-            logger.debug("POST to %s with headers %s and payload: %s",
-                         GRAPH_SEND_URL, 
-                         json.dumps(headers, indent=2), json.dumps(payload, indent=2))
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("POST to %s with headers %s and payload: %s",
+                             GRAPH_SEND_URL,
+                             json.dumps(headers, indent=2), json.dumps(payload, indent=2))
             resp = requests.post(GRAPH_SEND_URL, json=payload, headers=headers, timeout=30)
         except requests.RequestException as exc:
             retries += 1
@@ -115,7 +116,7 @@ def send_one(
             return SendResult(email=to.address, success=True, status_code=202, throttled=was_throttled)
 
         if resp.status_code == 401 and not token_refreshed:
-            logger.warning("Token expired, refreshing...")
+            logger.warning("⚠️ Token expired, refreshing...")
             token = get_token()
             token_refreshed = True
             headers["Authorization"] = f"Bearer {token}"
