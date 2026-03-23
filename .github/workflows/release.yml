@@ -23,6 +23,7 @@ jobs:
             artifact: MergeMail365-Windows.zip
 
     runs-on: ${{ matrix.os }}
+    environment: UCL
 
     steps:
       - uses: actions/checkout@v4
