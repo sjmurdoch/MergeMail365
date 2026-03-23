@@ -1,0 +1,64 @@
+name: Build release bundles
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: MergeMail365-macOS.zip
+            build_cmd: >-
+              cd dist &&
+              ditto -c -k --sequesterRsrc --keepParent MergeMail365.app MergeMail365-macOS.zip
+          - os: windows-latest
+            artifact: MergeMail365-Windows.zip
+            build_cmd: >-
+              Compress-Archive -Path dist\mergemail365 -DestinationPath dist\MergeMail365-Windows.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --extra desktop
+
+      - name: Inject version from release tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # Patch version in pyproject.toml so PyInstaller picks it up
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          # Patch version in the .spec info_plist
+          sed -i.bak "s/\"CFBundleVersion\": \".*\"/\"CFBundleVersion\": \"$VERSION\"/" mergemail365.spec
+          sed -i.bak "s/\"CFBundleShortVersionString\": \".*\"/\"CFBundleShortVersionString\": \"$VERSION\"/" mergemail365.spec
+
+      - name: Build with PyInstaller
+        env:
+          MERGEMAIL365_CLIENT_ID: ${{ secrets.MERGEMAIL365_CLIENT_ID }}
+          MERGEMAIL365_TENANT_ID: ${{ secrets.MERGEMAIL365_TENANT_ID }}
+        run: uv run pyinstaller mergemail365.spec
+
+      - name: Archive bundle
+        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        run: ${{ matrix.build_cmd }}
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "dist/${{ matrix.artifact }}" --clobber
