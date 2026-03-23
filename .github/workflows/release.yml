@@ -3,6 +3,11 @@ name: Build release bundles
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
 
 permissions:
   contents: write
@@ -35,7 +40,9 @@ jobs:
       - name: Inject version from release tag
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          VERSION="${TAG#v}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           # Patch version in pyproject.toml so PyInstaller picks it up
           sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
@@ -61,4 +68,4 @@ jobs:
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "dist/${{ matrix.artifact }}" --clobber
+        run: gh release upload "${{ env.TAG }}" "dist/${{ matrix.artifact }}" --clobber
