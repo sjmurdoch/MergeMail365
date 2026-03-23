@@ -52,8 +52,8 @@ jobs:
 
       - name: Build with PyInstaller
         env:
-          MERGEMAIL365_CLIENT_ID: ${{ secrets.MERGEMAIL365_CLIENT_ID }}
-          MERGEMAIL365_TENANT_ID: ${{ secrets.MERGEMAIL365_TENANT_ID }}
+          MERGEMAIL365_CLIENT_ID: ${{ vars.MERGEMAIL365_CLIENT_ID }}
+          MERGEMAIL365_TENANT_ID: ${{ vars.MERGEMAIL365_TENANT_ID }}
         run: uv run pyinstaller mergemail365.spec
 
       - name: Archive bundle (macOS)
