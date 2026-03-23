@@ -376,13 +376,25 @@ def create_app(
         fixed_cid = app.config["FIXED_CLIENT_ID"]
         fixed_tid = app.config["FIXED_TENANT_ID"]
 
+        # Re-read preview rows from the saved file if restoring session
+        spreadsheet_info = session.get("spreadsheet_info")
+        if spreadsheet_info and session.get("spreadsheet_path"):
+            filepath = session["spreadsheet_path"]
+            if os.path.exists(filepath):
+                try:
+                    from mail_merge.excel import read_preview
+                    _cols, rows, _sheets, _total = read_preview(filepath)
+                    spreadsheet_info = {**spreadsheet_info, "rows": rows}
+                except Exception:
+                    pass
+
         return jsonify({
             "client_id": fixed_cid or _get_config_value("client_id") or "",
             "tenant_id": fixed_tid or _get_config_value("tenant_id") or "",
             "client_id_locked": bool(fixed_cid),
             "tenant_id_locked": bool(fixed_tid),
             "desktop_mode": app.config["DESKTOP_MODE"],
-            "spreadsheet": session.get("spreadsheet_info"),
+            "spreadsheet": spreadsheet_info,
             "current_step": session.get("current_step", 1),
             "test_passed": session.get("test_passed", False),
             "verify_passed": session.get("verify_passed", False),
@@ -454,15 +466,17 @@ def create_app(
 
         session["spreadsheet_path"] = filepath
         session["spreadsheet_tmp_dir"] = tmp_dir
+        # Store only lightweight metadata in the session cookie — preview
+        # rows can be large and would blow the 4 KB cookie size limit,
+        # causing the session to be silently dropped by the browser.
         session["spreadsheet_info"] = {
             "columns": columns,
-            "rows": rows,
             "sheets": sheets,
             "total_rows": total_rows,
             "file_name": file.filename,
         }
 
-        return jsonify(session["spreadsheet_info"])
+        return jsonify({**session["spreadsheet_info"], "rows": rows})
 
     @app.route("/api/get-recipients", methods=["POST"])
     def api_get_recipients() -> Response:
