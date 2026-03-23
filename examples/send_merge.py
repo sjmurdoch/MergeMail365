@@ -1,4 +1,4 @@
-"""Example: using the mail-merge Python API."""
+"""Example: using the MergeMail365 Python API."""
 
 from mail_merge.api import send_merge
 
@@ -22,8 +22,8 @@ results = send_merge(
     body="body.html",
     subject="Monthly report for {{name}}",
     email_column="email",
-    client_id="YOUR_CLIENT_ID",       # or set MAIL_MERGE_CLIENT_ID env var
-    tenant_id="YOUR_TENANT_ID",       # or set MAIL_MERGE_TENANT_ID env var
+    client_id="YOUR_CLIENT_ID",       # or set MERGEMAIL365_CLIENT_ID env var
+    tenant_id="YOUR_TENANT_ID",       # or set MERGEMAIL365_TENANT_ID env var
     send=True,
     html=True,
     attachment=["report.pdf", "logo.png"],

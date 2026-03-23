@@ -23,8 +23,8 @@ This tool allows you to send mail merge campaigns using your Office 365 account.
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/your-username/mail-merge.git
-    cd mail-merge
+    git clone https://github.com/your-username/MergeMail365.git
+    cd MergeMail365
     ```
 
 2.  Install dependencies using `uv` (recommended) or `pip`:
@@ -57,7 +57,7 @@ This tool allows you to send mail merge campaigns using your Office 365 account.
 
 4.  **Run a dry run**:
     ```bash
-    mail-merge 
+    mergemail365
       --spreadsheet recipients.xlsx 
       --body body.txt 
       --subject "Hello {{name}}" 
@@ -67,7 +67,7 @@ This tool allows you to send mail merge campaigns using your Office 365 account.
 
 5.  **Send a test email** to yourself:
     ```bash
-    mail-merge 
+    mergemail365
       --spreadsheet recipients.xlsx 
       --body body.txt 
       --subject "Hello {{name}}" 
@@ -79,7 +79,7 @@ This tool allows you to send mail merge campaigns using your Office 365 account.
 
 6.  **Send for real**:
     ```bash
-    mail-merge 
+    mergemail365
       --spreadsheet recipients.xlsx 
       --body body.txt 
       --subject "Hello {{name}}" 
@@ -93,10 +93,10 @@ For detailed instructions and advanced features, see the [**Tutorial**](docs/tut
 ## Usage
 
 ```
-usage: mail-merge [-h] --spreadsheet SPREADSHEET --body BODY --subject SUBJECT --email-column EMAIL_COLUMN [--client-id CLIENT_ID] [--tenant-id TENANT_ID] [--sheet SHEET]
-                  [--test-email TEST_EMAIL] [--send] [--output OUTPUT] [--delay DELAY] [--max-retries MAX_RETRIES] [--importance {low,normal,high}] [--cc CC] [--bcc BCC]
-                  [--html] [--no-save-to-sent] [--attachment ATTACHMENT] [--reply-to REPLY_TO] [--filter FILTERS] [--no-resume] [--batch-size BATCH_SIZE] [-y]
-                  [--log-level LOG_LEVEL] [--bcc-blast] [--bcc-blast-to BCC_BLAST_TO]
+usage: mergemail365 [-h] --spreadsheet SPREADSHEET --body BODY --subject SUBJECT --email-column EMAIL_COLUMN [--client-id CLIENT_ID] [--tenant-id TENANT_ID] [--sheet SHEET]
+                    [--test-email TEST_EMAIL] [--send] [--output OUTPUT] [--delay DELAY] [--max-retries MAX_RETRIES] [--importance {low,normal,high}] [--cc CC] [--bcc BCC]
+                    [--html] [--no-save-to-sent] [--attachment ATTACHMENT] [--reply-to REPLY_TO] [--filter FILTERS] [--no-resume] [--batch-size BATCH_SIZE] [-y]
+                    [--log-level LOG_LEVEL] [--bcc-blast] [--bcc-blast-to BCC_BLAST_TO]
 
 Send personalised emails via Microsoft Graph API
 
@@ -109,9 +109,9 @@ options:
   --email-column EMAIL_COLUMN
                         Column name containing email addresses
   --client-id CLIENT_ID
-                        Azure AD application (client) ID (or set MAIL_MERGE_CLIENT_ID env var, or config file)
+                        Azure AD application (client) ID (or set MERGEMAIL365_CLIENT_ID env var, or config file)
   --tenant-id TENANT_ID
-                        Azure AD tenant ID (or set MAIL_MERGE_TENANT_ID env var, or config file; default: 'common')
+                        Azure AD tenant ID (or set MERGEMAIL365_TENANT_ID env var, or config file; default: 'common')
   --sheet SHEET         Sheet name (default: first sheet)
   --test-email TEST_EMAIL
                         Send a single test email to this address using the first recipient's data, then exit
@@ -152,7 +152,7 @@ Mail Merge includes a browser-based wizard to guide you through the process.
 
 2.  **Start the web server**:
     ```bash
-    mail-merge-web
+    mergemail365-web
     ```
 
 3.  **Open your browser**: Navigate to the URL printed in the terminal (usually `http://localhost:5050/?token=...`).

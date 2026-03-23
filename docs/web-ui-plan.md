@@ -1,4 +1,4 @@
-# Plan: Web Interface for mail-merge
+# Plan: Web Interface for MergeMail365
 
 ## Implementation Status
 
@@ -87,7 +87,7 @@ All core features from this plan have been implemented. The implementation close
 
 ## Context
 
-The mail-merge tool currently has a CLI and Python API but no browser-based interface. A web UI on localhost will make it more accessible — users can upload spreadsheets, compose templates with live preview, and monitor send progress visually, without memorising CLI flags.
+The MergeMail365 tool currently has a CLI and Python API but no browser-based interface. A web UI on localhost will make it more accessible — users can upload spreadsheets, compose templates with live preview, and monitor send progress visually, without memorising CLI flags.
 
 ## Approach: Flask + Vanilla JS Single-Page App
 
@@ -106,7 +106,7 @@ Since the user is already in a browser, use the OAuth 2.0 Authorization Code flo
 3. User is redirected to `login.microsoftonline.com` to authenticate
 4. Microsoft redirects back to `/auth/callback` with an authorization code
 5. Flask calls `msal_app.acquire_token_by_auth_code_flow(flow, request.args)` to exchange the code for a token
-6. Token is cached in the same MSAL cache file (`~/.mail-merge-token-cache.json`)
+6. Token is cached in the same MSAL cache file (`~/.mergemail365-token-cache.json`)
 7. When `send_merge()` later calls `acquire_token()`, silent acquisition succeeds from the shared cache
 
 **Setup requirement:** The Azure AD app registration needs `http://localhost:5050/auth/callback` added as a redirect URI (under "Mobile and desktop applications" for public clients). This is a one-time setup step, documented in the UI. Note: Entra ignores the port for localhost URIs, so this works on any port — no re-registration needed if the port auto-increments.
@@ -216,7 +216,7 @@ Shares internal logic with `read_recipients()` (size check, header parsing, valu
    web = ["flask>=3.0"]
    desktop = ["flask>=3.0", "pywebview>=5.0"]
    ```
-2. Add entry point: `mail-merge-web = "mail_merge.web:main"`
+2. Add entry point: `mergemail365-web = "mail_merge.web:main"`
 
 ## New Files
 
@@ -245,7 +245,7 @@ mail_merge_web.spec      # PyInstaller spec for building standalone app
 
 **Port conflict handling:** If the default port (5050) is in use, auto-increment and try the next port (5051, 5052, ...) up to 5099. Log the actual port being used. The auth callback redirect URI uses the actual port, but **Entra ignores the port component for localhost redirect URIs** — so a single registered `http://localhost:5050/auth/callback` (or `http://localhost/auth/callback`) will work on any port. No additional Entra configuration needed when the port changes.
 
-Installed as `mail-merge-web` console script. The desktop mode is the intended path for non-CLI users — they double-click a packaged app that starts in desktop mode automatically.
+Installed as `mergemail365-web` console script. The desktop mode is the intended path for non-CLI users — they double-click a packaged app that starts in desktop mode automatically.
 
 ### Backend Routes (`web/app.py`)
 
@@ -440,8 +440,8 @@ Target platforms: **macOS** (recent versions, both Intel and Apple Silicon) and 
 | Concern | macOS | Windows |
 |---|---|---|
 | Port 5000 | Conflicts with AirPlay Receiver (macOS 12+). Default port changed to **5050** to avoid this. | No common conflict. |
-| Token cache path | `~/.mail-merge-token-cache.json` | `%LOCALAPPDATA%/mail-merge/token-cache.json` (existing `_paths.py` logic) |
-| Config path | `~/.mail-merge.toml` | `%LOCALAPPDATA%/mail-merge/config.toml` (existing) |
+| Token cache path | `~/.mergemail365-token-cache.json` | `%LOCALAPPDATA%/mergemail365/token-cache.json` (existing `_paths.py` logic) |
+| Config path | `~/.mergemail365.toml` | `%LOCALAPPDATA%/mergemail365/config.toml` (existing) |
 | Temp file permissions | `0o700` via `os.chmod` | ACLs differ; `tempfile.mkdtemp()` is user-restricted by default |
 | Browser auto-open | `webbrowser.open()` works | `webbrowser.open()` works |
 | pywebview backend | Uses WebKit (built-in) | Uses EdgeChromium (WebView2, built into Windows 10+) |
@@ -691,7 +691,7 @@ Fixture `live_server` starts Flask in a background thread on a random port, with
 1. `uv run pytest` — full suite passes including all new tests
 2. `uv run mypy` — no type errors across all modules
 3. `uv run pytest --cov=mail_merge` — verify coverage of web module
-4. `uv run mail-merge-web` starts on `http://127.0.0.1:5050`
+4. `uv run mergemail365-web` starts on `http://127.0.0.1:5050`
 5. Upload spreadsheet → columns and preview rows appear
 6. Template preview renders correctly
 7. Wizard flow: setup → preview → test email → dry run → send

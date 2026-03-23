@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A Python tool that sends personalised emails via Microsoft Graph API. Recipients come from an Excel spreadsheet, and the email body/subject use `{{column_name}}` placeholders. Has three interfaces: CLI (`mail-merge`), Python API (`send_merge()`), and a web UI (`mail-merge-web`).
+A Python tool that sends personalised emails via Microsoft Graph API. Recipients come from an Excel spreadsheet, and the email body/subject use `{{column_name}}` placeholders. Has three interfaces: CLI (`mergemail365`), Python API (`send_merge()`), and a web UI (`mergemail365-web`).
 
 ## Commands
 
@@ -26,13 +26,13 @@ uv run pytest --cov=mail_merge
 uv run mypy
 
 # CLI usage (after install) — dry run by default, add --send to deliver
-uv run mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email
-uv run mail-merge --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email --send
+uv run mergemail365 --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email
+uv run mergemail365 --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email --send
 
 # Web UI — opens browser automatically
-uv run mail-merge-web
-uv run mail-merge-web --port 8080
-uv run mail-merge-web --desktop  # native window (requires pywebview)
+uv run mergemail365-web
+uv run mergemail365-web --port 8080
+uv run mergemail365-web --desktop  # native window (requires pywebview)
 ```
 
 ## Architecture
@@ -46,7 +46,7 @@ Source lives under `src/mail_merge/` (src layout). There are three entry points:
 The orchestration flow (in `api.py`) is strictly ordered: resolve config → read spreadsheet → validate emails → apply filters → resume (skip previous successes) → apply batch size → read body template → validate all placeholders (abort if any unresolvable) → parse CC/BCC/reply-to → validate recipient count → process attachments → confirm → authenticate → send → merge results → report. All validation happens before any sending. Resume and batch size are skipped for `--test-email` (which only needs one recipient's data for rendering). Resume works for both individual sends and BCC blast mode.
 
 Key design decisions:
-- **`config.py`** reads `~/.mail-merge.toml` for persistent `client-id` / `tenant-id`. Precedence: CLI flag → env var → config file → default (`"common"` for tenant-id).
+- **`config.py`** reads `~/.mergemail365.toml` for persistent `client-id` / `tenant-id`. Precedence: CLI flag → env var → config file → default (`"common"` for tenant-id).
 - **`EmailAddress`** dataclass (in `sender.py`) is the unified internal representation for email addresses throughout the codebase. It holds `address: str` and `name: str | None`, and provides `to_graph()` to convert to the Microsoft Graph API wire format (`{"emailAddress": {"address": ..., "name": ...}}`). Three representation layers are used consistently: user-facing strings (`"Display Name <email>"`) at the CLI/API boundary, `EmailAddress` objects internally, and Graph API dicts only at the point of HTTP serialisation in `send_one`.
 - **`api.py`** contains `send_merge()`, the shared orchestration function used by both CLI and Python callers. Accepts `str | Path` for file args, `str | list[str]` for address lists. `_parse_one_addr()` parses a single RFC 2822 address string into an `EmailAddress`. `_parse_address_entries()` normalises all address inputs (cc/bcc/reply-to) into `list[EmailAddress]`; parsed values are bundled into a `MessageOptions` dataclass and passed to sender functions. `sender.py` functions (`send_one`, `send_bcc_blast`, `send_all`) accept `opts: MessageOptions` for shared message-formatting parameters (max_retries, importance, cc, bcc, html, save_to_sent_items, attachments, reply_to). The primary recipient is passed as an `EmailAddress` parameter `to` (bundling address and display name together). `send_all` accepts `name_column` to look up per-recipient names from the spreadsheet and construct an `EmailAddress` per recipient.
 - **`auth.py`** uses lazy import in `api.py` — only imported when authentication is actually needed (skipped for dry runs). Three auth flows: **interactive browser** (default for CLI — opens system browser via `acquire_token_interactive_flow()`), **device code** (opt-in via `--device-code` — user copies a code to a browser, for headless/SSH), and **auth code with PKCE** (web UI — redirect to Microsoft and back). All flows share the same MSAL token cache file. If interactive flow fails (e.g. no display), it falls back to device code automatically.
@@ -72,7 +72,7 @@ Key design decisions:
 
 ## Web UI
 
-The web interface lives under `src/mail_merge/web/` and is installed as `mail-merge-web`. Flask backend (`web/app.py`) + vanilla JS single-page app (`web/static/app.js`) + Pico CSS. No build step, no JS framework.
+The web interface lives under `src/mail_merge/web/` and is installed as `mergemail365-web`. Flask backend (`web/app.py`) + vanilla JS single-page app (`web/static/app.js`) + Pico CSS. No build step, no JS framework.
 
 **Dependencies:** `flask>=3.0` (optional `web` extra), `pywebview>=5.0` (optional `desktop` extra). Install with `uv sync --extra web`.
 
@@ -150,7 +150,7 @@ Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge
 **Web UI tests** span four files:
 - `test_web.py` — Flask test client tests for all routes, CSRF, auth, job lifecycle, options pass-through. Uses `web_client` fixture (pre-authenticated test client).
 - `test_web_e2e.py` — Playwright browser tests for the full wizard flow. Flask runs in a background thread with mocked Graph API and MSAL. Uses module-scoped `live_server` fixture.
-- `test_web_cli.py` — entry point and argument parsing for `mail-merge-web`.
+- `test_web_cli.py` — entry point and argument parsing for `mergemail365-web`.
 - `test_web_robustness.py` — edge cases (empty uploads, malformed requests).
 - `test_auth_additions.py` — auth code flow, `diagnose_auth()`, `token_expires_at()`.
 - `test_api_additions.py` — `body_text`, `token_provider`, and `device_code` parameters on `send_merge()`.

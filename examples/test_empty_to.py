@@ -1,7 +1,7 @@
 """Probe whether the Graph API accepts an empty toRecipients array.
 
-Uses the token already cached by mail-merge so no browser login is needed
-(as long as you have run mail-merge --send or --test-email at least once).
+Uses the token already cached by MergeMail365 so no browser login is needed
+(as long as you have run mergemail365 --send or --test-email at least once).
 
 Usage:
     uv run python examples/test_empty_to.py --to you@example.com
@@ -33,11 +33,11 @@ from mail_merge.sender import GRAPH_SEND_URL
 
 def _token(client_id: str | None, tenant_id: str | None) -> str:
     config = load_config()
-    cid = client_id or os.environ.get("MAIL_MERGE_CLIENT_ID") or config.get("client_id")
-    tid = tenant_id or os.environ.get("MAIL_MERGE_TENANT_ID") or config.get("tenant_id") or "common"
+    cid = client_id or os.environ.get("MERGEMAIL365_CLIENT_ID") or config.get("client_id")
+    tid = tenant_id or os.environ.get("MERGEMAIL365_TENANT_ID") or config.get("tenant_id") or "common"
     if not cid:
         sys.exit(
-            "client-id is required (pass --client-id, set MAIL_MERGE_CLIENT_ID, or add to ~/.mail-merge.toml)"
+            "client-id is required (pass --client-id, set MERGEMAIL365_CLIENT_ID, or add to ~/.mergemail365.toml)"
         )
     return acquire_token(cid, tid)
 
@@ -54,7 +54,7 @@ def _send(token: str, payload: dict) -> tuple[int, str]:
 
 def _base_message(to_addr: str) -> dict:
     return {
-        "subject": "[mail-merge probe] empty-To test — ignore",
+        "subject": "[MergeMail365 probe] empty-To test — ignore",
         "body": {"contentType": "Text", "content": "This is an automated probe email. You can delete it."},
         "bccRecipients": [{"emailAddress": {"address": to_addr}}],
     }

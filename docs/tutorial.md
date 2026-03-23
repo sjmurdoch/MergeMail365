@@ -1,6 +1,6 @@
-# Getting Started with mail-merge
+# Getting Started with MergeMail365
 
-This tutorial walks you through setting up mail-merge and sending your first batch of personalised emails via Office 365.
+This tutorial walks you through setting up MergeMail365 and sending your first batch of personalised emails via Office 365.
 
 ## Prerequisites
 
@@ -12,20 +12,20 @@ This tutorial walks you through setting up mail-merge and sending your first bat
 ## 1. Install
 
 ```bash
-git clone <repo-url> && cd mail-merge
+git clone <repo-url> && cd MergeMail365
 uv sync
 ```
 
 Verify it works:
 
 ```bash
-uv run mail-merge --help
+uv run mergemail365 --help
 ```
 
 ## 2. Register an Azure AD application
 
 1. Go to the [Azure portal](https://portal.azure.com/) > **App registrations** > **New registration**.
-2. Set **Name** to something like `mail-merge-cli`.
+2. Set **Name** to something like `mergemail365`.
 3. Under **Supported account types**, choose the option that matches your organisation (typically "Accounts in this organizational directory only").
 4. Under **Redirect URI**, select **Public client/native (mobile & desktop)** and set the URI to `https://login.microsoftonline.com/common/oauth2/nativeclient`.
 5. Click **Register**.
@@ -36,7 +36,7 @@ uv run mail-merge --help
 
 ## 3. Save your credentials (optional)
 
-Instead of passing `--client-id` and `--tenant-id` on every run (or exporting environment variables), you can save them in `~/.mail-merge.toml`:
+Instead of passing `--client-id` and `--tenant-id` on every run (or exporting environment variables), you can save them in `~/.mergemail365.toml`:
 
 ```toml
 client-id = "YOUR_CLIENT_ID"
@@ -46,8 +46,8 @@ tenant-id = "YOUR_TENANT_ID"
 Values are resolved in this order (highest wins):
 
 1. CLI flags (`--client-id`, `--tenant-id`)
-2. Environment variables (`MAIL_MERGE_CLIENT_ID`, `MAIL_MERGE_TENANT_ID`)
-3. Config file (`~/.mail-merge.toml`)
+2. Environment variables (`MERGEMAIL365_CLIENT_ID`, `MERGEMAIL365_TENANT_ID`)
+3. Config file (`~/.mergemail365.toml`)
 4. Hardcoded default (`"common"` for tenant-id only)
 
 ## 4. Prepare your spreadsheet
@@ -78,10 +78,10 @@ Your Name
 
 ## 6. Dry run (the default)
 
-Running mail-merge performs a dry run by default — it checks the spreadsheet, resolves all placeholders, and logs what would be sent, without authenticating or making any API calls.
+Running MergeMail365 performs a dry run by default — it checks the spreadsheet, resolves all placeholders, and logs what would be sent, without authenticating or making any API calls.
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Event invitation for {{name}}" \
@@ -97,7 +97,7 @@ Use `--log-level DEBUG` to see the fully rendered body for each recipient.
 Once the dry run looks good, send a single real email to yourself to verify delivery and formatting. `--test-email` renders the email using the first recipient's data but sends it to the address you specify. Unlike the full send, `--test-email` always sends — no `--send` flag needed:
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Event invitation for {{name}}" \
@@ -107,7 +107,7 @@ uv run mail-merge \
   --test-email your.own@example.com
 ```
 
-If your Azure AD app is registered as single-tenant (the most common setup), you must provide `--tenant-id` with your directory (tenant) ID. You can find this in the Azure portal under **App registrations** > your app > **Overview**. You can also set it via the `MAIL_MERGE_TENANT_ID` environment variable. Multi-tenant apps can omit this flag (it defaults to `common`).
+If your Azure AD app is registered as single-tenant (the most common setup), you must provide `--tenant-id` with your directory (tenant) ID. You can find this in the Azure portal under **App registrations** > your app > **Overview**. You can also set it via the `MERGEMAIL365_TENANT_ID` environment variable. Multi-tenant apps can omit this flag (it defaults to `common`).
 
 On first run, you'll see a device code prompt like:
 
@@ -116,7 +116,7 @@ To sign in, use a web browser to open https://microsoft.com/devicelogin
 and enter the code XXXXXXXXX to authenticate.
 ```
 
-Open the URL, enter the code, and sign in with your Microsoft 365 account. The token is cached at `~/.mail-merge-token-cache.json` so subsequent runs won't require this step.
+Open the URL, enter the code, and sign in with your Microsoft 365 account. The token is cached at `~/.mergemail365-token-cache.json` so subsequent runs won't require this step.
 
 Check your inbox. If the email looks right, proceed to the full send.
 
@@ -125,7 +125,7 @@ Check your inbox. If the email looks right, proceed to the full send.
 Add `--send` to actually deliver emails. You'll see a confirmation prompt before anything is sent:
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Event invitation for {{name}}" \
@@ -135,11 +135,11 @@ uv run mail-merge \
   --send
 ```
 
-If you saved your credentials in `~/.mail-merge.toml` (step 3), you can omit `--client-id` and `--tenant-id`. You can also use environment variables:
+If you saved your credentials in `~/.mergemail365.toml` (step 3), you can omit `--client-id` and `--tenant-id`. You can also use environment variables:
 
 ```bash
-export MAIL_MERGE_CLIENT_ID=YOUR_CLIENT_ID
-export MAIL_MERGE_TENANT_ID=YOUR_TENANT_ID
+export MERGEMAIL365_CLIENT_ID=YOUR_CLIENT_ID
+export MERGEMAIL365_TENANT_ID=YOUR_TENANT_ID
 ```
 
 After all emails are sent, you'll see a console summary:
@@ -161,7 +161,7 @@ The exit code is 0 if all emails succeeded, or 1 if any failed.
 Save detailed per-recipient results to a CSV file:
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Hello {{name}}" \
@@ -173,7 +173,7 @@ The CSV contains columns: `email`, `success`, `status_code`, `error`.
 
 ### Rate limiting
 
-By default, mail-merge waits 2 seconds between sends (Exchange Online allows ~30 messages/minute) and uses adaptive throttling: if Microsoft Graph returns a 429 (rate limit) response, the delay doubles (up to 30s); once sends succeed without throttling, the delay halves back toward the base.
+By default, MergeMail365 waits 2 seconds between sends (Exchange Online allows ~30 messages/minute) and uses adaptive throttling: if Microsoft Graph returns a 429 (rate limit) response, the delay doubles (up to 30s); once sends succeed without throttling, the delay halves back toward the base.
 
 To change the base delay:
 
@@ -268,7 +268,7 @@ Send to a subset of your spreadsheet by filtering on column values. Use `--filte
 
 ### Interactive confirmation
 
-When sending (`--send`), mail-merge shows a summary (subject, recipient count, CC/BCC, attachments) and asks for confirmation before proceeding. Type `y` to proceed or anything else to abort (exit code 130).
+When sending (`--send`), MergeMail365 shows a summary (subject, recipient count, CC/BCC, attachments) and asks for confirmation before proceeding. Type `y` to proceed or anything else to abort (exit code 130).
 
 Confirmation is automatically skipped for dry runs (the default), `--test-email`, and when `--yes`/`-y` is passed:
 
@@ -279,11 +279,11 @@ Confirmation is automatically skipped for dry runs (the default), `--test-email`
 
 ### Resume and batch size
 
-When sending to large lists, runs can fail partway through (network issues, rate limits, auth expiry). Resume is automatic: when `--output` is set, mail-merge reads the existing CSV on each run, skips already-successful recipients, and retries failures. Just re-run the same command:
+When sending to large lists, runs can fail partway through (network issues, rate limits, auth expiry). Resume is automatic: when `--output` is set, MergeMail365 reads the existing CSV on each run, skips already-successful recipients, and retries failures. Just re-run the same command:
 
 ```bash
 # First run — might fail partway through
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Hello {{name}}" \
@@ -292,7 +292,7 @@ uv run mail-merge \
   --send
 
 # Just re-run the same command — successes are skipped automatically
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Hello {{name}}" \
@@ -305,7 +305,7 @@ Use `--batch-size N` to limit how many emails are sent per invocation. This is u
 
 ```bash
 # Send in batches of 50 — re-run until done
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body body.txt \
   --subject "Hello {{name}}" \
@@ -319,7 +319,7 @@ When all recipients have succeeded, the tool logs "All emails already sent" and 
 
 ### BCC blast
 
-When every recipient should receive the same email and must not be able to see other recipients' addresses, use BCC blast mode. Instead of sending one email per row, mail-merge groups all recipients into BCC batches (up to 499 addresses per email, respecting the Microsoft Graph API limit of 500 total recipients per message) and sends a small number of emails in total.
+When every recipient should receive the same email and must not be able to see other recipients' addresses, use BCC blast mode. Instead of sending one email per row, MergeMail365 groups all recipients into BCC batches (up to 499 addresses per email, respecting the Microsoft Graph API limit of 500 total recipients per message) and sends a small number of emails in total.
 
 **When to use BCC blast:**
 - Newsletters, announcements, or any message where the body is the same for everyone
@@ -341,7 +341,7 @@ When every recipient should receive the same email and must not be able to see o
 **Basic usage:**
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
@@ -371,7 +371,7 @@ Follow the same staged approach as a standard send:
 **Step 1 — Dry run (no flags beyond `--bcc-blast` and `--bcc-blast-to`)**
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
@@ -387,7 +387,7 @@ This validates the spreadsheet, calculates how many batches will be sent, and lo
 `--test-email` works in BCC blast mode. Instead of sending to the full recipient list, it sends a single BCC blast batch to only the test address, using the real subject and body. No `--send` flag is needed:
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
@@ -414,7 +414,7 @@ colleague@example.com
 ```
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet test-recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
@@ -430,7 +430,7 @@ uv run mail-merge \
 **Step 3 — Full send with confirmation**
 
 ```bash
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
@@ -457,7 +457,7 @@ If you pass `--output`, the CSV contains one row per recipient. On re-run, resum
 
 ```bash
 # First run — might fail partway through
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
@@ -468,7 +468,7 @@ uv run mail-merge \
   --send
 
 # Just re-run — successes are skipped, failures are retried
-uv run mail-merge \
+uv run mergemail365 \
   --spreadsheet recipients.xlsx \
   --body announcement.txt \
   --subject "Upcoming event on Friday" \
@@ -513,7 +513,7 @@ By default, the first sheet is used.
 
 ## 10. Python API
 
-If you want to call mail-merge from Python code instead of the command line, use the `send_merge()` function. It mirrors the CLI flags and returns a list of `SendResult` objects.
+If you want to call MergeMail365 from Python code instead of the command line, use the `send_merge()` function. It mirrors the CLI flags and returns a list of `SendResult` objects.
 
 ```python
 from mail_merge.api import send_merge
@@ -582,6 +582,64 @@ Key differences from the CLI:
 - **`bcc_blast`** / **`bcc_blast_to`** enable privacy-preserving bulk sends; `bcc_blast_to` is required when `bcc_blast=True`. Raises `ValueError` if combined with `batch_size` or templates containing `{{placeholders}}`. When `test_email` is set, the blast is sent to only that address instead of the full list. `delay` is accepted but silently ignored. `bcc` works as extra static BCC addresses added to every batch. Results are tracked per recipient (not per batch), so `output` + `resume` work the same as individual sends.
 
 See `examples/send_merge.py` for a complete example.
+
+## Releasing a new version
+
+### Version bump
+
+The version is defined in `pyproject.toml` (`version = "X.Y.Z"`). Update it before creating a release:
+
+```bash
+# Edit pyproject.toml and change the version field
+# e.g. version = "0.2.0"
+```
+
+### Create a release
+
+1. **Ensure all tests pass:**
+
+   ```bash
+   uv run pytest
+   uv run mypy
+   ```
+
+2. **Commit the version bump:**
+
+   ```bash
+   git add pyproject.toml
+   git commit -m "Bump version to 0.2.0"
+   git push
+   ```
+
+3. **Create a git tag matching the version (prefixed with `v`):**
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+4. **Create a GitHub release** from the tag. This triggers the `release.yml` workflow which builds macOS and Windows bundles via PyInstaller and uploads them as release assets:
+
+   ```bash
+   gh release create v0.2.0 --title "v0.2.0" --generate-notes
+   ```
+
+   Alternatively, create the release from the GitHub web UI at **Releases** > **Draft a new release**, selecting the tag you just pushed.
+
+5. **Verify the build** — check the Actions tab for the "Build release bundles" workflow. It builds on both macOS and Windows, then uploads `MergeMail365-macOS.zip` and `MergeMail365-Windows.zip` to the release.
+
+### Manual workflow trigger
+
+If you need to rebuild release bundles without creating a new release, trigger the workflow manually:
+
+```bash
+gh workflow run release.yml -f tag=v0.2.0
+```
+
+### Version conventions
+
+- Use [semantic versioning](https://semver.org/): `MAJOR.MINOR.PATCH`
+- Git tags must be prefixed with `v` (e.g. `v0.2.0`) — the CI workflow strips the `v` prefix when patching the version into the build
 
 ## Future features
 
