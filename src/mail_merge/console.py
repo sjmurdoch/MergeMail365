@@ -2,14 +2,41 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import re
+import sys
 from pathlib import Path
 
 from rich.console import Console
 from rich.logging import RichHandler
 
-console = Console(stderr=True, force_terminal=True)
+
+def _utf8_stderr() -> io.TextIOWrapper | None:
+    """Return a UTF-8 wrapper around stderr when the default encoding can't handle Unicode.
+
+    On Windows the default stderr encoding is often cp1252 which cannot
+    represent emoji characters used in log messages.  Wrapping the underlying
+    byte stream in a UTF-8 ``TextIOWrapper`` avoids ``UnicodeEncodeError``.
+    Returns ``None`` when stderr already supports UTF-8 (the common case on
+    macOS / Linux).
+    """
+    if getattr(sys.stderr, "encoding", "utf-8").lower().replace("-", "") == "utf8":
+        return None
+    try:
+        binary = getattr(sys.stderr, "buffer", None)
+        if binary is None:
+            return None
+        return io.TextIOWrapper(binary, encoding="utf-8", errors="replace", line_buffering=True)
+    except Exception:
+        return None
+
+
+_stderr_wrapper = _utf8_stderr()
+console = Console(
+    file=_stderr_wrapper or sys.stderr,
+    force_terminal=True,
+)
 
 # Regex to match ANSI escape sequences
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mK]")
