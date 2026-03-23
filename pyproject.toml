@@ -1,6 +1,6 @@
 [project]
 name = "mergemail365"
-version = "0.1.1"
+version = "0.2.0"
 description = "Office 365 mail merge CLI using Microsoft Graph API"
 requires-python = ">=3.10"
 dependencies = [
