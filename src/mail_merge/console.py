@@ -85,7 +85,12 @@ def setup_file_logging(level: int = logging.DEBUG) -> Path | None:
         ))
         handler.addFilter(_StripAnsiFilter())
 
-        logging.getLogger().addHandler(handler)
+        root = logging.getLogger()
+        root.addHandler(handler)
+        # Lower the root logger level so DEBUG messages reach the file
+        # handler even when the console handler is set to INFO or above.
+        if root.level > level:
+            root.setLevel(level)
         return log_file
     except OSError:
         return None
