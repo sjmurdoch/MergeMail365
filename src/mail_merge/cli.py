@@ -45,6 +45,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
+    parser.add_argument("--log-file", action="store_true", help="Enable debug logging to a file")
     parser.add_argument(
         "--bcc-blast",
         action="store_true",
@@ -63,6 +64,13 @@ def main(argv: list[str] | None = None) -> int:
 
     setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     logger = logging.getLogger(__name__)
+
+    is_bundled = getattr(sys, "frozen", False)
+    if is_bundled or args.log_file:
+        from mail_merge.console import setup_file_logging
+        log_file = setup_file_logging()
+        if log_file:
+            logger.info("Log file: %s", log_file)
 
     try:
         results = send_merge(

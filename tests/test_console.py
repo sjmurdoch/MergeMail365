@@ -1,9 +1,12 @@
-"""Tests for mail_merge.console — ANSI stripping filter and file logging."""
+"""Tests for mail_merge.console — ANSI stripping filter, file logging, and console setup."""
 
+import io
 import logging
 from unittest.mock import patch
 
-from mail_merge.console import _StripAnsiFilter, setup_file_logging
+from rich.logging import RichHandler
+
+from mail_merge.console import _StripAnsiFilter, _make_console, setup_file_logging, setup_logging
 
 
 class TestStripAnsiFilter:
@@ -96,3 +99,62 @@ class TestSetupFileLogging:
         with patch("mail_merge._paths.log_dir", side_effect=OSError("permission denied")):
             result = setup_file_logging()
         assert result is None
+
+
+class TestConsoleLevelIndependence:
+    def test_file_logging_does_not_change_console_level(self, tmp_path):
+        """Console handler stays at INFO after setup_file_logging lowers root to DEBUG."""
+        root = logging.getLogger()
+        original_handlers = list(root.handlers)
+        original_level = root.level
+
+        # Clear existing handlers so basicConfig will add our RichHandler
+        root.handlers.clear()
+        try:
+            setup_logging(logging.INFO)
+
+            with patch("mail_merge._paths.log_dir", return_value=tmp_path):
+                setup_file_logging(logging.DEBUG)
+
+            # Root logger should be lowered to DEBUG for the file handler
+            assert root.level == logging.DEBUG
+
+            # The RichHandler should still be at INFO
+            rich_handlers = [h for h in root.handlers if isinstance(h, RichHandler)]
+            assert rich_handlers, "Expected a RichHandler on the root logger"
+            assert rich_handlers[0].level == logging.INFO
+        finally:
+            # Clean up: remove handlers we added, restore originals
+            from logging.handlers import RotatingFileHandler
+            for h in list(root.handlers):
+                if isinstance(h, RotatingFileHandler) and str(tmp_path) in str(h.baseFilename):
+                    h.close()
+            root.handlers[:] = original_handlers
+            root.level = original_level
+
+
+class TestMakeConsole:
+    def test_stderr_none_returns_stringio_console(self):
+        """PyInstaller console=False: stderr is None, console uses StringIO."""
+        with patch("mail_merge.console.sys") as mock_sys:
+            mock_sys.stderr = None
+            c = _make_console()
+        assert isinstance(c.file, io.StringIO)
+
+    def test_stderr_no_buffer_uses_stderr(self):
+        """stderr with write but no buffer attr falls through to Console(stderr=True)."""
+        mock_stderr = io.StringIO()  # has write() but no buffer attr
+        with patch("mail_merge.console.sys") as mock_sys:
+            mock_sys.stderr = mock_stderr
+            c = _make_console()
+        # Should have fallen through to Console(stderr=True) or similar
+        assert c is not None
+
+    def test_stderr_with_buffer_gets_utf8_wrapper(self):
+        """Normal stderr with buffer gets a UTF-8 TextIOWrapper."""
+        with patch("mail_merge.console.sys") as mock_sys:
+            raw = io.BytesIO()
+            mock_sys.stderr = io.TextIOWrapper(raw, encoding="ascii")
+            c = _make_console()
+        assert isinstance(c.file, io.TextIOWrapper)
+        assert c.file.encoding == "utf-8"

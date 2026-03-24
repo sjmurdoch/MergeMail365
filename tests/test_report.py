@@ -1,34 +1,31 @@
-from mail_merge.console import console
+import logging
+
 from mail_merge.report import print_summary, read_csv, write_csv
 from mail_merge.sender import SendResult
 
 
 class TestPrintSummary:
-    def test_all_success_shows_no_failed_section(self, capsys):
+    def test_all_success_no_warnings(self, caplog):
         results = [
             SendResult(email="a@x.com", success=True, status_code=202),
             SendResult(email="b@x.com", success=True, status_code=202),
         ]
-        with console.capture() as cap:
+        with caplog.at_level(logging.INFO, logger="mail_merge.report"):
             print_summary(results)
-        output = cap.get()
-        assert "2" in output  # total
-        assert "Failed recipients" not in output
+        assert "Total: 2, Sent: 2, Failed: 0" in caplog.text
+        assert "Failed:" not in caplog.text.replace("Failed: 0", "")
 
-    def test_with_failures_shows_failed_count_and_recipients(self, capsys):
+    def test_with_failures_logs_each_failed_recipient(self, caplog):
         results = [
             SendResult(email="a@x.com", success=True, status_code=202),
             SendResult(email="b@x.com", success=False, status_code=403, error="Forbidden"),
         ]
-        with console.capture() as cap:
+        with caplog.at_level(logging.INFO, logger="mail_merge.report"):
             print_summary(results)
-        output = cap.get()
-        assert "Failed recipients" in output
-        assert "b@x.com" in output
-        assert "403" in output
-        assert "Forbidden" in output
-        # Failed count should appear
-        assert "1" in output
+        assert "Total: 2, Sent: 1, Failed: 1" in caplog.text
+        assert "b@x.com" in caplog.text
+        assert "403" in caplog.text
+        assert "Forbidden" in caplog.text
 
 
 class TestCsvSanitization:

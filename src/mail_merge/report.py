@@ -2,9 +2,6 @@ import csv
 import logging
 from pathlib import Path
 
-from rich.text import Text
-
-from mail_merge.console import console
 from mail_merge.sender import SendResult
 
 logger = logging.getLogger(__name__)
@@ -46,24 +43,10 @@ def print_summary(results: list[SendResult]) -> None:
 
     logger.info("Summary: Total: %d, Sent: %d, Failed: %d", total, sent, failed)
 
-    console.rule("Summary")
-    console.print(f"  Total:  {total}")
-    sent_text = Text(f"  Sent:   {sent}")
-    if sent:
-        sent_text.stylize("green")
-    console.print(sent_text)
-    failed_text = Text(f"  Failed: {failed}")
     if failed:
-        failed_text.stylize("bold red")
-    console.print(failed_text)
-    console.rule()
-
-    if failed:
-        console.print("\n[bold red]Failed recipients:[/bold red]")
         for r in results:
             if not r.success:
                 logger.warning("Failed: %s [%s] %s", r.email, r.status_code, r.error)
-                console.print(f"  [red]{r.email}[/red]: [{r.status_code}] {r.error}")
 
 
 def write_csv(results: list[SendResult], path: str | Path) -> None:

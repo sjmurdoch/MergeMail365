@@ -128,7 +128,7 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
         if "user_code" not in flow:
             raise RuntimeError(f"Device code flow failed: {json.dumps(flow, indent=2)}")
 
-        print(flow["message"], file=sys.stderr)
+        logger.info(flow["message"])
         result = app.acquire_token_by_device_flow(flow)
 
     _save_cache(cache)

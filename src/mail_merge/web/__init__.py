@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Always enable file logging in bundled mode (no stderr visible),
     # or when explicitly requested.
-    if is_bundled or args.log_file or args.log_level.upper() == "DEBUG":
+    if is_bundled or args.log_file:
         from mail_merge.console import setup_file_logging
         log_file = setup_file_logging()
         if log_file:

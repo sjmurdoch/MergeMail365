@@ -99,12 +99,6 @@ def setup_file_logging(level: int = logging.DEBUG) -> Path | None:
         if root.level > level:
             root.setLevel(level)
 
-        try:
-            _rich_ver = _pkg_version("rich")
-        except Exception:
-            _rich_ver = "unknown"
-        logging.getLogger(__name__).debug("rich version: %s", _rich_ver)
-
         return log_file
     except OSError:
         return None

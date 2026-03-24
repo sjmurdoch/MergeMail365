@@ -513,27 +513,39 @@ By default, the first sheet is used.
 
 ## 10. Logging and troubleshooting
 
-### CLI logging
+MergeMail365 has three independent log destinations. Each has its own level and is active only when appropriate:
 
-Control console log verbosity with `--log-level`:
+| Destination | Level | When active |
+|---|---|---|
+| **Console** (stderr) | `--log-level` (default INFO) | Always |
+| **File** | Always DEBUG | `--log-file` or PyInstaller bundle |
+| **Browser panel** (SSE) | INFO | Web UI only, during send jobs |
+
+Enabling file logging never changes what appears on the console or in the browser.
+
+### Console logging
+
+Control console log verbosity with `--log-level` (available on both `mergemail365` and `mergemail365-web`):
 
 ```bash
 uv run mergemail365 --log-level DEBUG ...
 uv run mergemail365-web --log-level DEBUG
 ```
 
-### Web UI and desktop app logging
+### File logging
 
-The web UI and desktop app support logging to a file. This is especially useful for the standalone desktop app (PyInstaller bundle), where there is no terminal to see console output.
+Both `mergemail365` and `mergemail365-web` support `--log-file` for opt-in file logging. This is especially useful for troubleshooting send failures and for the standalone desktop app (PyInstaller bundle), where there is no terminal to see console output.
 
 **When file logging is enabled:**
 
 | Scenario | File logging |
 |---|---|
 | **Desktop app (PyInstaller bundle)** | Always on automatically |
+| `mergemail365 --log-file` | On (explicit opt-in) |
 | `mergemail365-web --log-file` | On (explicit opt-in) |
-| `mergemail365-web --log-level DEBUG` | On (enabled with debug level) |
-| `mergemail365-web` (default) | Off |
+| Default (no flags) | Off |
+
+**File logging always captures at DEBUG level**, regardless of the console log level. This means that even with default INFO console output, the file will contain full details including exception tracebacks from API errors.
 
 **Log file locations:**
 
@@ -546,8 +558,6 @@ The web UI and desktop app support logging to a file. This is especially useful 
 On macOS, the log directory is indexed by Console.app — open Console and search for "mergemail365". On Windows, open File Explorer and paste `%LOCALAPPDATA%\mergemail365\logs` into the address bar.
 
 The log file rotates automatically at 5 MB with 3 backups (20 MB maximum disk usage).
-
-**File logging always captures at DEBUG level**, regardless of the console log level. This means that even with default INFO console output, the file will contain full details including exception tracebacks from API errors.
 
 **Finding the log file path programmatically:**
 

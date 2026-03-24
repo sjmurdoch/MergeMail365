@@ -690,3 +690,33 @@ class TestBccBlastCLI:
         payload = json.loads(responses.calls[0].request.body)
         bcc_addrs = [b["emailAddress"]["address"] for b in payload["message"]["bccRecipients"]]
         assert bcc_addrs == ["me@x.com"]
+
+
+class TestFileLogging:
+    def test_log_file_flag_enables_file_logging(self, sample_xlsx, body_template_file):
+        """--log-file flag triggers setup_file_logging."""
+        from unittest.mock import patch
+        with patch("mail_merge.console.setup_file_logging", return_value=None) as mock_file_log:
+            main([
+                "--spreadsheet", str(sample_xlsx),
+                "--body", str(body_template_file),
+                "--subject", "Hello {{name}}",
+                "--email-column", "email",
+                "--client-id", "fake-client-id",
+                "--log-file",
+            ])
+            mock_file_log.assert_called_once()
+
+    def test_debug_level_does_not_enable_file_logging(self, sample_xlsx, body_template_file):
+        """--log-level DEBUG alone does NOT trigger setup_file_logging."""
+        from unittest.mock import patch
+        with patch("mail_merge.console.setup_file_logging", return_value=None) as mock_file_log:
+            main([
+                "--spreadsheet", str(sample_xlsx),
+                "--body", str(body_template_file),
+                "--subject", "Hello {{name}}",
+                "--email-column", "email",
+                "--client-id", "fake-client-id",
+                "--log-level", "DEBUG",
+            ])
+            mock_file_log.assert_not_called()
