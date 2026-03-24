@@ -82,6 +82,13 @@ Apple recommends signing inside-out (inner binaries first, then the bundle), but
 
 PyInstaller ad-hoc signs all binaries by default (mandatory on Apple Silicon). Ad-hoc signing is sufficient for running on the machine where the app was built, but apps will be blocked by Gatekeeper when transferred to another Mac.
 
+Gatekeeper treats ad-hoc signed and self-signed apps identically — both are "unidentified developer" because neither chains back to an Apple-issued Developer ID certificate. The user experience when opening a blocked app depends on the macOS version:
+
+- **Ventura (13) and Sonoma (14):** Right-click (Control-click) the app, choose **Open**, confirm in the dialog. One-time approval.
+- **Sequoia (15.0+):** The right-click bypass was removed. Users must go to **System Settings > Privacy & Security**, find the blocked app under the Security section, and click **Open Anyway**. One-time approval.
+
+Note that the `com.apple.quarantine` extended attribute is what triggers Gatekeeper, not the signing type. Apps copied via Terminal (`cp`) or with quarantine removed (`xattr -d com.apple.quarantine App.app`) will run without any prompt regardless of how they are signed. Distribution instructions can suggest this as a workaround.
+
 ```bash
 # Ad-hoc sign (no identity needed)
 codesign -s - --force --deep dist/MergeMail365.app
@@ -95,7 +102,7 @@ codesign -s - --force --deep --options runtime \
 
 Self-signed certificates do **not** work with hardened runtime on macOS. When PyInstaller enables hardened runtime (which it does automatically with `codesign_identity`), self-signed certificates cause shared libraries to fail to load with: *"code signature not valid for use in process using Library Validation: mapped file has no Team ID"*.
 
-Self-signed certificates also cannot be notarized (Apple requires Developer ID). For local testing, ad-hoc signing (`codesign -s -`) is simpler and equally effective. For distribution, you need a paid Apple Developer account.
+Self-signed certificates also cannot be notarized (Apple requires Developer ID). Gatekeeper blocks self-signed apps with the same dialog and bypass steps as ad-hoc signed apps (see above), so self-signing offers no UX advantage for distribution. For local testing, ad-hoc signing (`codesign -s -`) is simpler and equally effective. For distribution, you need a paid Apple Developer account.
 
 If you still want a self-signed certificate (e.g., for signing **without** hardened runtime):
 
@@ -123,7 +130,7 @@ rm /tmp/cert.cfg /tmp/ss-key.pem /tmp/ss-cert.pem /tmp/ss-cert.p12
 codesign --deep --force --sign "MergeMail365 Self-Signed" dist/MergeMail365.app
 ```
 
-To run the self-signed app on another Mac, the user must right-click > **Open** or allow it in **System Settings > Privacy & Security**.
+To run the self-signed app on another Mac, the user must allow it in **System Settings > Privacy & Security** (on Sequoia 15.0+) or right-click > **Open** (on Sonoma and earlier). This is the same process as for ad-hoc signed apps.
 
 ### Notarization
 
@@ -256,6 +263,7 @@ Add these steps to `.github/workflows/release.yml`:
 - The `stapler staple` step embeds the notarization ticket in the app so it works offline.
 - `--onedir` mode (which our spec uses via `COLLECT`) is strongly recommended over `--onefile` for signed/notarized apps. Onefile bundles cannot be post-signed (embedded binaries are inaccessible) and are incompatible with sandboxing.
 - If signing fails with `"no cdhash, completely unsigned?"`, ensure you're using `--force` to replace PyInstaller's default ad-hoc signatures.
+- **Gatekeeper bypass changed in Sequoia**: macOS 15.0 removed the right-click > Open bypass for unsigned/ad-hoc/self-signed apps. Users must now go to System Settings > Privacy & Security > Open Anyway. This makes distribution without a Developer ID certificate noticeably more friction for end users.
 
 ## Windows
 
