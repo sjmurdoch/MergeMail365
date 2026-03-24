@@ -57,6 +57,22 @@ jobs:
           MERGEMAIL365_TENANT_ID: ${{ vars.MERGEMAIL365_TENANT_ID }}
         run: uv run pyinstaller mergemail365.spec
 
+      - name: Sign bundle (Windows)
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PWD: ${{ secrets.WINDOWS_CERTIFICATE_PWD }}
+        shell: pwsh
+        run: |
+          $certPath = "$env:RUNNER_TEMP\certificate.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          try {
+            .\scripts\sign-windows.ps1 -BundlePath dist\mergemail365 `
+              -ImportPfx $certPath -PfxPassword $env:WINDOWS_CERTIFICATE_PWD
+          } finally {
+            Remove-Item $certPath -ErrorAction SilentlyContinue
+          }
+
       - name: Archive bundle (macOS)
         if: runner.os == 'macOS'
         run: cd dist && ditto -c -k --sequesterRsrc --keepParent MergeMail365.app MergeMail365-macOS.zip

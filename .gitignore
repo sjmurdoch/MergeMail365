@@ -10,3 +10,5 @@ htmlcov/
 projects/
 .DS_Store
 ~$*
+*.pfx
+*.p12
