@@ -656,16 +656,16 @@ The version is defined in `pyproject.toml` (`version = "X.Y.Z"`). Update it befo
 2. **Commit the version bump:**
 
    ```bash
-   git add pyproject.toml
-   git commit -m "Bump version to 0.2.0"
+   git add pyproject.toml uv.lock
+   git commit -m "Bump version to 0.2.1"
    git push
    ```
 
 3. **Create a git tag matching the version (prefixed with `v`):**
 
    ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v0.2.1
+   git push origin v0.2.1
    ```
 
 4. **Create a GitHub release** from the tag. This triggers the `release.yml` workflow which builds macOS and Windows bundles via PyInstaller and uploads them as release assets:
