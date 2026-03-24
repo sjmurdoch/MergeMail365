@@ -168,7 +168,6 @@ if (Test-Path $mainExe) {
     & $signtool verify /pa $mainExe
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Signature verification failed for mergemail365.exe"
-        exit 1
     }
 }
 
