@@ -683,6 +683,7 @@ def create_app(
         def _run_job() -> None:
             job.status = JobStatus.RUNNING
             handler = JobLogHandler(job)
+            handler.setLevel(logging.INFO)
             handler.setFormatter(logging.Formatter("%(message)s"))
             mm_logger = logging.getLogger("mail_merge")
             mm_logger.addHandler(handler)

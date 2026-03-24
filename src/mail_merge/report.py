@@ -44,6 +44,8 @@ def print_summary(results: list[SendResult]) -> None:
     sent = summary["sent"]
     failed = summary["failed"]
 
+    logger.info("Summary: Total: %d, Sent: %d, Failed: %d", total, sent, failed)
+
     console.rule("Summary")
     console.print(f"  Total:  {total}")
     sent_text = Text(f"  Sent:   {sent}")
@@ -60,6 +62,7 @@ def print_summary(results: list[SendResult]) -> None:
         console.print("\n[bold red]Failed recipients:[/bold red]")
         for r in results:
             if not r.success:
+                logger.warning("Failed: %s [%s] %s", r.email, r.status_code, r.error)
                 console.print(f"  [red]{r.email}[/red]: [{r.status_code}] {r.error}")
 
 

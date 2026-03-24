@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import re
 import sys
@@ -11,19 +12,24 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 
-def _ensure_utf8_stderr() -> None:
-    """Reconfigure stderr to UTF-8 on Windows where cp1252 can't encode emoji in log messages."""
-    encoding = getattr(sys.stderr, "encoding", "") or ""
-    if encoding.lower().replace("-", "") == "utf8":
-        return
-    try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    except (AttributeError, OSError):
-        pass
+def _make_console() -> Console:
+    """Create a Console that writes UTF-8 to stderr regardless of the Windows codepage."""
+    # Wrap stderr's raw buffer in a UTF-8 TextIOWrapper so rich never hits cp1252.
+    # Works with any rich version (no 'encoding' kwarg needed).
+    buf = getattr(sys.stderr, "buffer", None)
+    if buf is not None:
+        try:
+            utf8_stderr = io.TextIOWrapper(buf, encoding="utf-8", errors="replace")
+            return Console(file=utf8_stderr, force_terminal=True)
+        except Exception:
+            pass
+    # PyInstaller console=False sets stderr to None; use devnull to avoid cp1252 errors.
+    if sys.stderr is None or not hasattr(sys.stderr, "write"):
+        return Console(file=io.StringIO(), force_terminal=True)
+    return Console(stderr=True, force_terminal=True)
 
 
-_ensure_utf8_stderr()
-console = Console(stderr=True, force_terminal=True)
+console = _make_console()
 
 # Regex to match ANSI escape sequences
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mK]")
@@ -91,6 +97,13 @@ def setup_file_logging(level: int = logging.DEBUG) -> Path | None:
         # handler even when the console handler is set to INFO or above.
         if root.level > level:
             root.setLevel(level)
+
+        try:
+            _rich_ver = _pkg_version("rich")
+        except Exception:
+            _rich_ver = "unknown"
+        logging.getLogger(__name__).debug("rich version: %s", _rich_ver)
+
         return log_file
     except OSError:
         return None
