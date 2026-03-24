@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import responses
 
@@ -695,7 +696,6 @@ class TestBccBlastCLI:
 class TestFileLogging:
     def test_log_file_flag_enables_file_logging(self, sample_xlsx, body_template_file):
         """--log-file flag triggers setup_file_logging."""
-        from unittest.mock import patch
         with patch("mail_merge.console.setup_file_logging", return_value=None) as mock_file_log:
             main([
                 "--spreadsheet", str(sample_xlsx),
@@ -709,7 +709,6 @@ class TestFileLogging:
 
     def test_debug_level_does_not_enable_file_logging(self, sample_xlsx, body_template_file):
         """--log-level DEBUG alone does NOT trigger setup_file_logging."""
-        from unittest.mock import patch
         with patch("mail_merge.console.setup_file_logging", return_value=None) as mock_file_log:
             main([
                 "--spreadsheet", str(sample_xlsx),

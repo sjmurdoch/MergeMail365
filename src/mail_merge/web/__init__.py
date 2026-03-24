@@ -42,16 +42,8 @@ def main(argv: list[str] | None = None) -> None:
     setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     logger = logging.getLogger(__name__)
 
-    # Auto-enable desktop mode when running as a PyInstaller bundle
-    is_bundled = getattr(sys, "frozen", False)
-
-    # Always enable file logging in bundled mode (no stderr visible),
-    # or when explicitly requested.
-    if is_bundled or args.log_file:
-        from mail_merge.console import setup_file_logging
-        log_file = setup_file_logging()
-        if log_file:
-            logger.info("Log file: %s", log_file)
+    from mail_merge.console import maybe_enable_file_logging
+    is_bundled = maybe_enable_file_logging(args.log_file)
 
     desktop = args.desktop or is_bundled
 

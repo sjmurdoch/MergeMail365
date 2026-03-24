@@ -102,3 +102,17 @@ def setup_file_logging(level: int = logging.DEBUG) -> Path | None:
         return log_file
     except OSError:
         return None
+
+
+def maybe_enable_file_logging(log_file_flag: bool) -> bool:
+    """Enable file logging if explicitly requested or running as a PyInstaller bundle.
+
+    Returns ``True`` if running as a PyInstaller bundle (caller may need this
+    for desktop-mode decisions).
+    """
+    is_bundled = getattr(sys, "frozen", False)
+    if is_bundled or log_file_flag:
+        log_file = setup_file_logging()
+        if log_file:
+            logging.getLogger(__name__).info("Log file: %s", log_file)
+    return is_bundled

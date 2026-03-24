@@ -65,12 +65,8 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     logger = logging.getLogger(__name__)
 
-    is_bundled = getattr(sys, "frozen", False)
-    if is_bundled or args.log_file:
-        from mail_merge.console import setup_file_logging
-        log_file = setup_file_logging()
-        if log_file:
-            logger.info("Log file: %s", log_file)
+    from mail_merge.console import maybe_enable_file_logging
+    maybe_enable_file_logging(args.log_file)
 
     try:
         results = send_merge(

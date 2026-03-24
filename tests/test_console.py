@@ -128,6 +128,7 @@ class TestConsoleLevelIndependence:
             from logging.handlers import RotatingFileHandler
             for h in list(root.handlers):
                 if isinstance(h, RotatingFileHandler) and str(tmp_path) in str(h.baseFilename):
+                    root.removeHandler(h)
                     h.close()
             root.handlers[:] = original_handlers
             root.level = original_level
