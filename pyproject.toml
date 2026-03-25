@@ -56,3 +56,6 @@ disallow_incomplete_defs = false
 [[tool.mypy.overrides]]
 module = ["msal", "openpyxl", "tomli", "flask", "flask.*", "webview"]
 ignore_missing_imports = true
+
+[tool.uv]
+exclude-newer = "7 days"
