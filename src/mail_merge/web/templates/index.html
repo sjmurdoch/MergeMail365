@@ -4,8 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MergeMail365</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='quill.snow.css') }}">
+    <style>@layer pico, quill, app;</style>
+    <style>@import url("{{ url_for('static', filename='pico.min.css') }}") layer(pico);</style>
+    <style>@import url("{{ url_for('static', filename='quill.snow.css') }}") layer(quill);</style>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>

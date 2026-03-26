@@ -497,6 +497,27 @@ details summary:hover {
     font-size: inherit;
 }
 
+/* Pico styles [role=button] as a primary button — reset inside Quill toolbar */
+.ql-toolbar [role="button"] {
+    --pico-background-color: transparent;
+    --pico-border-color: transparent;
+    --pico-color: #444;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    font-weight: normal;
+    width: auto;
+    height: auto;
+}
+
+.ql-toolbar .ql-picker-label {
+    padding: 0 2px 0 8px;
+}
+
+.ql-toolbar .ql-picker-item {
+    padding: 5px 8px;
+}
+
 /* Hidden */
 .hidden {
     display: none !important;
