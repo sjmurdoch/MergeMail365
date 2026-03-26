@@ -814,6 +814,21 @@ def create_app(
                 "supported in email. Use inline style attributes instead."
             )
 
+        if re.search(r"<style\b", body, re.IGNORECASE):
+            warnings.append(
+                "Embedded <style> blocks may be stripped. Many email clients "
+                "(Gmail, Outlook.com) remove <style> tags. Use inline style "
+                "attributes for reliable rendering."
+            )
+
+        if re.search(r"<html\b|<!DOCTYPE", body, re.IGNORECASE):
+            warnings.append(
+                "Full HTML document detected. Your own <html> structure will "
+                "be sent as-is, bypassing the app\u2019s standard email "
+                "compatibility wrappers (CSS resets, Outlook DPI fix, mobile "
+                "viewport)."
+            )
+
         body_bytes = len(body.encode("utf-8"))
         if body_bytes > _GMAIL_CLIP_BYTES:
             size_kb = body_bytes // 1024

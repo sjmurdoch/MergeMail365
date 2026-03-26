@@ -464,6 +464,39 @@ details summary:hover {
     margin-bottom: 0.25rem;
 }
 
+/* HTML editor wrapper */
+.html-editor-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.25rem;
+    font-size: 0.85rem;
+}
+
+#quill-editor {
+    min-height: 200px;
+    margin-bottom: 1rem;
+}
+
+/* Source textarea in HTML mode */
+#html-source {
+    font-family: var(--pico-font-family-monospace);
+    font-size: 0.85rem;
+}
+
+/* Override Quill toolbar to blend with Pico theme */
+.ql-toolbar.ql-snow {
+    border-color: var(--pico-form-element-border-color);
+    border-radius: var(--pico-border-radius) var(--pico-border-radius) 0 0;
+    background: var(--pico-card-background-color);
+}
+
+.ql-container.ql-snow {
+    border-color: var(--pico-form-element-border-color);
+    border-radius: 0 0 var(--pico-border-radius) var(--pico-border-radius);
+    font-family: inherit;
+    font-size: inherit;
+}
+
 /* Hidden */
 .hidden {
     display: none !important;

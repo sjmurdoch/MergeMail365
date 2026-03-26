@@ -28,6 +28,75 @@ from mail_merge.report import print_summary, read_csv, write_csv
 
 logger = logging.getLogger(__name__)
 
+_EMAIL_HTML_WRAPPER = """\
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+    <meta charset="utf-8">
+    <!--[if mso]>
+    <noscript><xml><o:OfficeDocumentSettings>
+    <o:PixelsPerInch>96</o:PixelsPerInch>
+    </o:OfficeDocumentSettings></xml></noscript>
+    <![endif]-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body, p, h1, h2, h3, ul, ol, li, blockquote {{
+            margin: 0;
+            padding: 0;
+        }}
+        p {{
+            margin: 0 0 0.75em 0;
+        }}
+        h1 {{
+            font-size: 1.6em;
+            margin: 0 0 0.5em 0;
+        }}
+        h2 {{
+            font-size: 1.3em;
+            margin: 0 0 0.5em 0;
+        }}
+        h3 {{
+            font-size: 1.1em;
+            margin: 0 0 0.5em 0;
+        }}
+        ul, ol {{
+            margin: 0 0 0.75em 0;
+            padding-left: 1.5em;
+        }}
+        li {{
+            margin: 0 0 0.25em 0;
+        }}
+        blockquote {{
+            margin: 0 0 0.75em 0;
+            padding: 0.5em 0 0.5em 1em;
+            border-left: 3px solid #ccc;
+            color: #555;
+        }}
+        a {{
+            color: #1a73e8;
+        }}
+    </style>
+</head>
+<body style="margin: 0; padding: 16px; font-family: -apple-system, 'Segoe UI', \
+Roboto, Arial, Helvetica, sans-serif; font-size: 14px; \
+line-height: 1.5; color: #1a1a1a;">
+{body}
+</body>
+</html>"""
+
+
+def _wrap_html_for_email(body: str) -> str:
+    """Wrap an HTML fragment in an email-compatible document structure.
+
+    If the body already contains ``<!DOCTYPE`` or ``<html`` (case-insensitive),
+    it is returned unchanged — the user provided a complete document.
+    """
+    import re
+    if re.search(r"<!DOCTYPE|<html\b", body, re.IGNORECASE):
+        return body
+    return _EMAIL_HTML_WRAPPER.format(body=body)
+
 
 def _format_addrs(entries: list[EmailAddress]) -> str:
     """Format a list of EmailAddress objects for human-readable display."""
@@ -521,6 +590,10 @@ def send_merge(
                         token = acquire_token(client_id, tenant_id)
                     except Exception:
                         logger.warning("Token refresh failed, continuing with current token")
+
+    # --- Wrap HTML body for email compatibility ---
+    if html:
+        body_template = _wrap_html_for_email(body_template)
 
     # --- Test email (always sends, regardless of --send flag) ---
     if test_email:

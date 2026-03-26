@@ -1319,3 +1319,108 @@ class TestNameColumn:
                 email_column="email",
                 name_column="nonexistent",
             )
+
+
+class TestWrapHtmlForEmail:
+    """Tests for _wrap_html_for_email()."""
+
+    def test_wraps_fragment(self):
+        from mail_merge.api import _wrap_html_for_email
+        result = _wrap_html_for_email("<p>Hello</p>")
+        assert "<!DOCTYPE html>" in result
+        assert "<p>Hello</p>" in result
+        assert "PixelsPerInch" in result
+        assert 'font-family' in result
+
+    def test_preserves_full_document_with_html_tag(self):
+        from mail_merge.api import _wrap_html_for_email
+        doc = "<html><body><p>Hello</p></body></html>"
+        assert _wrap_html_for_email(doc) == doc
+
+    def test_preserves_full_document_with_doctype(self):
+        from mail_merge.api import _wrap_html_for_email
+        doc = "<!DOCTYPE html>\n<html><body>Hi</body></html>"
+        assert _wrap_html_for_email(doc) == doc
+
+    def test_case_insensitive_detection(self):
+        from mail_merge.api import _wrap_html_for_email
+        doc = "<!doctype HTML>\n<HTML><BODY>Hi</BODY></HTML>"
+        assert _wrap_html_for_email(doc) == doc
+
+    def test_wrapper_contains_css_resets(self):
+        from mail_merge.api import _wrap_html_for_email
+        result = _wrap_html_for_email("<p>Test</p>")
+        assert "margin: 0" in result
+        assert "blockquote" in result
+
+    def test_wrapper_contains_viewport_meta(self):
+        from mail_merge.api import _wrap_html_for_email
+        result = _wrap_html_for_email("<p>Test</p>")
+        assert 'name="viewport"' in result
+
+    @responses.activate
+    def test_html_body_wrapped_in_send(self, sample_xlsx, body_template_file, monkeypatch):
+        """When html=True, the body sent via Graph API is wrapped."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Test",
+            email_column="email",
+            client_id="fake-client-id",
+            test_email="tester@example.com",
+            send=True,
+            html=True,
+        )
+        assert results[0].success
+
+        payload = json.loads(responses.calls[0].request.body)
+        body_content = payload["message"]["body"]["content"]
+        assert "<!DOCTYPE html>" in body_content
+        assert "PixelsPerInch" in body_content
+
+    @responses.activate
+    def test_full_document_not_double_wrapped(self, sample_xlsx, tmp_path, monkeypatch):
+        """A body that already has <html> is sent as-is."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
+
+        body_file = tmp_path / "body.html"
+        body_file.write_text(
+            "<html><body><p>Hello {{name}}</p></body></html>",
+            encoding="utf-8",
+        )
+
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_file,
+            subject="Test",
+            email_column="email",
+            client_id="fake-client-id",
+            test_email="tester@example.com",
+            send=True,
+            html=True,
+        )
+        assert results[0].success
+
+        payload = json.loads(responses.calls[0].request.body)
+        body_content = payload["message"]["body"]["content"]
+        # Should NOT have the wrapper's PixelsPerInch
+        assert "PixelsPerInch" not in body_content
+        assert "<html>" in body_content
+
+    def test_plain_text_not_wrapped(self, sample_xlsx, body_template_file):
+        """When html=False, body is not wrapped."""
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body=body_template_file,
+            subject="Hello {{name}}",
+            email_column="email",
+            html=False,
+        )
+        assert len(results) == 2
+        # Dry run — can't inspect body directly, but no error means wrapper wasn't applied

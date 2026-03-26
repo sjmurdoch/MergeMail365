@@ -13,6 +13,7 @@ let sendStarted = false;
 let currentJobId = null;
 let sendResults = null;
 let formDirty = false;
+let quillEditor = null;
 
 // Convenience getter — spreadsheetData.rows is the single source of truth
 function getRecipients() { return spreadsheetData ? spreadsheetData.rows : null; }
@@ -62,6 +63,98 @@ function apiFetch(url, opts = {}) {
     }
     return fetch(url, opts);
 }
+
+// ---------------------------------------------------------------------------
+// Quill rich text editor
+// ---------------------------------------------------------------------------
+function initQuill() {
+    if (quillEditor) return;
+    quillEditor = new Quill('#quill-editor', {
+        theme: 'snow',
+        placeholder: 'Compose your HTML email...',
+        modules: {
+            toolbar: [
+                ['bold', 'italic', 'underline'],
+                ['link'],
+                [{ header: [1, 2, 3, false] }],
+                [{ list: 'ordered' }, { list: 'bullet' }],
+                ['blockquote'],
+                ['clean'],
+            ],
+        },
+        formats: [
+            'bold', 'italic', 'underline',
+            'link',
+            'header',
+            'list',
+            'blockquote',
+        ],
+    });
+
+    quillEditor.on('text-change', () => {
+        syncQuillToTextarea();
+        onTemplateChange();
+    });
+}
+
+function syncQuillToTextarea() {
+    const html = quillEditor.root.innerHTML;
+    const cleaned = html.replace(/<p><br><\/p>/g, '')
+                        .replace(/<p><\/p>/g, '')
+                        .trim() || '';
+    $('html-source').value = cleaned;
+    $('body-input').value = cleaned;
+}
+
+function syncTextareaToQuill() {
+    const html = $('html-source').value;
+    const delta = quillEditor.clipboard.convert({ html });
+    quillEditor.setContents(delta, 'silent');
+    $('body-input').value = html;
+}
+
+// Source toggle: switch between rich text and raw HTML views
+$('source-toggle').addEventListener('change', () => {
+    if ($('source-toggle').checked) {
+        syncQuillToTextarea();
+        hide('quill-editor');
+        show('html-source');
+    } else {
+        syncTextareaToQuill();
+        show('quill-editor');
+        hide('html-source');
+    }
+});
+
+// HTML toggle: switch between plain textarea and Quill editor
+$('html-toggle').addEventListener('change', () => {
+    const isHtml = $('html-toggle').checked;
+    if (isHtml) {
+        initQuill();
+        const existingBody = $('body-input').value;
+        if (existingBody) {
+            const delta = quillEditor.clipboard.convert({ html: existingBody });
+            quillEditor.setContents(delta, 'silent');
+        }
+        hide('body-input');
+        show('html-editor-wrap');
+        // Reset source toggle to rich text view
+        $('source-toggle').checked = false;
+        show('quill-editor');
+        hide('html-source');
+    } else {
+        const html = $('body-input').value;
+        if (/<[a-zA-Z][^>]*>/.test(html)) {
+            if (!confirm('Body contains HTML formatting. Switch to plain text? Tags will be preserved as text.')) {
+                $('html-toggle').checked = true;
+                return;
+            }
+        }
+        show('body-input');
+        hide('html-editor-wrap');
+    }
+    onTemplateChange();
+});
 
 // ---------------------------------------------------------------------------
 // Step navigation
@@ -566,23 +659,39 @@ function showPlaceholderChips(columns) {
             // Use mousedown and preventDefault to avoid the input losing focus
             // when clicking the chip.
             e.preventDefault();
-            
-            // Target either the subject or the body, whichever was last focused
-            let target = document.activeElement;
-            if (target !== $("subject-input") && target !== $("body-input")) {
-                target = $("body-input");
-            }
-            
-            const start = target.selectionStart;
-            const end = target.selectionEnd;
-            const text = target.value;
             const insertion = "{{" + col + "}}";
-            
-            target.value = text.substring(0, start) + insertion + text.substring(end);
-            target.focus();
-            const newPos = start + insertion.length;
-            target.setSelectionRange(newPos, newPos);
-            
+
+            if ($("html-toggle").checked && quillEditor && !$("source-toggle").checked) {
+                // Insert into Quill editor
+                const range = quillEditor.getSelection(true);
+                if (range) {
+                    quillEditor.deleteText(range.index, range.length);
+                    quillEditor.insertText(range.index, insertion);
+                    const newPos = range.index + insertion.length;
+                    quillEditor.setSelection(newPos, 0);
+                    const bounds = quillEditor.getBounds(newPos);
+                    if (bounds) {
+                        quillEditor.scrollingContainer.scrollTop = bounds.top;
+                    }
+                }
+            } else {
+                // Textarea insertion (subject, body, or html-source)
+                let target = document.activeElement;
+                if (target !== $("subject-input") && target !== $("body-input")
+                    && target !== $("html-source")) {
+                    target = $("html-toggle").checked ? $("html-source") : $("body-input");
+                }
+
+                const start = target.selectionStart;
+                const end = target.selectionEnd;
+                const text = target.value;
+
+                target.value = text.substring(0, start) + insertion + text.substring(end);
+                target.focus();
+                const newPos = start + insertion.length;
+                target.setSelectionRange(newPos, newPos);
+            }
+
             // Trigger validation/auto-save
             onTemplateChange();
         });
@@ -605,7 +714,10 @@ $("subject-input").addEventListener("input", onTemplateChange);
 $("body-input").addEventListener("input", onTemplateChange);
 $("email-column").addEventListener("change", onTemplateChange);
 $("name-column").addEventListener("change", onTemplateChange);
-$("html-toggle").addEventListener("change", onTemplateChange);
+$("html-source").addEventListener("input", () => {
+    $("body-input").value = $("html-source").value;
+    onTemplateChange();
+});
 $("cc-input").addEventListener("input", onTemplateChange);
 $("bcc-input").addEventListener("input", onTemplateChange);
 $("reply-to-input").addEventListener("input", onTemplateChange);
@@ -678,6 +790,24 @@ function validateHtmlBody() {
         warnings.push(
             "<strong>External stylesheets ignored:</strong> <code>&lt;link rel=\"stylesheet\"&gt;</code> " +
             "is not supported in email. Use inline <code>style</code> attributes instead."
+        );
+    }
+
+    // Embedded <style> blocks
+    if (/<style\b/i.test(body)) {
+        warnings.push(
+            "<strong>Embedded &lt;style&gt; blocks may be stripped.</strong> Many email clients " +
+            "(Gmail, Outlook.com) remove &lt;style&gt; tags. Use inline <code>style</code> " +
+            "attributes for reliable rendering."
+        );
+    }
+
+    // Full HTML document bypass
+    if (/<html\b|<!doctype/i.test(body)) {
+        warnings.push(
+            "<strong>Full HTML document detected.</strong> Your own &lt;html&gt; structure will " +
+            "be sent as-is, bypassing the app\u2019s standard email compatibility wrappers " +
+            "(CSS resets, Outlook DPI fix, mobile viewport)."
         );
     }
 
@@ -1162,6 +1292,13 @@ function newMerge() {
     $("email-column").innerHTML = '<option value="">-- select --</option>';
     $("name-column").innerHTML = '<option value="">-- none --</option>';
     $("html-toggle").checked = false;
+    show("body-input");
+    hide("html-editor-wrap");
+    $("source-toggle").checked = false;
+    if (quillEditor) {
+        quillEditor.setContents([{ insert: '\n' }], 'silent');
+    }
+    $("html-source").value = "";
     hide("placeholder-chips");
     hide("placeholder-errors");
     hide("html-warnings");
@@ -1219,6 +1356,7 @@ function newMerge() {
         localStorage.removeItem("mm_body");
         localStorage.removeItem("mm_email_col");
         localStorage.removeItem("mm_name_col");
+        localStorage.removeItem("mm_html");
     } catch (e) { /* ignore */ }
 
     goToStep(1);
@@ -1401,6 +1539,7 @@ document.addEventListener("DOMContentLoaded", () => {
             localStorage.setItem("mm_body", $("body-input").value);
             localStorage.setItem("mm_email_col", $("email-column").value);
             localStorage.setItem("mm_name_col", $("name-column").value);
+            localStorage.setItem("mm_html", $("html-toggle").checked ? "1" : "");
         } catch (e) { /* ignore */ }
     }, 5000);
 
@@ -1410,10 +1549,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const savedBody = localStorage.getItem("mm_body");
         const savedEmailCol = localStorage.getItem("mm_email_col");
         const savedNameCol = localStorage.getItem("mm_name_col");
-        
+        const savedHtml = localStorage.getItem("mm_html");
+
         if (savedSubject && !$("subject-input").value) $("subject-input").value = savedSubject;
         if (savedBody && !$("body-input").value) $("body-input").value = savedBody;
         if (savedEmailCol && !$("email-column").value) $("email-column").value = savedEmailCol;
         if (savedNameCol && !$("name-column").value) $("name-column").value = savedNameCol;
+        if (savedHtml === "1" && !$("html-toggle").checked) {
+            $("html-toggle").checked = true;
+            $("html-toggle").dispatchEvent(new Event("change"));
+        }
     } catch (e) { /* ignore */ }
 });
