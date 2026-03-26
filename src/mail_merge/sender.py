@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from importlib.metadata import version
 
 import requests
 
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 GRAPH_SEND_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
 MAX_RECIPIENTS_PER_MESSAGE = 500
+X_MAILER = f"MergeMail365/{version('mergemail365')}"
 
 
 @dataclass
@@ -77,6 +79,9 @@ def send_one(
         "subject": subject,
         "body": {"contentType": content_type, "content": body},
         "toRecipients": [to.to_graph()],
+        "internetMessageHeaders": [
+            {"name": "X-Mailer", "value": X_MAILER},
+        ],
     }
     if opts.importance:
         message["importance"] = opts.importance
