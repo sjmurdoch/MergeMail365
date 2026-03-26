@@ -33,6 +33,7 @@ from flask import (
     url_for,
 )
 
+from mail_merge.api import _FULL_DOC_RE, _STYLE_TAG_RE
 from mail_merge.config import load_config
 from mail_merge.sender import SendResult
 
@@ -814,14 +815,14 @@ def create_app(
                 "supported in email. Use inline style attributes instead."
             )
 
-        if re.search(r"<style\b", body, re.IGNORECASE):
+        if _STYLE_TAG_RE.search(body):
             warnings.append(
                 "Embedded <style> blocks may be stripped. Many email clients "
                 "(Gmail, Outlook.com) remove <style> tags. Use inline style "
                 "attributes for reliable rendering."
             )
 
-        if re.search(r"<html\b|<!DOCTYPE", body, re.IGNORECASE):
+        if _FULL_DOC_RE.search(body):
             warnings.append(
                 "Full HTML document detected. Your own <html> structure will "
                 "be sent as-is, bypassing the app\u2019s standard email "

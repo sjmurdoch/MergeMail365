@@ -490,7 +490,8 @@ class TestHtmlEditor:
         editor = page.locator("#quill-editor .ql-editor")
         editor.click()
         editor.type("Hello from Quill")
-        # body-input should contain the text (wrapped in HTML tags by Quill)
+        # Wait for debounced sync (150ms) to propagate to body-input
+        page.wait_for_timeout(300)
         body_val = page.locator("#body-input").input_value()
         assert "Hello from Quill" in body_val
         # Clean up
@@ -563,6 +564,8 @@ class TestHtmlEditor:
         # Type something and bold it to ensure HTML tags are present
         editor.type("Bold text")
         page.click(".ql-bold")
+        # Wait for debounced sync to propagate HTML to body-input
+        page.wait_for_timeout(300)
 
         # Dismiss the confirm dialog — should stay in HTML mode
         dialog_messages = []
@@ -597,6 +600,8 @@ class TestHtmlEditor:
         page.locator("#quill-editor .ql-editor").click()
         # Click a placeholder chip
         page.click(".chip >> nth=0")
+        # Wait for debounced sync to propagate
+        page.wait_for_timeout(300)
         # The body-input (synced from Quill) should contain the placeholder
         body_val = page.locator("#body-input").input_value()
         assert "{{" in body_val

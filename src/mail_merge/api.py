@@ -29,7 +29,10 @@ from mail_merge.report import print_summary, read_csv, write_csv
 
 logger = logging.getLogger(__name__)
 
-_EMAIL_HTML_WRAPPER = """\
+_FULL_DOC_RE = re.compile(r"<!DOCTYPE|<html\b", re.IGNORECASE)
+_STYLE_TAG_RE = re.compile(r"<style\b", re.IGNORECASE)
+
+_EMAIL_HTML_WRAPPER_HEAD = """\
 <!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml"
       xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -42,47 +45,49 @@ _EMAIL_HTML_WRAPPER = """\
     <![endif]-->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body, p, h1, h2, h3, ul, ol, li, blockquote {{
+        body, p, h1, h2, h3, ul, ol, li, blockquote {
             margin: 0;
             padding: 0;
-        }}
-        p {{
+        }
+        p {
             margin: 0 0 0.75em 0;
-        }}
-        h1 {{
+        }
+        h1 {
             font-size: 1.6em;
             margin: 0 0 0.5em 0;
-        }}
-        h2 {{
+        }
+        h2 {
             font-size: 1.3em;
             margin: 0 0 0.5em 0;
-        }}
-        h3 {{
+        }
+        h3 {
             font-size: 1.1em;
             margin: 0 0 0.5em 0;
-        }}
-        ul, ol {{
+        }
+        ul, ol {
             margin: 0 0 0.75em 0;
             padding-left: 1.5em;
-        }}
-        li {{
+        }
+        li {
             margin: 0 0 0.25em 0;
-        }}
-        blockquote {{
+        }
+        blockquote {
             margin: 0 0 0.75em 0;
             padding: 0.5em 0 0.5em 1em;
             border-left: 3px solid #ccc;
             color: #555;
-        }}
-        a {{
+        }
+        a {
             color: #1a73e8;
-        }}
+        }
     </style>
 </head>
 <body style="margin: 0; padding: 16px; font-family: -apple-system, 'Segoe UI', \
 Roboto, Arial, Helvetica, sans-serif; font-size: 14px; \
 line-height: 1.5; color: #1a1a1a;">
-{body}
+"""
+
+_EMAIL_HTML_WRAPPER_TAIL = """
 </body>
 </html>"""
 
@@ -93,9 +98,9 @@ def _wrap_html_for_email(body: str) -> str:
     If the body already contains ``<!DOCTYPE`` or ``<html`` (case-insensitive),
     it is returned unchanged — the user provided a complete document.
     """
-    if re.search(r"<!DOCTYPE|<html\b", body, re.IGNORECASE):
+    if _FULL_DOC_RE.search(body):
         return body
-    return _EMAIL_HTML_WRAPPER.format(body=body)
+    return _EMAIL_HTML_WRAPPER_HEAD + body + _EMAIL_HTML_WRAPPER_TAIL
 
 
 def _format_addrs(entries: list[EmailAddress]) -> str:

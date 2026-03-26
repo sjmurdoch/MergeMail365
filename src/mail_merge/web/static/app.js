@@ -91,9 +91,13 @@ function initQuill() {
         ],
     });
 
+    let syncTimer = null;
     quillEditor.on('text-change', () => {
-        syncQuillToTextarea();
-        onTemplateChange();
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(() => {
+            syncQuillToTextarea();
+            onTemplateChange();
+        }, 150);
     });
 }
 
@@ -673,6 +677,7 @@ function showPlaceholderChips(columns) {
                     if (bounds) {
                         quillEditor.scrollingContainer.scrollTop = bounds.top;
                     }
+                    syncQuillToTextarea();
                 }
             } else {
                 // Textarea insertion (subject, body, or html-source)
