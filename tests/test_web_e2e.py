@@ -445,6 +445,230 @@ class TestKeyboardNavigation:
         # Should move to next input — just verify we can tab without errors
 
 
+class TestHtmlEditor:
+    """Tests for the Quill rich text editor and HTML mode."""
+
+    def test_html_toggle_shows_quill_editor(self, authenticated_page: Page):
+        """Checking 'Send as HTML' shows the Quill editor and hides the plain textarea."""
+        page = authenticated_page
+        # Plain textarea should be visible, editor hidden
+        expect(page.locator("#body-input")).to_be_visible()
+        expect(page.locator("#html-editor-wrap")).to_be_hidden()
+
+        page.check("#html-toggle")
+        expect(page.locator("#body-input")).to_be_hidden()
+        expect(page.locator("#html-editor-wrap")).not_to_have_class(re.compile("hidden"))
+        # Quill toolbar should be present
+        expect(page.locator(".ql-toolbar")).to_be_visible()
+        # Quill editor area should be visible
+        expect(page.locator("#quill-editor .ql-editor")).to_be_visible()
+
+        # Uncheck to restore
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+        expect(page.locator("#body-input")).to_be_visible()
+        expect(page.locator("#html-editor-wrap")).to_be_hidden()
+
+    def test_quill_toolbar_buttons(self, authenticated_page: Page):
+        """Quill toolbar has the expected formatting buttons."""
+        page = authenticated_page
+        page.check("#html-toggle")
+        expect(page.locator(".ql-bold")).to_be_visible()
+        expect(page.locator(".ql-italic")).to_be_visible()
+        expect(page.locator(".ql-underline")).to_be_visible()
+        expect(page.locator(".ql-link")).to_be_visible()
+        expect(page.locator(".ql-blockquote")).to_be_visible()
+        expect(page.locator(".ql-clean")).to_be_visible()
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_typing_in_quill_syncs_to_body_input(self, authenticated_page: Page):
+        """Text typed in Quill should sync to the hidden body-input textarea."""
+        page = authenticated_page
+        page.check("#html-toggle")
+        editor = page.locator("#quill-editor .ql-editor")
+        editor.click()
+        editor.type("Hello from Quill")
+        # body-input should contain the text (wrapped in HTML tags by Quill)
+        body_val = page.locator("#body-input").input_value()
+        assert "Hello from Quill" in body_val
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_source_toggle_shows_html(self, authenticated_page: Page):
+        """Toggling 'View source' shows raw HTML and hides the Quill editor."""
+        page = authenticated_page
+        page.check("#html-toggle")
+        editor = page.locator("#quill-editor .ql-editor")
+        editor.click()
+        editor.type("Source test")
+
+        # Toggle to source view
+        page.check("#source-toggle")
+        expect(page.locator("#quill-editor")).to_be_hidden()
+        expect(page.locator("#html-source")).to_be_visible()
+        source_val = page.locator("#html-source").input_value()
+        assert "Source test" in source_val
+
+        # Toggle back to rich text
+        page.uncheck("#source-toggle")
+        expect(page.locator("#quill-editor")).to_be_visible()
+        expect(page.locator("#html-source")).to_be_hidden()
+
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_source_edits_sync_back_to_quill(self, authenticated_page: Page):
+        """Edits made in source view should appear in Quill when switching back."""
+        page = authenticated_page
+        page.check("#html-toggle")
+
+        # Switch to source and type HTML
+        page.check("#source-toggle")
+        page.fill("#html-source", "<p>Edited in source</p>")
+
+        # Switch back to Quill
+        page.uncheck("#source-toggle")
+        editor_text = page.locator("#quill-editor .ql-editor").inner_text()
+        assert "Edited in source" in editor_text
+
+        # body-input should also be synced
+        body_val = page.locator("#body-input").input_value()
+        assert "Edited in source" in body_val
+
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_existing_body_transferred_to_quill(self, authenticated_page: Page):
+        """Content in body-input before toggling HTML should appear in Quill."""
+        page = authenticated_page
+        page.fill("#body-input", "Pre-existing content")
+        page.check("#html-toggle")
+        editor_text = page.locator("#quill-editor .ql-editor").inner_text()
+        assert "Pre-existing content" in editor_text
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_html_toggle_off_confirms_when_html_present(self, authenticated_page: Page):
+        """Unchecking HTML toggle with HTML content shows a confirmation dialog."""
+        page = authenticated_page
+        page.check("#html-toggle")
+        editor = page.locator("#quill-editor .ql-editor")
+        editor.click()
+        # Type something and bold it to ensure HTML tags are present
+        editor.type("Bold text")
+        page.click(".ql-bold")
+
+        # Dismiss the confirm dialog — should stay in HTML mode
+        dialog_messages = []
+
+        def dismiss_handler(d):
+            dialog_messages.append(d.message)
+            d.dismiss()
+
+        page.on("dialog", dismiss_handler)
+        # Click the checkbox label directly instead of using uncheck
+        page.locator("#html-toggle").click(force=True)
+        page.wait_for_timeout(500)
+        assert len(dialog_messages) > 0
+        assert "HTML formatting" in dialog_messages[0]
+        # Should still be in HTML mode (dismissed = cancelled)
+        assert page.locator("#html-toggle").is_checked()
+        page.remove_listener("dialog", dismiss_handler)
+
+        # Now accept the dialog to actually toggle off
+        page.on("dialog", lambda d: d.accept())
+        page.locator("#html-toggle").click(force=True)
+        page.wait_for_timeout(500)
+        expect(page.locator("#body-input")).to_be_visible()
+
+    def test_placeholder_chip_inserts_into_quill(self, authenticated_page: Page, sample_xlsx: Path):
+        """Clicking a placeholder chip inserts into the Quill editor."""
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.check("#html-toggle")
+        # Click in the editor to focus it
+        page.locator("#quill-editor .ql-editor").click()
+        # Click a placeholder chip
+        page.click(".chip >> nth=0")
+        # The body-input (synced from Quill) should contain the placeholder
+        body_val = page.locator("#body-input").input_value()
+        assert "{{" in body_val
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_html_warnings_for_style_block(self, authenticated_page: Page):
+        """An embedded <style> block shows a warning."""
+        page = authenticated_page
+        page.check("#html-toggle")
+        page.check("#source-toggle")
+        page.fill("#html-source", "<style>body{color:red}</style><p>Hello</p>")
+        # Trigger sync to body-input
+        page.locator("#html-source").dispatch_event("input")
+        page.wait_for_selector("#html-warnings:not(.hidden)", timeout=3000)
+        expect(page.locator("#html-warnings")).to_contain_text("style")
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_html_warnings_for_full_document(self, authenticated_page: Page):
+        """A full HTML document shows a bypass warning."""
+        page = authenticated_page
+        page.check("#html-toggle")
+        page.check("#source-toggle")
+        page.fill("#html-source", "<!DOCTYPE html><html><body>Hi</body></html>")
+        page.locator("#html-source").dispatch_event("input")
+        page.wait_for_selector("#html-warnings:not(.hidden)", timeout=3000)
+        expect(page.locator("#html-warnings")).to_contain_text("Full HTML document")
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+    def test_html_preview_uses_iframe(self, authenticated_page: Page, sample_xlsx: Path):
+        """In HTML mode, Step 2 preview renders in an iframe."""
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.fill("#subject-input", "Hello {{name}}")
+
+        # Set HTML body via source mode
+        page.check("#html-toggle")
+        page.check("#source-toggle")
+        page.fill("#html-source", "<p>Welcome <strong>{{name}}</strong></p>")
+        page.locator("#html-source").dispatch_event("input")
+
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        # HTML preview should use iframe, not <pre>
+        expect(page.locator("#preview-body")).to_be_hidden()
+        expect(page.locator("#preview-body-html")).to_be_visible()
+
+        # Go back for cleanup
+        page.click("button:has-text('← Back')")
+        page.wait_for_selector("#step-1.active", timeout=3000)
+        page.on("dialog", lambda d: d.accept())
+        page.locator("#html-toggle").click(force=True)
+        page.wait_for_timeout(300)
+
+    def test_bypass_hint_visible_in_source_mode(self, authenticated_page: Page):
+        """The bypass hint below the source textarea is visible."""
+        page = authenticated_page
+        page.check("#html-toggle")
+        # The hint should be visible in the html-editor-wrap
+        expect(page.locator("#html-editor-wrap small.muted")).to_be_visible()
+        expect(page.locator("#html-editor-wrap small.muted")).to_contain_text("compatibility wrappers")
+        # Clean up
+        page.on("dialog", lambda d: d.accept())
+        page.uncheck("#html-toggle")
+
+
 class TestFullWizardFlow:
     """Tests the complete wizard flow with mocked Graph API."""
 

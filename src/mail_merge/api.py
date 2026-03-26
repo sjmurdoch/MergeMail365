@@ -6,6 +6,7 @@ import base64
 import logging
 import mimetypes
 import os
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from email.utils import parseaddr
@@ -92,7 +93,6 @@ def _wrap_html_for_email(body: str) -> str:
     If the body already contains ``<!DOCTYPE`` or ``<html`` (case-insensitive),
     it is returned unchanged — the user provided a complete document.
     """
-    import re
     if re.search(r"<!DOCTYPE|<html\b", body, re.IGNORECASE):
         return body
     return _EMAIL_HTML_WRAPPER.format(body=body)
