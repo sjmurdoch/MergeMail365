@@ -173,4 +173,6 @@ if (Test-Path $mainExe) {
 
 if ($failed -gt 0) {
     exit 1
+} else {
+    exit 0
 }
