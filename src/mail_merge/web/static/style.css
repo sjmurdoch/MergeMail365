@@ -23,33 +23,21 @@
     --badge-warning-text: #78350f;
 }
 
-fieldset legend {
+.pico fieldset legend {
     font-weight: 700;
 }
 
 /* Hide placeholder on focus */
-input:focus::placeholder,
-textarea:focus::placeholder {
+.pico input:focus::placeholder,
+.pico textarea:focus::placeholder {
     opacity: 0;
     transition: opacity 0.1s ease;
 }
 
 /* File input — style the button to match Pico */
-input[type="file"]::file-selector-button {
+.pico input[type="file"]::file-selector-button {
     background-color: var(--pico-primary);
     color: var(--pico-primary-inverse);
-    border: 1px solid var(--pico-primary);
-    border-radius: var(--pico-border-radius);
-    padding: 0.4rem 1rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    margin-right: 0.75rem;
-    transition: background-color 0.15s, border-color 0.15s, filter 0.15s;
-}
-
-input[type="file"]::file-selector-button:hover {
-    filter: brightness(1.1);
 }
 
 /* Layout */
@@ -300,58 +288,6 @@ table caption {
     border-top: 1px solid var(--pico-muted-border-color);
 }
 
-/* Collapsible options */
-details summary {
-    display: inline-block;
-    padding: 0.4rem 1rem;
-    border-radius: var(--pico-border-radius);
-    background-color: var(--pico-primary);
-    color: var(--pico-primary-inverse) !important;
-    font-size: 0.9rem;
-    font-weight: 700;
-    cursor: pointer;
-    border: 1px solid var(--pico-primary);
-    transition: background-color 0.15s, border-color 0.15s, filter 0.15s;
-    margin-bottom: 0.5rem;
-    list-style: none; /* Hide default arrow in some browsers */
-}
-
-details summary::-webkit-details-marker {
-    display: none; /* Hide default arrow in Safari */
-}
-
-details summary::before {
-    content: "▶";
-    display: inline-block;
-    margin-right: 0.5rem;
-    font-size: 0.7rem;
-    transition: transform 0.2s;
-    color: var(--pico-primary-inverse);
-}
-
-details[open] summary::before {
-    transform: rotate(90deg);
-}
-
-details summary:hover {
-    filter: brightness(1.1);
-}
-
-/* Sending mode toggle */
-.mode-toggle {
-    display: flex;
-    gap: 0.5rem;
-    margin: 1rem 0;
-}
-
-.mode-toggle button {
-    flex: 1;
-}
-
-.mode-toggle button.outline:not(.active-mode) {
-    opacity: 0.6;
-}
-
 /* Button row — horizontal group of buttons */
 .button-row {
     display: flex;
@@ -454,6 +390,7 @@ details summary:hover {
 /* Recipient preview table wrapper */
 .table-wrap {
     max-height: 300px;
+    max-width: 900px;
     overflow-y: auto;
 }
 

@@ -83,7 +83,7 @@
                     </div>
                 </div>
                 <details>
-                    <summary>Preview data</summary>
+                    <summary role="button">Preview data</summary>
                     <div class="table-wrap">
                         <table id="preview-table" class="striped"><thead></thead><tbody></tbody></table>
                     </div>
@@ -95,7 +95,7 @@
         <fieldset>
             <legend>Message</legend>
             <!-- Sending mode -->
-            <div class="mode-toggle">
+            <div class="mode-toggle" role="group">
                 <button type="button" id="mode-individual" class="active-mode" onclick="setSendMode('individual')">Send as individual emails</button>
                 <button type="button" id="mode-bcc" class="outline" onclick="setSendMode('bcc')">Send as BCC’d email</button>
             </div>
@@ -127,7 +127,7 @@
 
         <!-- Options (collapsible) -->
         <details>
-            <summary>Additional options</summary>
+            <summary role="button">Additional options</summary>
             <div class="grid">
                 <div>
                     <label for="cc-input">CC</label>
