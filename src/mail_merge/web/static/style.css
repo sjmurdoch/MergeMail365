@@ -23,46 +23,6 @@
     --badge-warning-text: #78350f;
 }
 
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-        --color-warning: #fbbf24;
-        --color-success: #4ade80;
-        --feedback-success-bg: #14532d;
-        --feedback-success-border: #22c55e;
-        --feedback-success-text: #bbf7d0;
-        --feedback-info-bg: #1e3a5f;
-        --feedback-info-border: #3b82f6;
-        --feedback-info-text: #bfdbfe;
-        --feedback-warning-bg: #78350f;
-        --feedback-warning-border: #d97706;
-        --feedback-warning-text: #fef3c7;
-        --feedback-danger-bg: #450a0a;
-        --feedback-danger-border: #ef4444;
-        --feedback-danger-text: #fecaca;
-        --badge-warning-bg: #92400e;
-        --badge-warning-text: #fef3c7;
-    }
-}
-
-[data-theme="dark"] {
-    --color-warning: #fbbf24;
-    --color-success: #4ade80;
-    --feedback-success-bg: #14532d;
-    --feedback-success-border: #22c55e;
-    --feedback-success-text: #bbf7d0;
-    --feedback-info-bg: #1e3a5f;
-    --feedback-info-border: #3b82f6;
-    --feedback-info-text: #bfdbfe;
-    --feedback-warning-bg: #78350f;
-    --feedback-warning-border: #d97706;
-    --feedback-warning-text: #fef3c7;
-    --feedback-danger-bg: #450a0a;
-    --feedback-danger-border: #ef4444;
-    --feedback-danger-text: #fecaca;
-    --badge-warning-bg: #92400e;
-    --badge-warning-text: #fef3c7;
-}
-
 fieldset legend {
     font-weight: 700;
 }
@@ -320,6 +280,7 @@ table caption {
 .badge-warning {
     background: var(--badge-warning-bg);
     color: var(--badge-warning-text);
+    margin-left: 0.5rem;
 }
 
 /* Confirmation input */
@@ -404,11 +365,22 @@ details summary:hover {
     margin-top: 1rem;
 }
 
+.skipped-list {
+    margin: 0.5rem 0 0 1rem;
+    padding: 0;
+    font-size: 0.85rem;
+}
+
 /* Auth diagnostics */
 .auth-diagnostics-content {
     font-size: 0.8rem;
     max-height: 200px;
     overflow: auto;
+}
+
+.auth-diagnostics-content pre {
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
 }
 
 /* Stop send button */
@@ -423,6 +395,16 @@ details summary:hover {
     border-radius: 0.5rem;
     margin: 0.75rem 0;
     font-size: 0.9rem;
+}
+
+.callout.mt-0 {
+    margin-top: 0;
+}
+
+.callout hr {
+    margin: 0.4rem 0;
+    border-color: inherit;
+    opacity: 0.3;
 }
 
 .callout-success {

@@ -43,7 +43,7 @@ function updateStepUI(n) {
 function renderSpreadsheetSummary(data) {
     $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${data.total_rows} rows.`;
     if (data.total_rows > 99) {
-        $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning" style="margin-left:0.5rem;">Large file — filters required</span>`;
+        $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning">Large file — filters required</span>`;
     }
 }
 
@@ -463,18 +463,18 @@ $("btn-test-connection").addEventListener("click", async () => {
         // Build a summary of results
         let summary = "";
         if (data.error) {
-            summary = `<div class="callout callout-danger" style="margin-top:0;"><strong>Connection Error:</strong> ${escapeHtml(data.error)}</div>`;
+            summary = `<div class="callout callout-danger mt-0"><strong>Connection Error:</strong> ${escapeHtml(data.error)}</div>`;
         } else if (data.token_valid) {
-            summary = `<div class="callout callout-success" style="margin-top:0;"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
+            summary = `<div class="callout callout-success mt-0"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
         } else if (data.authority_reachable) {
-            summary = `<div class="callout callout-warning" style="margin-top:0;"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
+            summary = `<div class="callout callout-warning mt-0"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
         } else {
-            summary = `<div class="callout callout-danger" style="margin-top:0;"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
+            summary = `<div class="callout callout-danger mt-0"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
         }
         
-        $("auth-diag-content").innerHTML = summary + `<pre style="font-size:0.8rem; margin-top: 0.5rem;">${JSON.stringify(data, null, 2)}</pre>`;
+        $("auth-diag-content").innerHTML = summary + `<pre>${JSON.stringify(data, null, 2)}</pre>`;
     } catch (e) {
-        $("auth-diag-content").innerHTML = `<div class="callout callout-danger" style="margin-top:0;"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
+        $("auth-diag-content").innerHTML = `<div class="callout callout-danger mt-0"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
     }
 });
 
@@ -691,7 +691,7 @@ function validateHtmlBody() {
     }
 
     if (warnings.length > 0) {
-        el.innerHTML = warnings.join("<hr style='margin:0.4rem 0;border-color:inherit;opacity:0.3;'>");
+        el.innerHTML = warnings.join("<hr>");
         show(el);
     } else {
         hide(el);
@@ -845,7 +845,7 @@ function showInvalidEmailWarning(invalidEmails, totalBefore) {
     el.innerHTML =
         `<strong>${invalidEmails.length} invalid email${invalidEmails.length > 1 ? " addresses" : " address"} skipped</strong>` +
         ` (${validCount} of ${totalBefore} recipients remain)` +
-        `<ul style="margin:0.5rem 0 0 1rem;padding:0;font-size:0.85rem;">${skippedList}</ul>`;
+        `<ul class="skipped-list">${skippedList}</ul>`;
     show(el);
 }
 
