@@ -496,6 +496,7 @@ details summary:hover {
 .auth-feedback {
     min-height: 2rem;
     margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
     display: flex;
     align-items: center;
 }
