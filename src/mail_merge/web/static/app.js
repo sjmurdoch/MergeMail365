@@ -598,7 +598,9 @@ function showPlaceholderChips(columns) {
 // ---------------------------------------------------------------------------
 // Trix HTML editor — sits outside .pico in the DOM for CSS isolation
 // ---------------------------------------------------------------------------
+let trixEditorEl = null;
 document.addEventListener('trix-initialize', (e) => {
+    trixEditorEl = e.target;
     trixEditor = e.target.editor;
 });
 
@@ -622,6 +624,7 @@ function activateHtmlEditor() {
             $("trix-input").value = existingBody;
         }
     }
+    $("source-toggle").checked = false;
     hide("body-input");
     show("html-editor-wrap");
 }
@@ -633,8 +636,8 @@ function onTemplateChange() {
     validationTimer = setTimeout(() => {
         validatePlaceholders();
         validateHtmlBody();
+        if (sendMode === "bcc") checkBccPlaceholders();
     }, 500);
-    if (sendMode === "bcc") checkBccPlaceholders();
     formDirty = true;
 }
 $("subject-input").addEventListener("input", onTemplateChange);
@@ -659,14 +662,13 @@ $("html-toggle").addEventListener("change", () => {
     onTemplateChange();
 });
 $("source-toggle").addEventListener("change", () => {
-    const editorEl = document.querySelector("trix-editor");
     if ($("source-toggle").checked) {
         $("html-source").value = $("trix-input").value;
-        hide(editorEl);
+        hide(trixEditorEl);
         show("html-source");
     } else {
-        trixEditor.loadHTML($("html-source").value);
-        show(editorEl);
+        if (trixEditor) trixEditor.loadHTML($("html-source").value);
+        show(trixEditorEl);
         hide("html-source");
     }
 });
