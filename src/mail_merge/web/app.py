@@ -52,7 +52,7 @@ _EXT_STYLESHEET_RE = re.compile(
     r"""<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>""", re.IGNORECASE,
 )
 _STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
-_FULL_HTML_DOC_RE = re.compile(r"<!doctype|<html\b", re.IGNORECASE)
+_FULL_HTML_DOC_RE = re.compile(r"<!DOCTYPE|<html\b", re.IGNORECASE)
 _GMAIL_CLIP_BYTES = 102 * 1024  # ~102 KB
 
 

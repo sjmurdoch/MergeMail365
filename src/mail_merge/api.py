@@ -165,11 +165,6 @@ _EMAIL_HTML_TAIL = """
 
 
 def _wrap_html_for_email(body: str) -> str:
-    """Wrap an HTML fragment in an email-compatible document structure.
-
-    If the body already contains ``<!DOCTYPE`` or ``<html`` (i.e. the user
-    provided a complete document), return it unchanged.
-    """
     if _FULL_HTML_DOC_RE.search(body):
         return body
     return _EMAIL_HTML_HEAD + body + _EMAIL_HTML_TAIL

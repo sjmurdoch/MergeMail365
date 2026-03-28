@@ -704,6 +704,17 @@ function syncTextareaToQuill() {
     $('body-input').value = html;
 }
 
+function activateHtmlEditor() {
+    initQuill();
+    const existingBody = $("body-input").value;
+    if (existingBody) {
+        const delta = quillEditor.clipboard.convert({ html: existingBody });
+        quillEditor.setContents(delta);
+    }
+    hide("body-input");
+    show("html-editor-wrap");
+}
+
 // Real-time placeholder and HTML validation
 let validationTimer = null;
 function onTemplateChange() {
@@ -722,14 +733,7 @@ $("name-column").addEventListener("change", onTemplateChange);
 $("html-toggle").addEventListener("change", () => {
     const isHtml = $("html-toggle").checked;
     if (isHtml) {
-        initQuill();
-        const existingBody = $("body-input").value;
-        if (existingBody) {
-            const delta = quillEditor.clipboard.convert({ html: existingBody });
-            quillEditor.setContents(delta);
-        }
-        hide("body-input");
-        show("html-editor-wrap");
+        activateHtmlEditor();
     } else {
         const html = $("body-input").value;
         if (/<[a-zA-Z][^>]*>/.test(html)) {
@@ -799,16 +803,13 @@ function validateHtmlBody() {
 
     const warnings = [];
 
-    // Plain text with no HTML tags at all
     if (!HTML_TAG_RE.test(body)) {
         warnings.push(
             "<strong>No HTML tags detected.</strong> The body appears to be plain text " +
             "but will be sent as HTML. Line breaks will not be visible to recipients. " +
             "Use <code>&lt;br&gt;</code> for line breaks or <code>&lt;p&gt;</code> for paragraphs."
         );
-    }
-    // Has HTML tags but newlines without any block/br elements
-    else if (/\n/.test(body) && !BLOCK_OR_BR_RE.test(body)) {
+    } else if (/\n/.test(body) && !BLOCK_OR_BR_RE.test(body)) {
         warnings.push(
             "<strong>Line breaks may not render.</strong> The body contains newlines but no " +
             "<code>&lt;br&gt;</code>, <code>&lt;p&gt;</code>, or <code>&lt;div&gt;</code> tags. " +
@@ -816,7 +817,6 @@ function validateHtmlBody() {
         );
     }
 
-    // Tags stripped by all email clients
     if (STRIPPED_TAGS_RE.test(body)) {
         const found = [];
         for (const tag of ["script", "iframe", "form", "embed", "object"]) {
@@ -827,7 +827,6 @@ function validateHtmlBody() {
         );
     }
 
-    // External stylesheets
     if (EXT_STYLESHEET_RE.test(body)) {
         warnings.push(
             "<strong>External stylesheets ignored:</strong> <code>&lt;link rel=\"stylesheet\"&gt;</code> " +
@@ -835,7 +834,6 @@ function validateHtmlBody() {
         );
     }
 
-    // Embedded <style> blocks
     if (STYLE_BLOCK_RE.test(body)) {
         warnings.push(
             "<strong>Embedded &lt;style&gt; blocks may be stripped.</strong> Many email clients " +
@@ -844,7 +842,6 @@ function validateHtmlBody() {
         );
     }
 
-    // Full HTML document bypass
     if (FULL_HTML_DOC_RE.test(body)) {
         warnings.push(
             "<strong>Full HTML document detected.</strong> Your own &lt;html&gt; structure will " +
@@ -853,7 +850,6 @@ function validateHtmlBody() {
         );
     }
 
-    // Gmail clipping threshold (~102 KB)
     const sizeKb = new Blob([body]).size / 1024;
     if (sizeKb > GMAIL_CLIP_KB) {
         warnings.push(
@@ -1599,14 +1595,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (savedNameCol && !$("name-column").value) $("name-column").value = savedNameCol;
         if (savedHtml === "1") {
             $("html-toggle").checked = true;
-            initQuill();
-            const existingBody = $("body-input").value;
-            if (existingBody) {
-                const delta = quillEditor.clipboard.convert({ html: existingBody });
-                quillEditor.setContents(delta);
-            }
-            hide("body-input");
-            show("html-editor-wrap");
+            activateHtmlEditor();
         }
     } catch (e) { /* ignore */ }
 });
