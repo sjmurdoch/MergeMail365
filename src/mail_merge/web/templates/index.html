@@ -122,14 +122,14 @@
 
         <!-- HTML editor (outside .pico — CSS isolation) -->
         <div id="html-editor-wrap" class="hidden">
-            <div class="html-editor-header">
+            <input type="hidden" id="trix-input">
+            <trix-editor input="trix-input" placeholder="Compose your HTML email..."></trix-editor>
+            <textarea id="html-source" rows="12" class="hidden" spellcheck="false"></textarea>
+            <div class="html-editor-footer">
                 <label>
                     <input type="checkbox" id="source-toggle"> View source
                 </label>
             </div>
-            <input type="hidden" id="trix-input">
-            <trix-editor input="trix-input" placeholder="Compose your HTML email..."></trix-editor>
-            <textarea id="html-source" rows="12" class="hidden" spellcheck="false"></textarea>
             <small>Tip: if you include your own &lt;html&gt; tags, the app's email compatibility wrappers are skipped.</small>
         </div>
 

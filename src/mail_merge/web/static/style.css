@@ -383,15 +383,16 @@ table caption {
 }
 
 /* HTML editor wrapper */
-.html-editor-header {
+.html-editor-footer {
     display: flex;
     justify-content: flex-end;
-    margin-bottom: 0.25rem;
+    margin-top: 0.25rem;
     font-size: 0.85rem;
 }
 
 /* Source textarea in HTML mode */
 #html-source {
+    width: 100%;
     font-family: var(--pico-font-family-monospace);
     font-size: 0.85rem;
 }
