@@ -25,6 +25,9 @@ uv run pytest --cov=mail_merge
 # Type checking
 uv run mypy
 
+# JS linting (requires Biome — brew install biome)
+biome lint src/mail_merge/web/static/app.js
+
 # CLI usage (after install) — dry run by default, add --send to deliver
 uv run mergemail365 --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email
 uv run mergemail365 --spreadsheet recipients.xlsx --body body.txt --subject "Hello {{name}}" --email-column email --send

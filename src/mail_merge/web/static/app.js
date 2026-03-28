@@ -103,10 +103,10 @@ function escapeHtml(s) {
 }
 
 function updateStepUI(n) {
-    document.querySelectorAll(".step-panel").forEach(p => p.classList.remove("active"));
-    $("step-" + n).classList.add("active");
+    document.querySelectorAll(".step-panel").forEach(p => { p.classList.remove("active"); });
+    $(`step-${n}`).classList.add("active");
     document.querySelectorAll(".step-indicator li").forEach(li => {
-        const s = parseInt(li.dataset.step);
+        const s = parseInt(li.dataset.step, 10);
         li.classList.remove("active", "completed");
         if (s < n) li.classList.add("completed");
         if (s === n) li.classList.add("active");
@@ -328,7 +328,7 @@ async function saveState() {
                 verify_passed: state.verifyPassed
             })
         });
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
 }
 
 // Load config and session status on page load
@@ -436,7 +436,7 @@ async function checkAuthStatus() {
         const el = $("auth-display");
         if (data.authenticated) {
             _auth.isSignedIn = true;
-            el.innerHTML = '<span class="dot green"></span> Signed in as <span class="email">' + escapeHtml(data.email) + '</span>';
+            el.innerHTML = `<span class="dot green"></span> Signed in as <span class="email">${escapeHtml(data.email)}</span>`;
             if ($("test-email-input") && !$("test-email-input").value) {
                 $("test-email-input").value = data.email;
             }
@@ -449,14 +449,14 @@ async function checkAuthStatus() {
             _auth.tokenExpiresAt = null;
         }
         updateSignInButton();
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
 }
 
 // Auth message below sign-in button
 function showAuthMessage(text, type) {
     const el = $("auth-message");
     el.textContent = text;
-    el.className = "auth-message " + type;
+    el.className = `auth-message ${type}`;
     el.classList.remove("hidden");
 }
 
@@ -510,7 +510,7 @@ async function doSignOut() {
         await apiFetch("/auth/logout", { method: "POST" });
         showAuthMessage("Signed out successfully.", "info");
     } catch (e) {
-        showAuthMessage("Sign-out failed: " + e.message, "error");
+        showAuthMessage(`Sign-out failed: ${e.message}`, "error");
     }
     await checkAuthStatus();
 }
@@ -566,12 +566,12 @@ $("btn-sign-in").addEventListener("click", async () => {
                         showAuthMessage("Signed in successfully.", "success");
                         checkAuthStatus();
                     }
-                } catch (e) { /* ignore poll errors */ }
+                } catch (_e) { /* ignore poll errors */ }
                 finally { pollBusy = false; }
             }, 2000);
             updateSignInButton();
         } catch (e) {
-            cancelSignIn("Failed to start sign-in: " + e.message);
+            cancelSignIn(`Failed to start sign-in: ${e.message}`);
         }
     } else {
         // Browser mode: redirect to auth login
@@ -599,7 +599,7 @@ $("btn-test-connection").addEventListener("click", async () => {
             summary = `<div class="callout callout-danger mt-0"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
         }
 
-        $("auth-diag-content").innerHTML = summary + `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        $("auth-diag-content").innerHTML = `${summary}<pre>${JSON.stringify(data, null, 2)}</pre>`;
     } catch (e) {
         $("auth-diag-content").innerHTML = `<div class="callout callout-danger mt-0"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
     }
@@ -633,7 +633,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         // Build preview table on step 1
         buildPreviewTable(data.columns, data.rows, data.total_rows);
     } catch (e) {
-        alert("Upload error: " + e.message);
+        alert(`Upload error: ${e.message}`);
     }
 });
 
@@ -656,9 +656,9 @@ $("sheet-select").addEventListener("change", async () => {
         state.spreadsheetData = data;
         renderSpreadsheetSummary(data);
         buildPreviewTable(data.columns, data.rows, data.total_rows);
-        try { localStorage.setItem("mm_sheet", sheet); } catch (e) { /* ignore */ }
+        try { localStorage.setItem("mm_sheet", sheet); } catch (_e) { /* ignore */ }
     } catch (e) {
-        alert("Error changing sheet: " + e.message);
+        alert(`Error changing sheet: ${e.message}`);
     }
 });
 
@@ -673,9 +673,9 @@ function populateSelect(sel, cols, required) {
 function buildPreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#preview-table thead");
     const tbody = document.querySelector("#preview-table tbody");
-    thead.innerHTML = "<tr>" + columns.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
+    thead.innerHTML = `<tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
     tbody.innerHTML = rows.map(row =>
-        "<tr>" + columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
+        `<tr>${columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
     ).join("");
     // Show truncation notice if not all rows are displayed
     const caption = document.querySelector("#preview-table caption") || document.createElement("caption");
@@ -690,9 +690,9 @@ function buildPreviewTable(columns, rows, totalRows) {
 function buildComposePreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#compose-preview-table thead");
     const tbody = document.querySelector("#compose-preview-table tbody");
-    thead.innerHTML = "<tr>" + columns.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
+    thead.innerHTML = `<tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
     tbody.innerHTML = rows.map(row =>
-        "<tr>" + columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
+        `<tr>${columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
     ).join("");
     const caption = document.querySelector("#compose-preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
@@ -710,12 +710,12 @@ function showPlaceholderChips(columns) {
     for (const col of columns) {
         const chip = document.createElement("span");
         chip.className = "chip";
-        chip.textContent = "{{" + col + "}}";
+        chip.textContent = `{{${col}}}`;
         chip.addEventListener("mousedown", (e) => {
             // Use mousedown and preventDefault to avoid the input losing focus
             // when clicking the chip.
             e.preventDefault();
-            const insertion = "{{" + col + "}}";
+            const insertion = `{{${col}}}`;
 
             if ($("html-toggle").checked && state.trixEditor && !$("source-toggle").checked) {
                 state.trixEditor.insertString(insertion);
@@ -977,7 +977,7 @@ async function loadPreview() {
         return true;
 
     } catch (e) {
-        alert("Error loading preview: " + e.message);
+        alert(`Error loading preview: ${e.message}`);
         return false;
     } finally {
         $("btn-next-2").ariaBusy = "false";
@@ -1056,9 +1056,9 @@ function buildRecipientsTable() {
     const cols = [emailCol, ...state.spreadsheetData.columns.filter(c => c !== emailCol)];
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
-    thead.innerHTML = "<tr>" + cols.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
+    thead.innerHTML = `<tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
     tbody.innerHTML = recipients.map(row =>
-        "<tr>" + cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
+        `<tr>${cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
     ).join("");
 }
 
@@ -1145,7 +1145,7 @@ async function sendTestEmail() {
             }
         });
     } catch (e) {
-        showTestResult(false, "Error: " + e.message);
+        showTestResult(false, `Error: ${e.message}`);
     }
 }
 
@@ -1202,7 +1202,7 @@ function startVerify() {
                 }
             });
         })
-        .catch(e => showVerifyResult(false, "Error: " + e.message));
+        .catch(e => showVerifyResult(false, `Error: ${e.message}`));
 }
 
 function showVerifyResult(success, msg) {
@@ -1288,7 +1288,7 @@ async function startSend() {
         });
     } catch (e) {
         window.removeEventListener("beforeunload", beforeUnloadWarn);
-        showSendResult(false, "Error: " + e.message);
+        showSendResult(false, `Error: ${e.message}`);
     }
 }
 
@@ -1333,7 +1333,7 @@ async function fetchAndShowSendResults(jobId) {
 
         $("send-result").innerHTML = html;
     } catch (e) {
-        showSendResult(false, "Error fetching results: " + e.message);
+        showSendResult(false, `Error fetching results: ${e.message}`);
     }
 }
 
@@ -1349,7 +1349,7 @@ function showSendResult(success, msg) {
 function sanitizeCsvValue(val) {
     if (!val) return val;
     const s = String(val);
-    if (/^[=+@\-\t\r]/.test(s)) return "\t" + s;
+    if (/^[=+@\-\t\r]/.test(s)) return `\t${s}`;
     return s;
 }
 
@@ -1453,7 +1453,7 @@ function newMerge() {
         localStorage.removeItem("mm_name_col");
         localStorage.removeItem("mm_html");
         localStorage.removeItem("mm_sheet");
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
 
     goToStep(1);
 }
@@ -1480,14 +1480,14 @@ function streamEvents(jobId, logPanelId, onComplete, onProgress) {
         }
         if (event.type === "log") {
             const entry = document.createElement("div");
-            entry.className = "log-entry " + (event.data.level || "INFO");
+            entry.className = `log-entry ${event.data.level || "INFO"}`;
             entry.textContent = `[${event.data.timestamp}] ${event.data.message}`;
             panel.appendChild(entry);
             panel.scrollTop = panel.scrollHeight;
             // Extract send progress from log messages like "Sending [3/42]"
             if (onProgress) {
                 const match = event.data.message.match(/\[(\d+)\/(\d+)\]/);
-                if (match) onProgress(parseInt(match[1]), parseInt(match[2]));
+                if (match) onProgress(parseInt(match[1], 10), parseInt(match[2], 10));
             }
         }
         if (event.type === "completed" || event.type === "error") {
@@ -1551,7 +1551,7 @@ function handleAuthHash() {
         history.replaceState(null, "", window.location.pathname + window.location.search);
     } else if (hash.startsWith("#auth-error=")) {
         const error = decodeURIComponent(hash.substring("#auth-error=".length));
-        showAuthMessage("Sign-in failed: " + error, "error");
+        showAuthMessage(`Sign-in failed: ${error}`, "error");
         history.replaceState(null, "", window.location.pathname + window.location.search);
     }
 }
@@ -1608,6 +1608,19 @@ function categoriseError(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// Expose functions called from HTML onclick attributes
+// ---------------------------------------------------------------------------
+window.goToStep = goToStep;
+window.setSendMode = setSendMode;
+window.confirmGoBack = confirmGoBack;
+window.changePreviewRecipient = changePreviewRecipient;
+window.sendTestEmail = sendTestEmail;
+window.startSend = startSend;
+window.stopSend = stopSend;
+window.downloadCsv = downloadCsv;
+window.newMerge = newMerge;
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
@@ -1636,7 +1649,7 @@ document.addEventListener("DOMContentLoaded", () => {
             localStorage.setItem("mm_email_col", $("email-column").value);
             localStorage.setItem("mm_name_col", $("name-column").value);
             localStorage.setItem("mm_html", $("html-toggle").checked ? "1" : "");
-        } catch (e) { /* ignore */ }
+        } catch (_e) { /* ignore */ }
     }, 5000);
 
     // Restore from localStorage
@@ -1655,5 +1668,5 @@ document.addEventListener("DOMContentLoaded", () => {
             $("html-toggle").checked = true;
             activateHtmlEditor();
         }
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
 });
