@@ -118,6 +118,132 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 
 **Design plan:** `docs/web-ui-plan.md` contains the full design document with implementation status, security assessment, and deferred features.
 
+### Web UI state management
+
+State lives in three tiers, each with different lifetimes and sync characteristics.
+
+**Tier 1 — JS memory (ephemeral, lost on reload):** `currentStep`, `spreadsheetData` (columns + rows + metadata), `previewIndex`, `sendMode`, `testPassed`, `verifyPassed`, `sendStarted`, `currentJobId`, `sendResults`, `tokenExpiresAt`, `__isSignedIn`, `__desktopMode`. These drive all UI rendering and navigation guards. The DOM form elements (`subject-input`, `body-input`, `email-column`, `name-column`, `html-toggle`, `filter-input`, `cc-input`, etc.) are the source of truth for compose data — JS reads them directly when building form submissions rather than caching copies.
+
+**Tier 2 — localStorage (survives reload, per-browser):** Five keys auto-saved every 5 seconds when `formDirty` is true: `mm_subject`, `mm_body`, `mm_email_col`, `mm_name_col`, `mm_html`. On page load, these only fill form fields that are still empty (server-restored values take precedence). Cleared by `newMerge()`. Filters, CC/BCC, reply-to, importance, attachments, and send mode are intentionally not persisted — they are considered step-specific and not worth carrying across sessions.
+
+**Tier 3 — Flask session (cookie-based, survives reload):** Auth state (`authenticated`, `ms_authenticated`, `client_id`, `tenant_id`, `auth_flow`, `csrf_token`), spreadsheet metadata (`spreadsheet_path`, `spreadsheet_tmp_dir`, `spreadsheet_info` — columns/sheets/total_rows/file_name but not row data, which would exceed the 4 KB cookie limit), and wizard progress (`current_step`, `test_passed`, `verify_passed`, `job_id`). The MSAL token cache is a separate file on disk shared with CLI auth.
+
+**Tier 4 — Server memory (ephemeral, lost on restart):** `_jobs` dict holds active/completed `Job` objects with their event queues and results. These are not persisted — server restart loses all job state.
+
+**Tier 5 — Temp files on disk:** Uploaded spreadsheet saved to a `tempfile.mkdtemp()` directory, tracked by `spreadsheet_tmp_dir` in the session. Cleaned up on re-upload, reset, or process exit (`atexit`).
+
+#### Data flow and sync points
+
+The tiers sync at specific moments, not continuously:
+
+- **Upload/sheet change → server → JS:** `POST /api/upload-spreadsheet` and `POST /api/change-sheet` write metadata to the session and return full row data in the response. JS stores this as `spreadsheetData`. The session stores only metadata (no rows).
+- **Step navigation → server:** `saveState()` POSTs `{current_step, test_passed, verify_passed}` to `/api/state` on every step change. This is a one-way push.
+- **Page load → JS:** `loadConfig()` GETs `/api/config` which returns session metadata + re-reads preview rows from the temp file. JS restores `spreadsheetData` from this. Separately, localStorage restores compose fields into empty form inputs.
+- **Job lifecycle → server → JS:** `POST /api/start-job` creates a server-side `Job`, stores its ID in the session, and returns it. JS connects via SSE for live events. On completion, the `testPassed`/`verifyPassed` flags are set in JS and pushed to the session.
+- **Active job reconnection:** On reload during a send, `/api/config` returns the `active_job_id`. JS reconnects to the SSE stream and resumes the send UI at step 6. This only works for the send step; test/verify jobs are not reconnected.
+
+#### What is and is not recoverable after page reload
+
+| State | Recovered? | Source |
+|---|---|---|
+| Auth status | Yes | MSAL token cache on disk, checked via `/auth/status` |
+| Uploaded spreadsheet | Yes | Temp file on disk, path in session |
+| Sheet selection | No | Not persisted; defaults to first sheet |
+| Spreadsheet preview rows | Yes | Re-read from temp file by `/api/config` |
+| Column selections | Partially | localStorage has `mm_email_col`/`mm_name_col`, restored if columns still match |
+| Subject / body / HTML mode | Yes | localStorage (`mm_subject`, `mm_body`, `mm_html`) |
+| Filtered recipient list | No | Only in JS memory; must re-run `/api/get-recipients` |
+| Test/verify passed flags | No | Session has them, but JS always resets to `false` on load (by design — results are transient) |
+| Active send job | Yes | `session["job_id"]` + `_jobs` dict; JS reconnects to SSE stream |
+| Send results | No | In-memory `Job.results`, lost if not fetched before server restart |
+| Filters, CC/BCC, reply-to, importance, attachments | No | DOM-only, not persisted |
+
+#### Dependency graph: what invalidates what
+
+The wizard is a pipeline — upstream changes invalidate downstream state. The invalidation rules:
+
+```
+Spreadsheet upload / sheet change (Step 1)
+  └→ columns, rows, preview table, total_rows
+      └→ Column selections may become invalid (Step 2)
+          └→ Placeholder chips refresh
+          └→ Filtered recipients invalid (Step 3)
+              └→ Test results invalid (Step 4)
+                  └→ Verify results invalid (Step 5)
+                      └→ Send confirmation invalid (Step 6)
+```
+
+In the current implementation:
+- **Step 1 → Step 2:** `initComposeStep()` re-populates column dropdowns when entering Step 2. Previous selections are preserved if the column name still exists in the new data; otherwise reset to empty.
+- **Step 2 → Step 3:** `loadPreview()` always re-fetches filtered recipients from the server when advancing to Step 3. No caching of the recipient list across step transitions.
+- **Step 3 → Steps 4–6:** `confirmGoBack()` warns the user and resets `testPassed`/`verifyPassed` when navigating backward from any step ≥ 3.
+- **Sheet change on Step 1:** Calls `/api/change-sheet`, replaces `spreadsheetData` entirely. If the user had already advanced to Step 2 and goes back, re-entering Step 2 will refresh dropdowns from the new column list.
+
+There is no automatic cascade — invalidation happens lazily when the user navigates forward again.
+
+#### MVVM suitability analysis
+
+The current architecture is **imperative DOM manipulation** — JS functions directly read/write DOM elements and manage visibility. State is scattered across JS variables, DOM `.value` properties, and the server session with ad-hoc sync. This works for the current scale but creates several structural tensions:
+
+**What MVVM would improve:**
+- **Single source of truth.** Currently, compose data lives simultaneously in DOM form fields, localStorage (backup), and is re-read from the DOM when building form submissions. A ViewModel would be the one canonical location, with DOM bindings as a projection. This eliminates the "which is current?" question.
+- **Declarative invalidation.** The dependency graph above (sheet change → columns → placeholders → recipients → test → verify → send) maps directly to reactive computed properties. Currently this cascade is handled by imperative function calls (`initComposeStep()`, `resetTestAndVerify()`, `showPlaceholderChips()`) spread across navigation handlers. A reactive ViewModel would make "spreadsheet columns changed" automatically propagate to dependent UI without explicit wiring.
+- **Consistent state on reload.** A ViewModel serialised to/from a single persistence layer (instead of the current three-tier split) would make recovery deterministic. Currently, reload recovery involves merging data from `/api/config`, localStorage, and DOM defaults with priority rules scattered across `loadConfig()` and `DOMContentLoaded`.
+- **Testability.** ViewModel logic (validation rules, navigation guards, state transitions) could be unit-tested in isolation from the DOM. Currently, testing wizard behaviour requires Playwright E2E tests.
+
+**What MVVM would not improve (or would complicate):**
+- **Server-side jobs and SSE.** The background job lifecycle (start → stream events → poll status → show results) is inherently async and event-driven. MVVM doesn't simplify this — it would still need imperative event handlers that update the ViewModel.
+- **File upload and temp files.** Binary file handling is inherently imperative and tightly coupled to the server. No ViewModel pattern helps here.
+- **Framework weight.** The app currently has zero JS build step and zero dependencies (vanilla JS + Pico CSS). Adopting MVVM properly would require either a framework (Vue, Svelte, Preact) or a hand-rolled reactive system. For a single-page, single-user, local-only tool, this may not be worth the added complexity. The current codebase is ~1500 lines of JS.
+
+**Recommended approach if pursuing MVVM:** The lightest-weight option would be a single `WizardState` object with computed getters and a `render()` function that projects state to DOM — essentially a hand-rolled ViewModel without a framework. This gives the single-source-of-truth benefit without a build step:
+
+```
+WizardState {
+  // Data tier
+  spreadsheet: { columns, rows, sheets, fileName, totalRows } | null
+  selectedSheet: string | null
+
+  // Compose tier (derived UI depends on spreadsheet)
+  emailColumn: string
+  nameColumn: string
+  subject: string
+  body: string
+  htmlMode: boolean
+  sendMode: "individual" | "bcc"
+  filters: string
+  // ... other compose fields
+
+  // Progress tier (derived from compose + server round-trips)
+  filteredRecipients: [] | null   // populated by server call
+  testPassed: boolean
+  verifyPassed: boolean
+
+  // Computed
+  get availablePlaceholders() → from spreadsheet.columns
+  get unresolvedPlaceholders() → from subject + body vs columns
+  get canAdvanceToCompose() → spreadsheet !== null
+  get canAdvanceToPreview() → emailColumn && subject && body && ...
+  get canAdvanceToTest() → filteredRecipients.length > 0
+  get canAdvanceToVerify() → testPassed
+  get canAdvanceToSend() → verifyPassed
+}
+```
+
+This would replace the current 14 top-level JS variables, the `validateDataSource()`/`validateCompose()` functions, and the scattered invalidation logic. The `render()` function would replace the manual `show()`/`hide()`/`updateStepUI()` calls. DOM inputs would bind to the state object via event listeners (similar to current `onTemplateChange()` but writing to `state.subject` instead of relying on the DOM as source of truth). Persistence (localStorage, server session) would serialize from this single object.
+
+#### Current consistency guarantees and gaps
+
+**Consistent by design:**
+- The server re-validates recipients on `/api/start-job` (defense-in-depth — doesn't trust the client's filtered list).
+- `buildJobFormData()` reads directly from DOM at submission time, so stale JS variables can't cause a wrong send.
+- Auth tokens are always acquired via `token_provider()` at send time, not cached in JS state.
+
+**Known inconsistency gaps:**
+- `testPassed`/`verifyPassed` are saved to the server session but intentionally not restored on reload — the user must re-run these steps. This is a deliberate UX choice (results are transient), not a bug.
+- Sheet selection is not persisted — after reload, the first sheet is shown even if the user had selected a different one. The uploaded file and column selections (via localStorage) survive, but the sheet does not.
+- `sendMode`, filters, CC/BCC, reply-to, importance, and attachments are DOM-only and lost on reload. For a local single-session app this is acceptable, but it means reload during Step 2 loses more state than reload during Step 1 (which only loses sheet selection).
+
 ## Email address pipeline
 
 Addresses enter the system in different forms and are normalised into `EmailAddress` before being serialised for the Graph API.
