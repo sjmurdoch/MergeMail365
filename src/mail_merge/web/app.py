@@ -136,6 +136,109 @@ def _unregister_temp_dir(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pure helpers (no Flask app/session dependency)
+# ---------------------------------------------------------------------------
+
+
+def _validate_html_body(body: str) -> list[str]:
+    """Return a list of warning strings for HTML email body content."""
+    if not body.strip():
+        return []
+    warnings: list[str] = []
+
+    if not _HTML_TAG_RE.search(body):
+        warnings.append(
+            "No HTML tags detected. The body appears to be plain text "
+            "but will be sent as HTML. Line breaks will not be visible "
+            "to recipients. Use <br> for line breaks or <p> for paragraphs."
+        )
+    elif "\n" in body and not _BLOCK_OR_BR_RE.search(body):
+        warnings.append(
+            "Line breaks may not render. The body contains newlines but "
+            "no <br>, <p>, or <div> tags. Newlines are ignored in HTML."
+        )
+
+    m = _STRIPPED_TAGS_RE.search(body)
+    if m:
+        found = [
+            tag for tag in ("script", "iframe", "form", "embed", "object")
+            if re.search(rf"<{tag}\b", body, re.IGNORECASE)
+        ]
+        warnings.append(
+            f"Unsupported tags: <{'>, <'.join(found)}> will be stripped "
+            "by email clients."
+        )
+
+    if _EXT_STYLESHEET_RE.search(body):
+        warnings.append(
+            "External stylesheets (<link rel=\"stylesheet\">) are not "
+            "supported in email. Use inline style attributes instead."
+        )
+
+    if _STYLE_BLOCK_RE.search(body):
+        warnings.append(
+            "Embedded <style> blocks may be stripped. Many email clients "
+            "(Gmail, Outlook.com) remove <style> tags. Use inline style "
+            "attributes for reliable rendering."
+        )
+
+    if _FULL_HTML_DOC_RE.search(body):
+        warnings.append(
+            "Full HTML document detected. Your own <html> structure will "
+            "be sent as-is, bypassing the app\u2019s standard email "
+            "compatibility wrappers (CSS resets, Outlook DPI fix, mobile "
+            "viewport)."
+        )
+
+    body_bytes = len(body.encode("utf-8"))
+    if body_bytes > _GMAIL_CLIP_BYTES:
+        size_kb = body_bytes // 1024
+        warnings.append(
+            f"Large body ({size_kb} KB): Gmail clips emails over ~102 KB. "
+            "Recipients may see a truncated message."
+        )
+
+    return warnings
+
+
+def _partition_emails(
+    recipients: list[dict[str, str]], email_column: str,
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Split recipients into (valid, invalid) based on email validation."""
+    from email_validator import EmailNotValidError, validate_email
+
+    valid: list[dict[str, str]] = []
+    invalid: list[dict[str, str]] = []
+    for row in recipients:
+        addr = row.get(email_column, "")
+        try:
+            validate_email(addr, check_deliverability=False, allow_smtputf8=False)
+            valid.append(row)
+        except EmailNotValidError as exc:
+            invalid.append({"address": addr, "reason": str(exc)})
+    return valid, invalid
+
+
+def _validated_recipient_count(
+    filepath: str, email_column: str,
+    sheet: str | None = None, filters: list[str] | None = None,
+) -> int:
+    """Read, validate, and filter recipients — return the count.
+
+    Used by both api_get_recipients (full results) and api_start_job
+    (defense-in-depth cap check) to ensure consistent counting.
+    """
+    from mail_merge.api import apply_filters
+    from mail_merge.excel import read_recipients
+
+    recipients = read_recipients(filepath, email_column, sheet_name=sheet)
+    valid, _invalid = _partition_emails(recipients, email_column)
+    if filters:
+        valid = apply_filters(valid, filters)
+    return len(valid)
+
+
+# ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
 
@@ -810,101 +913,6 @@ def create_app(
         })
 
     # ----- Helpers -----
-
-    def _validate_html_body(body: str) -> list[str]:
-        """Return a list of warning strings for HTML email body content."""
-        if not body.strip():
-            return []
-        warnings: list[str] = []
-
-        if not _HTML_TAG_RE.search(body):
-            warnings.append(
-                "No HTML tags detected. The body appears to be plain text "
-                "but will be sent as HTML. Line breaks will not be visible "
-                "to recipients. Use <br> for line breaks or <p> for paragraphs."
-            )
-        elif "\n" in body and not _BLOCK_OR_BR_RE.search(body):
-            warnings.append(
-                "Line breaks may not render. The body contains newlines but "
-                "no <br>, <p>, or <div> tags. Newlines are ignored in HTML."
-            )
-
-        m = _STRIPPED_TAGS_RE.search(body)
-        if m:
-            found = [
-                tag for tag in ("script", "iframe", "form", "embed", "object")
-                if re.search(rf"<{tag}\b", body, re.IGNORECASE)
-            ]
-            warnings.append(
-                f"Unsupported tags: <{'>, <'.join(found)}> will be stripped "
-                "by email clients."
-            )
-
-        if _EXT_STYLESHEET_RE.search(body):
-            warnings.append(
-                "External stylesheets (<link rel=\"stylesheet\">) are not "
-                "supported in email. Use inline style attributes instead."
-            )
-
-        if _STYLE_BLOCK_RE.search(body):
-            warnings.append(
-                "Embedded <style> blocks may be stripped. Many email clients "
-                "(Gmail, Outlook.com) remove <style> tags. Use inline style "
-                "attributes for reliable rendering."
-            )
-
-        if _FULL_HTML_DOC_RE.search(body):
-            warnings.append(
-                "Full HTML document detected. Your own <html> structure will "
-                "be sent as-is, bypassing the app\u2019s standard email "
-                "compatibility wrappers (CSS resets, Outlook DPI fix, mobile "
-                "viewport)."
-            )
-
-        body_bytes = len(body.encode("utf-8"))
-        if body_bytes > _GMAIL_CLIP_BYTES:
-            size_kb = body_bytes // 1024
-            warnings.append(
-                f"Large body ({size_kb} KB): Gmail clips emails over ~102 KB. "
-                "Recipients may see a truncated message."
-            )
-
-        return warnings
-
-    def _partition_emails(
-        recipients: list[dict[str, str]], email_column: str,
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-        """Split recipients into (valid, invalid) based on email validation."""
-        from email_validator import EmailNotValidError, validate_email
-
-        valid: list[dict[str, str]] = []
-        invalid: list[dict[str, str]] = []
-        for row in recipients:
-            addr = row.get(email_column, "")
-            try:
-                validate_email(addr, check_deliverability=False, allow_smtputf8=False)
-                valid.append(row)
-            except EmailNotValidError as exc:
-                invalid.append({"address": addr, "reason": str(exc)})
-        return valid, invalid
-
-    def _validated_recipient_count(
-        filepath: str, email_column: str,
-        sheet: str | None = None, filters: list[str] | None = None,
-    ) -> int:
-        """Read, validate, and filter recipients — return the count.
-
-        Used by both api_get_recipients (full results) and api_start_job
-        (defense-in-depth cap check) to ensure consistent counting.
-        """
-        from mail_merge.api import apply_filters
-        from mail_merge.excel import read_recipients
-
-        recipients = read_recipients(filepath, email_column, sheet_name=sheet)
-        valid, _invalid = _partition_emails(recipients, email_column)
-        if filters:
-            valid = apply_filters(valid, filters)
-        return len(valid)
 
     _cached_config: dict[str, str] | None = None
 

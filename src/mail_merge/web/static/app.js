@@ -3,20 +3,92 @@
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-let currentStep = 1;
-let spreadsheetData = null;   // { columns, rows, sheets, file_name, total_rows }
-let previewIndex = 0;
-let sendMode = "individual";  // "individual" | "bcc"
-let testPassed = false;
-let verifyPassed = false;
-let sendStarted = false;
-let currentJobId = null;
-let sendResults = null;
-let formDirty = false;
-let trixEditor = null;
+const state = {
+    // Wizard navigation
+    currentStep: 1,
 
-// Convenience getter — spreadsheetData.rows is the single source of truth
-function getRecipients() { return spreadsheetData ? spreadsheetData.rows : null; }
+    // Spreadsheet data: { columns, rows, sheets, file_name, total_rows }
+    spreadsheetData: null,
+
+    // Preview navigation index
+    previewIndex: 0,
+
+    // "individual" | "bcc"
+    sendMode: "individual",
+
+    // Step gate flags
+    testPassed: false,
+    verifyPassed: false,
+    sendStarted: false,
+
+    // Background job tracking
+    currentJobId: null,
+    sendResults: null,
+
+    // Dirty flag for localStorage auto-save
+    formDirty: false,
+
+    // Trix rich-text editor instance
+    trixEditor: null,
+
+    /** Convenience getter — spreadsheetData.rows is the single source of truth */
+    getRecipients() {
+        return this.spreadsheetData ? this.spreadsheetData.rows : null;
+    },
+
+    /** Reset downstream state when compose/data changes */
+    resetTestAndVerify() {
+        this.testPassed = false;
+        this.verifyPassed = false;
+        $("btn-next-4").disabled = true;
+        $("btn-next-5").disabled = true;
+        $("test-log").innerHTML = "";
+        hide("test-log");
+        hide("test-result");
+        $("verify-log").innerHTML = "";
+        hide("verify-result");
+    },
+
+    /** Full reset for "New merge" */
+    resetAll() {
+        this.spreadsheetData = null;
+        this.sendResults = null;
+        this.testPassed = false;
+        this.verifyPassed = false;
+        this.sendStarted = false;
+        this.currentJobId = null;
+        this.previewIndex = 0;
+        this.currentStep = 1;
+    },
+};
+
+// Expose on window so E2E tests can set flags via page.evaluate()
+window.state = state;
+
+// Legacy global aliases — E2E tests use `testPassed = true` etc.
+Object.defineProperty(window, "testPassed", {
+    get() { return state.testPassed; },
+    set(v) { state.testPassed = v; },
+});
+Object.defineProperty(window, "verifyPassed", {
+    get() { return state.verifyPassed; },
+    set(v) { state.verifyPassed = v; },
+});
+Object.defineProperty(window, "spreadsheetData", {
+    get() { return state.spreadsheetData; },
+    set(v) { state.spreadsheetData = v; },
+});
+
+// Auth state — grouped separately (not part of wizard flow)
+const _auth = {
+    isSignedIn: false,
+    desktopMode: false,
+    signInPoll: null,     // interval ID for polling during sign-in
+    tokenExpiresAt: null,
+};
+
+// Convenience alias kept as a plain function for backward compat
+function getRecipients() { return state.getRecipients(); }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -74,65 +146,57 @@ function apiFetch(url, opts = {}) {
 // Step navigation
 // ---------------------------------------------------------------------------
 async function goToStep(n) {
-    console.log("Navigating to step", n, "from", currentStep);
+    console.log("Navigating to step", n, "from", state.currentStep);
     // Only perform validation/trigger side-effects when advancing forward
-    if (n > currentStep) {
+    if (n > state.currentStep) {
         // Step 1 → 2: need a spreadsheet uploaded
-        if (n === 2 && currentStep === 1) {
+        if (n === 2 && state.currentStep === 1) {
             if (!validateDataSource()) return;
             initComposeStep();
         }
         // Step 2 → 3: validate compose fields, load recipient preview
-        if (n === 3 && currentStep === 2) {
+        if (n === 3 && state.currentStep === 2) {
             if (!validateCompose()) return;
             const previewOk = await loadPreview();
             if (!previewOk) return;
         }
         // Step 3 → 4: pre-fill test email
         if (n === 4) {
-            if (!testPassed) {
+            if (!state.testPassed) {
                 checkAuthForStep4();
             }
         }
         // Step 4 → 5: need test to pass first
         if (n === 5) {
-            if (!testPassed) return;
+            if (!state.testPassed) return;
             startVerify();
         }
         // Step 5 → 6: need verify to pass first
         if (n === 6) {
-            if (!verifyPassed) return;
+            if (!state.verifyPassed) return;
             prepareSend();
         }
     }
 
-    currentStep = n;
+    state.currentStep = n;
     saveState();
     updateStepUI(n);
 }
 
 function resetTestAndVerify() {
-    testPassed = false;
-    verifyPassed = false;
-    $("btn-next-4").disabled = true;
-    $("btn-next-5").disabled = true;
-    $("test-log").innerHTML = "";
-    hide("test-log");
-    hide("test-result");
-    $("verify-log").innerHTML = "";
-    hide("verify-result");
+    state.resetTestAndVerify();
 }
 
 function confirmGoBack(targetStep) {
     // Going back from test/verify/send steps resets test and verify results
-    if (currentStep >= 4 && (testPassed || verifyPassed)) {
+    if (state.currentStep >= 4 && (state.testPassed || state.verifyPassed)) {
         if (!confirm("Going back will discard your test and verification results. You will need to complete these steps again. Continue?")) {
             return;
         }
         resetTestAndVerify();
     }
     // Going back from preview (step 3) to compose (step 2) also invalidates
-    if (currentStep === 3 && targetStep === 2) {
+    if (state.currentStep === 3 && targetStep === 2) {
         resetTestAndVerify();
     }
     goToStep(targetStep);
@@ -142,7 +206,7 @@ function confirmGoBack(targetStep) {
 // Step 1: Data Source
 // ---------------------------------------------------------------------------
 function validateDataSource() {
-    if (!spreadsheetData) {
+    if (!state.spreadsheetData) {
         alert("Please upload a spreadsheet.");
         return false;
     }
@@ -153,37 +217,38 @@ function validateDataSource() {
 // Step 2: Compose — initialisation and validation
 // ---------------------------------------------------------------------------
 function initComposeStep() {
-    if (!spreadsheetData) return;
+    if (!state.spreadsheetData) return;
+    const sd = state.spreadsheetData;
     // Update compose data summary
     $("compose-data-summary").textContent =
-        `${spreadsheetData.file_name}: ${spreadsheetData.columns.length} columns, ${spreadsheetData.total_rows} rows.`;
+        `${sd.file_name}: ${sd.columns.length} columns, ${sd.total_rows} rows.`;
 
     // Build the read-only preview table on the compose step
-    buildComposePreviewTable(spreadsheetData.columns, spreadsheetData.rows, spreadsheetData.total_rows);
+    buildComposePreviewTable(sd.columns, sd.rows, sd.total_rows);
 
     // Populate column dropdowns — preserve previous selections if they're
     // still valid (user went back and came forward without changing data)
     const prevEmail = $("email-column").value;
     const prevName = $("name-column").value;
-    populateColumnDropdowns(spreadsheetData.columns);
-    if (prevEmail && spreadsheetData.columns.includes(prevEmail)) {
+    populateColumnDropdowns(sd.columns);
+    if (prevEmail && sd.columns.includes(prevEmail)) {
         $("email-column").value = prevEmail;
     } else {
         // Auto-detect email column
         const emailPatterns = ["email", "e-mail", "email address", "emailaddress", "mail"];
-        for (const col of spreadsheetData.columns) {
+        for (const col of sd.columns) {
             if (emailPatterns.includes(col.toLowerCase())) {
                 $("email-column").value = col;
                 break;
             }
         }
     }
-    if (prevName && spreadsheetData.columns.includes(prevName)) {
+    if (prevName && sd.columns.includes(prevName)) {
         $("name-column").value = prevName;
     }
 
     // Show placeholder chips
-    showPlaceholderChips(spreadsheetData.columns);
+    showPlaceholderChips(sd.columns);
 }
 
 function validateCompose() {
@@ -202,11 +267,11 @@ function validateCompose() {
         alert("Please enter a body.");
         return false;
     }
-    if (sendMode === "bcc" && !$("bcc-blast-to").value.trim()) {
+    if (state.sendMode === "bcc" && !$("bcc-blast-to").value.trim()) {
         alert("BCC mode requires a To: address.");
         return false;
     }
-    if (sendMode === "bcc" && /\{\{(\w[\w ]*\w|\w)\}\}/.test(subject + body)) {
+    if (state.sendMode === "bcc" && /\{\{(\w[\w ]*\w|\w)\}\}/.test(subject + body)) {
         alert("BCC blast mode does not support {{placeholders}} in the subject or body. All recipients receive the same message.");
         return false;
     }
@@ -214,22 +279,22 @@ function validateCompose() {
     // The authoritative cap check happens server-side in api_get_recipients
     // (after email validation and filtering), but this gives early feedback
     // when the spreadsheet is clearly too large and no filters are set.
-    if (spreadsheetData.total_rows > 99 && !$("filter-input").value.trim()) {
-        alert(`Too many recipients (${spreadsheetData.total_rows}). The web interface supports up to 99 recipients. Add filters to reduce the count, or use the command-line tool.`);
+    if (state.spreadsheetData.total_rows > 99 && !$("filter-input").value.trim()) {
+        alert(`Too many recipients (${state.spreadsheetData.total_rows}). The web interface supports up to 99 recipients. Add filters to reduce the count, or use the command-line tool.`);
         return false;
     }
     return true;
 }
 
 function setSendMode(mode) {
-    sendMode = mode;
+    state.sendMode = mode;
     if (mode === "individual") {
         $("mode-individual").classList.add("active-mode");
         $("mode-individual").classList.remove("outline");
         $("mode-bcc").classList.remove("active-mode");
         $("mode-bcc").classList.add("outline");
         hide("bcc-blast-options");
-        if (spreadsheetData) show("placeholder-chips");
+        if (state.spreadsheetData) show("placeholder-chips");
     } else {
         $("mode-bcc").classList.add("active-mode");
         $("mode-bcc").classList.remove("outline");
@@ -258,9 +323,9 @@ async function saveState() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                current_step: currentStep,
-                test_passed: testPassed,
-                verify_passed: verifyPassed
+                current_step: state.currentStep,
+                test_passed: state.testPassed,
+                verify_passed: state.verifyPassed
             })
         });
     } catch (e) { /* ignore */ }
@@ -285,17 +350,26 @@ async function loadConfig() {
             hide("auth-config-fields");
         }
         if (data.desktop_mode) {
-            __desktopMode = true;
+            _auth.desktopMode = true;
         }
 
         // Restore session spreadsheet if it exists
         if (data.spreadsheet) {
             const s = data.spreadsheet;
-            spreadsheetData = s;
+            state.spreadsheetData = s;
             show("spreadsheet-info");
             renderSpreadsheetSummary(s);
             populateSheetSelect(s.sheets);
             buildPreviewTable(s.columns, s.rows, s.total_rows);
+
+            // Restore saved sheet selection — if it differs from what the
+            // server returned, re-fetch the preview for that sheet.
+            const savedSheet = localStorage.getItem("mm_sheet");
+            if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== s.sheets[0]) {
+                $("sheet-select").value = savedSheet;
+                // Trigger a change to re-fetch the sheet's data
+                $("sheet-select").dispatchEvent(new Event("change"));
+            }
 
             // Restore chosen columns if they match what's in the sheet
             const savedEmailCol = localStorage.getItem("mm_email_col");
@@ -311,24 +385,24 @@ async function loadConfig() {
         // Restore wizard state — test and verify results don't survive
         // a page reload because the server-side job results are transient.
         // Only trust these flags when reconnecting to an active job.
-        testPassed = false;
-        verifyPassed = false;
+        state.testPassed = false;
+        state.verifyPassed = false;
 
         if (data.active_job_id) {
-            currentJobId = data.active_job_id;
-            sendStarted = true;
+            state.currentJobId = data.active_job_id;
+            state.sendStarted = true;
             // Jump to step 6 (Send) and connect to the existing stream
             hide("send-confirm");
             show("send-progress");
             show("send-log");
             $("btn-back-6").disabled = true;
             window.addEventListener("beforeunload", beforeUnloadWarn);
-            currentStep = 6;
+            state.currentStep = 6;
             updateStepUI(6);
-            streamEvents(currentJobId, "send-log", (result) => {
+            streamEvents(state.currentJobId, "send-log", (result) => {
                 window.removeEventListener("beforeunload", beforeUnloadWarn);
                 if (result.status === "completed" || result.status === "stopped") {
-                    fetchAndShowSendResults(currentJobId);
+                    fetchAndShowSendResults(state.currentJobId);
                 } else {
                     showSendResult(false, result.error || "Send failed");
                 }
@@ -344,10 +418,10 @@ async function loadConfig() {
             // preview fetch).  Steps 3+ require loading recipients and
             // steps 4-6 require test/verify to have actually run in this
             // page session, so fall back to step 1.
-            if (data.current_step >= 2 && spreadsheetData) {
+            if (data.current_step >= 2 && state.spreadsheetData) {
                 // Restore to step 1 — the user can re-advance with one click
                 // since all their inputs are still populated.
-                currentStep = 1;
+                state.currentStep = 1;
                 updateStepUI(1);
             }
         }
@@ -355,26 +429,24 @@ async function loadConfig() {
 }
 
 // Check auth status
-let tokenExpiresAt = null;
-let __isSignedIn = false;
 async function checkAuthStatus() {
     try {
         const resp = await apiFetch("/auth/status");
         const data = await resp.json();
         const el = $("auth-display");
         if (data.authenticated) {
-            __isSignedIn = true;
+            _auth.isSignedIn = true;
             el.innerHTML = '<span class="dot green"></span> Signed in as <span class="email">' + escapeHtml(data.email) + '</span>';
             if ($("test-email-input") && !$("test-email-input").value) {
                 $("test-email-input").value = data.email;
             }
             if (data.token_expires_at) {
-                tokenExpiresAt = new Date(data.token_expires_at);
+                _auth.tokenExpiresAt = new Date(data.token_expires_at);
             }
         } else {
-            __isSignedIn = false;
+            _auth.isSignedIn = false;
             el.innerHTML = '<span class="dot gray"></span> Not signed in';
-            tokenExpiresAt = null;
+            _auth.tokenExpiresAt = null;
         }
         updateSignInButton();
     } catch (e) { /* ignore */ }
@@ -394,21 +466,19 @@ function hideAuthMessage() {
 }
 
 // Sign-in button state management
-let __desktopMode = false;
-let __signInPoll = null;  // interval ID for polling during sign-in
 
 function updateSignInButton() {
     const btn = $("btn-sign-in");
     const progress = $("auth-progress");
     btn.removeAttribute("aria-busy");
 
-    if (__signInPoll) {
+    if (_auth.signInPoll) {
         // Currently waiting for sign-in to complete
         btn.textContent = "Cancel sign-in";
         btn.className = "outline contrast";
         btn.disabled = false;
         progress.classList.remove("hidden");
-    } else if (__isSignedIn) {
+    } else if (_auth.isSignedIn) {
         btn.textContent = "Sign out";
         btn.className = "outline secondary";
         btn.disabled = false;
@@ -422,9 +492,9 @@ function updateSignInButton() {
 }
 
 function cancelSignIn(reason) {
-    if (__signInPoll) {
-        clearInterval(__signInPoll);
-        __signInPoll = null;
+    if (_auth.signInPoll) {
+        clearInterval(_auth.signInPoll);
+        _auth.signInPoll = null;
     }
     if (reason) {
         showAuthMessage(reason, "error");
@@ -447,13 +517,13 @@ async function doSignOut() {
 
 $("btn-sign-in").addEventListener("click", async () => {
     // If currently waiting for sign-in, cancel it
-    if (__signInPoll) {
+    if (_auth.signInPoll) {
         cancelSignIn("Sign-in cancelled.");
         return;
     }
 
     // If signed in, sign out
-    if (__isSignedIn) {
+    if (_auth.isSignedIn) {
         await doSignOut();
         return;
     }
@@ -467,7 +537,7 @@ $("btn-sign-in").addEventListener("click", async () => {
         return;
     }
 
-    if (__desktopMode) {
+    if (_auth.desktopMode) {
         // Desktop mode: use interactive auth via system browser
         try {
             await apiFetch("/auth/interactive", {
@@ -479,7 +549,7 @@ $("btn-sign-in").addEventListener("click", async () => {
             // Poll auth status until authenticated or timeout
             const deadline = Date.now() + 5 * 60 * 1000; // 5 minutes
             let pollBusy = false;
-            __signInPoll = setInterval(async () => {
+            _auth.signInPoll = setInterval(async () => {
                 if (pollBusy) return;
                 if (Date.now() > deadline) {
                     cancelSignIn("Sign-in timed out. Please try again.");
@@ -490,8 +560,8 @@ $("btn-sign-in").addEventListener("click", async () => {
                     const resp = await apiFetch("/auth/status");
                     const data = await resp.json();
                     if (data.authenticated) {
-                        clearInterval(__signInPoll);
-                        __signInPoll = null;
+                        clearInterval(_auth.signInPoll);
+                        _auth.signInPoll = null;
                         updateSignInButton();
                         showAuthMessage("Signed in successfully.", "success");
                         checkAuthStatus();
@@ -554,7 +624,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
             alert(data.error || "Upload failed");
             return;
         }
-        spreadsheetData = data;
+        state.spreadsheetData = data;
         show("spreadsheet-info");
         renderSpreadsheetSummary(data);
         $("btn-next-1").disabled = false;
@@ -569,7 +639,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
 
 // Sheet change — re-read preview for the selected sheet
 $("sheet-select").addEventListener("change", async () => {
-    if (!spreadsheetData) return;
+    if (!state.spreadsheetData) return;
     const sheet = $("sheet-select").value;
 
     try {
@@ -583,9 +653,10 @@ $("sheet-select").addEventListener("change", async () => {
             alert(data.error || "Failed to change sheet");
             return;
         }
-        spreadsheetData = data;
+        state.spreadsheetData = data;
         renderSpreadsheetSummary(data);
         buildPreviewTable(data.columns, data.rows, data.total_rows);
+        try { localStorage.setItem("mm_sheet", sheet); } catch (e) { /* ignore */ }
     } catch (e) {
         alert("Error changing sheet: " + e.message);
     }
@@ -646,8 +717,8 @@ function showPlaceholderChips(columns) {
             e.preventDefault();
             const insertion = "{{" + col + "}}";
 
-            if ($("html-toggle").checked && trixEditor && !$("source-toggle").checked) {
-                trixEditor.insertString(insertion);
+            if ($("html-toggle").checked && state.trixEditor && !$("source-toggle").checked) {
+                state.trixEditor.insertString(insertion);
             } else {
                 // Insert into textarea (subject, body, or html-source)
                 let target = document.activeElement;
@@ -679,7 +750,7 @@ function showPlaceholderChips(columns) {
 let trixEditorEl = null;
 document.addEventListener('trix-initialize', (e) => {
     trixEditorEl = e.target;
-    trixEditor = e.target.editor;
+    state.trixEditor = e.target.editor;
 });
 
 document.addEventListener('trix-change', () => {
@@ -694,8 +765,8 @@ document.addEventListener('trix-file-accept', (e) => {
 function activateHtmlEditor() {
     const existingBody = $("body-input").value;
     if (existingBody) {
-        if (trixEditor) {
-            trixEditor.loadHTML(existingBody);
+        if (state.trixEditor) {
+            state.trixEditor.loadHTML(existingBody);
         } else {
             // trix-initialize hasn't fired yet; seed the hidden input
             // so Trix picks up the content when it initialises.
@@ -714,9 +785,9 @@ function onTemplateChange() {
     validationTimer = setTimeout(() => {
         validatePlaceholders();
         validateHtmlBody();
-        if (sendMode === "bcc") checkBccPlaceholders();
+        if (state.sendMode === "bcc") checkBccPlaceholders();
     }, 500);
-    formDirty = true;
+    state.formDirty = true;
 }
 $("subject-input").addEventListener("input", onTemplateChange);
 $("body-input").addEventListener("input", onTemplateChange);
@@ -745,7 +816,7 @@ $("source-toggle").addEventListener("change", () => {
         hide(trixEditorEl);
         show("html-source");
     } else {
-        if (trixEditor) trixEditor.loadHTML($("html-source").value);
+        if (state.trixEditor) state.trixEditor.loadHTML($("html-source").value);
         show(trixEditorEl);
         hide("html-source");
     }
@@ -760,18 +831,18 @@ $("reply-to-input").addEventListener("input", onTemplateChange);
 $("filter-input").addEventListener("input", onTemplateChange);
 
 function validatePlaceholders() {
-    if (!spreadsheetData) return;
+    if (!state.spreadsheetData) return;
     const subject = $("subject-input").value;
     const body = $("body-input").value;
     const combined = subject + body;
     const used = [...combined.matchAll(/\{\{(\w[\w ]*\w|\w)\}\}/g)].map(m => m[1]);
-    const colsLower = spreadsheetData.columns.map(c => c.toLowerCase());
+    const colsLower = state.spreadsheetData.columns.map(c => c.toLowerCase());
     const bad = used.filter(p => !colsLower.includes(p.toLowerCase()));
     const el = $("placeholder-errors");
     if (bad.length > 0) {
         const unique = [...new Set(bad)];
         el.innerHTML = unique.map(p =>
-            `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${spreadsheetData.columns.join(", ")}`
+            `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${state.spreadsheetData.columns.join(", ")}`
         ).join("<br>");
         show(el);
     } else {
@@ -884,16 +955,16 @@ async function loadPreview() {
             return false;
         }
 
-        // Store the final filtered recipients in spreadsheetData
-        spreadsheetData.rows = data.recipients;
+        // Store the final filtered recipients in state
+        state.spreadsheetData.rows = data.recipients;
 
-        const rows = spreadsheetData.rows;
+        const rows = state.spreadsheetData.rows;
         if (!rows || rows.length === 0) {
             alert("No recipients found (check your filters and email column).");
             return false;
         }
 
-        previewIndex = 0;
+        state.previewIndex = 0;
         renderPreviewRecipient();
         buildRecipientsTable();
 
@@ -917,14 +988,14 @@ async function loadPreview() {
 function renderPreviewRecipient() {
     const recipients = getRecipients();
     if (!recipients || recipients.length === 0) return;
-    const row = recipients[previewIndex];
+    const row = recipients[state.previewIndex];
     const subject = $("subject-input").value;
     const body = $("body-input").value;
 
     // Client-side template rendering for preview
     // In BCC mode all recipients get the same message — no substitution
-    const rendered_subject = sendMode === "bcc" ? subject : renderTemplate(subject, row);
-    const rendered_body = sendMode === "bcc" ? body : renderTemplate(body, row);
+    const rendered_subject = state.sendMode === "bcc" ? subject : renderTemplate(subject, row);
+    const rendered_body = state.sendMode === "bcc" ? body : renderTemplate(body, row);
 
     $("preview-subject").textContent = rendered_subject;
     const isHtml = $("html-toggle").checked;
@@ -939,7 +1010,7 @@ function renderPreviewRecipient() {
     }
 
     // Headers
-    if (sendMode === "bcc") {
+    if (state.sendMode === "bcc") {
         $("preview-to").textContent = $("bcc-blast-to").value || "(none)";
         $("preview-cc").textContent = "(none in BCC mode)";
         $("preview-bcc").textContent = `[all ${recipients.length} recipients]`;
@@ -957,7 +1028,7 @@ function renderPreviewRecipient() {
     $("preview-reply-to").textContent = $("reply-to-input").value || "(none)";
     $("preview-importance").textContent = $("importance-select").value || "Normal";
 
-    $("preview-recipient-label").textContent = `Previewing recipient ${previewIndex + 1} of ${recipients.length}`;
+    $("preview-recipient-label").textContent = `Previewing recipient ${state.previewIndex + 1} of ${recipients.length}`;
 }
 
 function renderTemplate(template, data) {
@@ -973,16 +1044,16 @@ function renderTemplate(template, data) {
 function changePreviewRecipient(delta) {
     const recipients = getRecipients();
     if (!recipients) return;
-    previewIndex = Math.max(0, Math.min(recipients.length - 1, previewIndex + delta));
+    state.previewIndex = Math.max(0, Math.min(recipients.length - 1, state.previewIndex + delta));
     renderPreviewRecipient();
 }
 
 function buildRecipientsTable() {
     const recipients = getRecipients();
-    if (!recipients || !spreadsheetData) return;
+    if (!recipients || !state.spreadsheetData) return;
     const emailCol = $("email-column").value;
     // Show the email column first, then all other columns
-    const cols = [emailCol, ...spreadsheetData.columns.filter(c => c !== emailCol)];
+    const cols = [emailCol, ...state.spreadsheetData.columns.filter(c => c !== emailCol)];
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
     thead.innerHTML = "<tr>" + cols.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
@@ -1040,7 +1111,7 @@ async function sendTestEmail() {
         return;
     }
 
-    testPassed = false;
+    state.testPassed = false;
     saveState();
 
     $("btn-send-test").disabled = true;
@@ -1060,10 +1131,10 @@ async function sendTestEmail() {
             showTestResult(false, data.error || "Failed to start job");
             return;
         }
-        currentJobId = data.job_id;
+        state.currentJobId = data.job_id;
         streamEvents(data.job_id, "test-log", (result) => {
             if (result.status === "completed") {
-                testPassed = true;
+                state.testPassed = true;
                 saveState();
                 $("btn-next-4").disabled = false;
                 showTestResult(true, "Test email sent successfully!");
@@ -1096,7 +1167,7 @@ function startVerify() {
     $("verify-log").innerHTML = "";
     hide("verify-result");
     $("btn-next-5").disabled = true;
-    verifyPassed = false;
+    state.verifyPassed = false;
     saveState();
 
     const form = buildJobFormData("dry_run");
@@ -1108,10 +1179,10 @@ function startVerify() {
                 showVerifyResult(false, data.error);
                 return;
             }
-            currentJobId = data.job_id;
+            state.currentJobId = data.job_id;
             streamEvents(data.job_id, "verify-log", (result) => {
                 if (result.status === "completed") {
-                    verifyPassed = true;
+                    state.verifyPassed = true;
                     saveState();
                     $("btn-next-5").disabled = false;
                     const recs = getRecipients();
@@ -1119,9 +1190,9 @@ function startVerify() {
                     const estSec = recs ? recs.length * 2 : "?";
                     let msg = `${n} emails ready to send. Estimated time: ~${estSec} seconds (2-second delay between sends).`;
                     // Token expiry check
-                    if (tokenExpiresAt && recs) {
+                    if (_auth.tokenExpiresAt && recs) {
                         const estEndMs = Date.now() + recs.length * 2000;
-                        if (estEndMs > tokenExpiresAt.getTime()) {
+                        if (estEndMs > _auth.tokenExpiresAt.getTime()) {
                             msg += "\n\u26a0\ufe0f Warning: Your authentication token may expire before sending completes. Consider signing in again before proceeding.";
                         }
                     }
@@ -1145,8 +1216,8 @@ function showVerifyResult(success, msg) {
 // Step 6: Send
 // ---------------------------------------------------------------------------
 function prepareSend() {
-    sendStarted = false;
-    sendResults = null;
+    state.sendStarted = false;
+    state.sendResults = null;
     const recipients = getRecipients();
     const n = recipients ? recipients.length : "?";
     $("send-count").textContent = n;
@@ -1183,7 +1254,7 @@ $("send-confirm-input").addEventListener("input", () => {
 });
 
 async function startSend() {
-    sendStarted = true;
+    state.sendStarted = true;
     hide("send-confirm");
     show("send-progress");
     show("send-log");
@@ -1202,7 +1273,7 @@ async function startSend() {
             showSendResult(false, data.error || "Failed to start send");
             return;
         }
-        currentJobId = data.job_id;
+        state.currentJobId = data.job_id;
         streamEvents(data.job_id, "send-log", (result) => {
             window.removeEventListener("beforeunload", beforeUnloadWarn);
             if (result.status === "completed" || result.status === "stopped") {
@@ -1227,8 +1298,8 @@ function beforeUnloadWarn(e) {
 }
 
 async function stopSend() {
-    if (!currentJobId) return;
-    await apiFetch(`/api/job/${currentJobId}/stop`, {
+    if (!state.currentJobId) return;
+    await apiFetch(`/api/job/${state.currentJobId}/stop`, {
         method: "POST",
         headers: { "X-CSRF-Token": CSRF_TOKEN },
     });
@@ -1238,7 +1309,7 @@ async function fetchAndShowSendResults(jobId) {
     try {
         const resp = await apiFetch(`/api/job/${jobId}/status`);
         const data = await resp.json();
-        sendResults = data.results || [];
+        state.sendResults = data.results || [];
         const summary = data.summary || {};
 
         hide("send-progress");
@@ -1251,9 +1322,9 @@ async function fetchAndShowSendResults(jobId) {
         html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
         html += `<span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`;
 
-        if (sendResults.length > 0) {
+        if (state.sendResults.length > 0) {
             html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>`;
-            for (const r of sendResults) {
+            for (const r of state.sendResults) {
                 const cls = r.success ? "success" : "failure";
                 html += `<tr class="${cls}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${escapeHtml(r.error || "")}</td></tr>`;
             }
@@ -1283,9 +1354,9 @@ function sanitizeCsvValue(val) {
 }
 
 function downloadCsv() {
-    if (!sendResults || sendResults.length === 0) return;
+    if (!state.sendResults || state.sendResults.length === 0) return;
     let csv = "email,success,status_code,error\n";
-    for (const r of sendResults) {
+    for (const r of state.sendResults) {
         csv += `"${sanitizeCsvValue(r.email)}",${r.success},${r.status_code || ""},"${sanitizeCsvValue((r.error || "").replace(/"/g, '""'))}"\n`;
     }
     const blob = new Blob([csv], { type: "text/csv" });
@@ -1299,14 +1370,7 @@ function downloadCsv() {
 
 function newMerge() {
     // Reset all state
-    spreadsheetData = null;
-    sendResults = null;
-    testPassed = false;
-    verifyPassed = false;
-    sendStarted = false;
-    currentJobId = null;
-    previewIndex = 0;
-    currentStep = 1;
+    state.resetAll();
 
     // Clean up server-side temp files and session state
     apiFetch("/api/reset", { method: "POST" }).catch(() => {});
@@ -1323,8 +1387,8 @@ function newMerge() {
     $("name-column").innerHTML = '<option value="">-- none --</option>';
     $("html-toggle").checked = false;
     $("source-toggle").checked = false;
-    if (trixEditor) {
-        trixEditor.loadHTML('');
+    if (state.trixEditor) {
+        state.trixEditor.loadHTML('');
     }
     $("trix-input").value = "";
     $("html-source").value = "";
@@ -1388,6 +1452,7 @@ function newMerge() {
         localStorage.removeItem("mm_email_col");
         localStorage.removeItem("mm_name_col");
         localStorage.removeItem("mm_html");
+        localStorage.removeItem("mm_sheet");
     } catch (e) { /* ignore */ }
 
     goToStep(1);
@@ -1459,7 +1524,7 @@ function buildJobFormData(mode) {
     form.set("save_to_sent_items", "true");
     if ($("filter-input").value.trim()) form.set("filters", $("filter-input").value.trim());
 
-    if (sendMode === "bcc") {
+    if (state.sendMode === "bcc") {
         form.set("bcc_blast", "true");
         form.set("bcc_blast_to", $("bcc-blast-to").value);
     }
@@ -1563,8 +1628,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Auto-save to localStorage (only when form content changed)
     setInterval(() => {
-        if (!formDirty) return;
-        formDirty = false;
+        if (!state.formDirty) return;
+        state.formDirty = false;
         try {
             localStorage.setItem("mm_subject", $("subject-input").value);
             localStorage.setItem("mm_body", $("body-input").value);

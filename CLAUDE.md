@@ -79,9 +79,9 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 
 **Key files:**
 - `web/__init__.py` — entry point: port discovery, startup token, browser launch
-- `web/app.py` — Flask app factory, all routes, background job management
+- `web/app.py` — Flask app factory, all routes, background job management. Pure helper functions (`_validate_html_body`, `_partition_emails`, `_validated_recipient_count`) and job infrastructure (`Job`, `JobLogHandler`, `_jobs`) are at module level; only routes and session-dependent helpers live inside `create_app()`.
 - `web/templates/index.html` — single Jinja2 template with all 6 wizard steps
-- `web/static/app.js` — wizard navigation, SSE streaming, client-side template preview
+- `web/static/app.js` — wizard navigation, SSE streaming, client-side template preview. Wizard state centralised in `state` object (`window.state`), auth state in `_auth`.
 - `web/static/style.css` — custom styles (step indicator, chips, log panel, callouts)
 - `web/static/pico.min.css` — bundled Pico CSS v2 (no CDN)
 
@@ -122,9 +122,9 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 
 State lives in three tiers, each with different lifetimes and sync characteristics.
 
-**Tier 1 — JS memory (ephemeral, lost on reload):** `currentStep`, `spreadsheetData` (columns + rows + metadata), `previewIndex`, `sendMode`, `testPassed`, `verifyPassed`, `sendStarted`, `currentJobId`, `sendResults`, `tokenExpiresAt`, `__isSignedIn`, `__desktopMode`. These drive all UI rendering and navigation guards. The DOM form elements (`subject-input`, `body-input`, `email-column`, `name-column`, `html-toggle`, `filter-input`, `cc-input`, etc.) are the source of truth for compose data — JS reads them directly when building form submissions rather than caching copies.
+**Tier 1 — JS memory (ephemeral, lost on reload):** Wizard workflow state is centralised in a `state` object (`window.state`): `currentStep`, `spreadsheetData`, `previewIndex`, `sendMode`, `testPassed`, `verifyPassed`, `sendStarted`, `currentJobId`, `sendResults`, `formDirty`, `trixEditor`. Auth state is grouped in `_auth`: `isSignedIn`, `desktopMode`, `signInPoll`, `tokenExpiresAt`. Legacy global aliases (`window.testPassed`, `window.verifyPassed`, `window.spreadsheetData`) are defined as property accessors for E2E test compatibility. The DOM form elements (`subject-input`, `body-input`, `email-column`, `name-column`, `html-toggle`, `filter-input`, `cc-input`, etc.) are the source of truth for compose data — JS reads them directly when building form submissions rather than caching copies.
 
-**Tier 2 — localStorage (survives reload, per-browser):** Five keys auto-saved every 5 seconds when `formDirty` is true: `mm_subject`, `mm_body`, `mm_email_col`, `mm_name_col`, `mm_html`. On page load, these only fill form fields that are still empty (server-restored values take precedence). Cleared by `newMerge()`. Filters, CC/BCC, reply-to, importance, attachments, and send mode are intentionally not persisted — they are considered step-specific and not worth carrying across sessions.
+**Tier 2 — localStorage (survives reload, per-browser):** Six keys auto-saved: `mm_subject`, `mm_body`, `mm_email_col`, `mm_name_col`, `mm_html` (every 5 seconds when `state.formDirty` is true), and `mm_sheet` (on sheet change). On page load, these fill form fields that are still empty (server-restored values take precedence). Sheet selection triggers a `/api/change-sheet` call if the saved sheet differs from the server's default. Cleared by `newMerge()`. Filters, CC/BCC, reply-to, importance, attachments, and send mode are intentionally not persisted — they are considered step-specific and not worth carrying across sessions.
 
 **Tier 3 — Flask session (cookie-based, survives reload):** Auth state (`authenticated`, `ms_authenticated`, `client_id`, `tenant_id`, `auth_flow`, `csrf_token`), spreadsheet metadata (`spreadsheet_path`, `spreadsheet_tmp_dir`, `spreadsheet_info` — columns/sheets/total_rows/file_name but not row data, which would exceed the 4 KB cookie limit), and wizard progress (`current_step`, `test_passed`, `verify_passed`, `job_id`). The MSAL token cache is a separate file on disk shared with CLI auth.
 
@@ -148,7 +148,7 @@ The tiers sync at specific moments, not continuously:
 |---|---|---|
 | Auth status | Yes | MSAL token cache on disk, checked via `/auth/status` |
 | Uploaded spreadsheet | Yes | Temp file on disk, path in session |
-| Sheet selection | No | Not persisted; defaults to first sheet |
+| Sheet selection | Yes | localStorage (`mm_sheet`); triggers `/api/change-sheet` on reload if different from default |
 | Spreadsheet preview rows | Yes | Re-read from temp file by `/api/config` |
 | Column selections | Partially | localStorage has `mm_email_col`/`mm_name_col`, restored if columns still match |
 | Subject / body / HTML mode | Yes | localStorage (`mm_subject`, `mm_body`, `mm_html`) |
@@ -196,41 +196,9 @@ The current architecture is **imperative DOM manipulation** — JS functions dir
 - **File upload and temp files.** Binary file handling is inherently imperative and tightly coupled to the server. No ViewModel pattern helps here.
 - **Framework weight.** The app currently has zero JS build step and zero dependencies (vanilla JS + Pico CSS). Adopting MVVM properly would require either a framework (Vue, Svelte, Preact) or a hand-rolled reactive system. For a single-page, single-user, local-only tool, this may not be worth the added complexity. The current codebase is ~1500 lines of JS.
 
-**Recommended approach if pursuing MVVM:** The lightest-weight option would be a single `WizardState` object with computed getters and a `render()` function that projects state to DOM — essentially a hand-rolled ViewModel without a framework. This gives the single-source-of-truth benefit without a build step:
+**Current approach (partial MVVM):** The first step has been taken: a `state` object centralises wizard workflow state (step, spreadsheet data, progress flags, job tracking) and an `_auth` object groups auth state. DOM form fields remain the source of truth for compose data, with `state` owning only workflow/progress state. This gives single-source-of-truth for navigation and invalidation without a full reactive framework. `state.resetTestAndVerify()` and `state.resetAll()` centralise invalidation logic. Legacy global property aliases (`window.testPassed` etc.) maintain backward compatibility for E2E tests.
 
-```
-WizardState {
-  // Data tier
-  spreadsheet: { columns, rows, sheets, fileName, totalRows } | null
-  selectedSheet: string | null
-
-  // Compose tier (derived UI depends on spreadsheet)
-  emailColumn: string
-  nameColumn: string
-  subject: string
-  body: string
-  htmlMode: boolean
-  sendMode: "individual" | "bcc"
-  filters: string
-  // ... other compose fields
-
-  // Progress tier (derived from compose + server round-trips)
-  filteredRecipients: [] | null   // populated by server call
-  testPassed: boolean
-  verifyPassed: boolean
-
-  // Computed
-  get availablePlaceholders() → from spreadsheet.columns
-  get unresolvedPlaceholders() → from subject + body vs columns
-  get canAdvanceToCompose() → spreadsheet !== null
-  get canAdvanceToPreview() → emailColumn && subject && body && ...
-  get canAdvanceToTest() → filteredRecipients.length > 0
-  get canAdvanceToVerify() → testPassed
-  get canAdvanceToSend() → verifyPassed
-}
-```
-
-This would replace the current 14 top-level JS variables, the `validateDataSource()`/`validateCompose()` functions, and the scattered invalidation logic. The `render()` function would replace the manual `show()`/`hide()`/`updateStepUI()` calls. DOM inputs would bind to the state object via event listeners (similar to current `onTemplateChange()` but writing to `state.subject` instead of relying on the DOM as source of truth). Persistence (localStorage, server session) would serialize from this single object.
+A further step toward full MVVM would add computed getters (e.g. `canAdvanceToPreview`) and a `render()` function that projects state to DOM, replacing the manual `show()`/`hide()`/`updateStepUI()` calls. For the current scale (~1600 lines of JS, single-user local tool), the partial extraction is sufficient.
 
 #### Current consistency guarantees and gaps
 
@@ -241,8 +209,7 @@ This would replace the current 14 top-level JS variables, the `validateDataSourc
 
 **Known inconsistency gaps:**
 - `testPassed`/`verifyPassed` are saved to the server session but intentionally not restored on reload — the user must re-run these steps. This is a deliberate UX choice (results are transient), not a bug.
-- Sheet selection is not persisted — after reload, the first sheet is shown even if the user had selected a different one. The uploaded file and column selections (via localStorage) survive, but the sheet does not.
-- `sendMode`, filters, CC/BCC, reply-to, importance, and attachments are DOM-only and lost on reload. For a local single-session app this is acceptable, but it means reload during Step 2 loses more state than reload during Step 1 (which only loses sheet selection).
+- `sendMode`, filters, CC/BCC, reply-to, importance, and attachments are DOM-only and lost on reload. For a local single-session app this is acceptable.
 
 ## Email address pipeline
 
