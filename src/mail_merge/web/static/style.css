@@ -396,8 +396,20 @@ table caption {
     font-size: 0.85rem;
 }
 
-/* Quill editor is mounted inside a Shadow DOM for complete Pico CSS isolation.
-   Only the host element (#quill-editor) needs styling here. */
+/* Quill editor — sits outside .pico in the DOM so Pico selectors
+   don't match. Only cosmetic tweaks needed here. */
+#quill-editor {
+    min-height: 200px;
+    margin-bottom: 1rem;
+}
+
+#quill-editor .ql-editor {
+    font-family: -apple-system, 'Segoe UI', Roboto, Arial, Helvetica, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #1a1a1a;
+    min-height: 150px;
+}
 
 /* Hidden */
 .hidden {

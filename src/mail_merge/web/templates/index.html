@@ -5,128 +5,134 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MergeMail365</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='quill.snow.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="pico">
+<body>
 <main>
-    <!-- Header -->
-    <div class="header-bar">
-        <strong>MergeMail365</strong>
-        <div class="identity">
-            <span id="session-timer" class="session-timer hidden"></span>
-            <span id="auth-display" class="auth-indicator">
-                <span class="dot gray"></span> Not signed in
-            </span>
+    <!-- Header + Step Indicator (Pico-styled) -->
+    <div class="pico">
+        <div class="header-bar">
+            <strong>MergeMail365</strong>
+            <div class="identity">
+                <span id="session-timer" class="session-timer hidden"></span>
+                <span id="auth-display" class="auth-indicator">
+                    <span class="dot gray"></span> Not signed in
+                </span>
+            </div>
         </div>
-    </div>
 
-    <!-- Step Indicator -->
-    <ol class="step-indicator" id="step-indicator">
-        <li class="active" data-step="1"><span class="step-num">1</span> Setup</li>
-        <li data-step="2"><span class="step-arrow">&rarr;</span><span class="step-num">2</span> Preview</li>
-        <li data-step="3"><span class="step-arrow">&rarr;</span><span class="step-num">3</span> Test</li>
-        <li data-step="4"><span class="step-arrow">&rarr;</span><span class="step-num">4</span> Verify</li>
-        <li data-step="5"><span class="step-arrow">&rarr;</span><span class="step-num">5</span> Send</li>
-    </ol>
+        <ol class="step-indicator" id="step-indicator">
+            <li class="active" data-step="1"><span class="step-num">1</span> Setup</li>
+            <li data-step="2"><span class="step-arrow">&rarr;</span><span class="step-num">2</span> Preview</li>
+            <li data-step="3"><span class="step-arrow">&rarr;</span><span class="step-num">3</span> Test</li>
+            <li data-step="4"><span class="step-arrow">&rarr;</span><span class="step-num">4</span> Verify</li>
+            <li data-step="5"><span class="step-arrow">&rarr;</span><span class="step-num">5</span> Send</li>
+        </ol>
+    </div>
 
     <!-- ===== STEP 1: Setup ===== -->
     <div class="step-panel active" id="step-1">
-        <h3>Setup the mail merge</h3>
+        <div class="pico">
+            <h3>Setup the mail merge</h3>
 
-        <!-- Auth -->
-        <fieldset>
-            <legend>Authentication</legend>
-            <div id="auth-config-fields" class="grid">
-                <div>
-                    <label for="client-id">Client ID</label>
-                    <input type="text" id="client-id" placeholder="Azure AD application (client) ID">
-                    <small id="config-badge" class="hidden">Loaded from config file</small>
-                </div>
-                <div>
-                    <label for="tenant-id">Tenant ID</label>
-                    <input type="text" id="tenant-id" placeholder="common" value="common">
-                    <small>Leave as "common" if unsure</small>
-                </div>
-            </div>
-            <div class="button-row">
-                <button type="button" id="btn-sign-in" class="outline">Sign in with Microsoft</button>
-                <button type="button" id="btn-test-connection" class="outline secondary">Test connection</button>
-            </div>
-            <div class="auth-feedback">
-                <progress id="auth-progress" class="auth-progress hidden"></progress>
-                <div id="auth-message" class="auth-message hidden"></div>
-            </div>
-            <div id="auth-diagnostics" class="hidden">
-                <pre id="auth-diag-content" class="auth-diagnostics-content"></pre>
-            </div>
-        </fieldset>
-
-        <!-- Spreadsheet -->
-        <fieldset>
-            <legend>Spreadsheet</legend>
-            <label for="spreadsheet-file">Upload .xlsx file</label>
-            <input type="file" id="spreadsheet-file" accept=".xlsx">
-            <div id="spreadsheet-info" class="hidden">
-                <p id="spreadsheet-summary"></p>
-                <div class="grid">
+            <!-- Auth -->
+            <fieldset>
+                <legend>Authentication</legend>
+                <div id="auth-config-fields" class="grid">
                     <div>
-                        <label for="email-column">Email column</label>
-                        <select id="email-column"><option value="">-- select --</option></select>
+                        <label for="client-id">Client ID</label>
+                        <input type="text" id="client-id" placeholder="Azure AD application (client) ID">
+                        <small id="config-badge" class="hidden">Loaded from config file</small>
                     </div>
                     <div>
-                        <label for="name-column">Name column <small>(optional)</small></label>
-                        <select id="name-column"><option value="">-- none --</option></select>
-                    </div>
-                    <div>
-                        <label for="sheet-select">Sheet</label>
-                        <select id="sheet-select"><option value="">Default</option></select>
+                        <label for="tenant-id">Tenant ID</label>
+                        <input type="text" id="tenant-id" placeholder="common" value="common">
+                        <small>Leave as "common" if unsure</small>
                     </div>
                 </div>
-                <details>
-                    <summary role="button">Preview data</summary>
-                    <div class="table-wrap">
-                        <table id="preview-table" class="striped"><thead></thead><tbody></tbody></table>
+                <div class="button-row">
+                    <button type="button" id="btn-sign-in" class="outline">Sign in with Microsoft</button>
+                    <button type="button" id="btn-test-connection" class="outline secondary">Test connection</button>
+                </div>
+                <div class="auth-feedback">
+                    <progress id="auth-progress" class="auth-progress hidden"></progress>
+                    <div id="auth-message" class="auth-message hidden"></div>
+                </div>
+                <div id="auth-diagnostics" class="hidden">
+                    <pre id="auth-diag-content" class="auth-diagnostics-content"></pre>
+                </div>
+            </fieldset>
+
+            <!-- Spreadsheet -->
+            <fieldset>
+                <legend>Spreadsheet</legend>
+                <label for="spreadsheet-file">Upload .xlsx file</label>
+                <input type="file" id="spreadsheet-file" accept=".xlsx">
+                <div id="spreadsheet-info" class="hidden">
+                    <p id="spreadsheet-summary"></p>
+                    <div class="grid">
+                        <div>
+                            <label for="email-column">Email column</label>
+                            <select id="email-column"><option value="">-- select --</option></select>
+                        </div>
+                        <div>
+                            <label for="name-column">Name column <small>(optional)</small></label>
+                            <select id="name-column"><option value="">-- none --</option></select>
+                        </div>
+                        <div>
+                            <label for="sheet-select">Sheet</label>
+                            <select id="sheet-select"><option value="">Default</option></select>
+                        </div>
                     </div>
-                </details>
-            </div>
-        </fieldset>
-
-        <!-- Message -->
-        <fieldset>
-            <legend>Message</legend>
-            <!-- Sending mode -->
-            <div class="mode-toggle" role="group">
-                <button type="button" id="mode-individual" class="active-mode" onclick="setSendMode('individual')">Send as individual emails</button>
-                <button type="button" id="mode-bcc" class="outline" onclick="setSendMode('bcc')">Send as BCC’d email</button>
-            </div>
-            <div id="bcc-blast-options" class="hidden">
-                <label for="bcc-blast-to"><em>To:</em> address when sending as BCC</label>
-                <input type="text" id="bcc-blast-to" placeholder='Display Name <email@example.com>'>
-                <div id="bcc-placeholder-warn" class="callout callout-warning hidden">
-                    BCC mode does not support placeholders. Body and subject must be static text.
+                    <details>
+                        <summary role="button">Preview data</summary>
+                        <div class="table-wrap">
+                            <table id="preview-table" class="striped"><thead></thead><tbody></tbody></table>
+                        </div>
+                    </details>
                 </div>
-            </div>
+            </fieldset>
 
-            <label for="subject-input">Subject</label>
-            <input type="text" id="subject-input" placeholder="Hello {{name}}">
-
-            <label for="body-input">Body</label>
-
-            <!-- Plain-text mode (default) -->
-            <textarea id="body-input" rows="8" placeholder="Hello {{name}},&#10;&#10;Welcome from {{company}}."></textarea>
-
-            <!-- HTML editor mode (hidden by default) -->
-            <div id="html-editor-wrap" class="hidden">
-                <div class="html-editor-header">
-                    <label>
-                        <input type="checkbox" id="source-toggle"> View source
-                    </label>
+            <!-- Message -->
+            <fieldset>
+                <legend>Message</legend>
+                <!-- Sending mode -->
+                <div class="mode-toggle" role="group">
+                    <button type="button" id="mode-individual" class="active-mode" onclick="setSendMode('individual')">Send as individual emails</button>
+                    <button type="button" id="mode-bcc" class="outline" onclick="setSendMode('bcc')">Send as BCC'd email</button>
                 </div>
-                <div id="quill-editor"></div>
-                <textarea id="html-source" rows="12" class="hidden" spellcheck="false"></textarea>
-                <small class="muted">Tip: if you include your own &lt;html&gt; tags, the app's email compatibility wrappers are skipped.</small>
-            </div>
+                <div id="bcc-blast-options" class="hidden">
+                    <label for="bcc-blast-to"><em>To:</em> address when sending as BCC</label>
+                    <input type="text" id="bcc-blast-to" placeholder='Display Name <email@example.com>'>
+                    <div id="bcc-placeholder-warn" class="callout callout-warning hidden">
+                        BCC mode does not support placeholders. Body and subject must be static text.
+                    </div>
+                </div>
 
+                <label for="subject-input">Subject</label>
+                <input type="text" id="subject-input" placeholder="Hello {{name}}">
+
+                <label for="body-input">Body</label>
+
+                <!-- Plain-text mode (default) -->
+                <textarea id="body-input" rows="8" placeholder="Hello {{name}},&#10;&#10;Welcome from {{company}}."></textarea>
+            </fieldset>
+        </div>
+
+        <!-- HTML editor (outside .pico — Quill CSS isolation) -->
+        <div id="html-editor-wrap" class="hidden">
+            <div class="html-editor-header">
+                <label>
+                    <input type="checkbox" id="source-toggle"> View source
+                </label>
+            </div>
+            <div id="quill-editor"></div>
+            <textarea id="html-source" rows="12" class="hidden" spellcheck="false"></textarea>
+            <small>Tip: if you include your own &lt;html&gt; tags, the app's email compatibility wrappers are skipped.</small>
+        </div>
+
+        <div class="pico">
             <label>
                 <input type="checkbox" id="html-toggle"> Send as HTML
             </label>
@@ -137,54 +143,54 @@
             </div>
             <div id="placeholder-errors" class="hidden callout callout-danger"></div>
             <div id="html-warnings" class="hidden callout callout-warning"></div>
-        </fieldset>
 
-        <!-- Options (collapsible) -->
-        <details>
-            <summary role="button">Additional options</summary>
-            <div class="grid">
-                <div>
-                    <label for="cc-input">CC</label>
-                    <input type="text" id="cc-input" placeholder="e.g., user@example.com or Display Name <user@example.com>">
+            <!-- Options (collapsible) -->
+            <details>
+                <summary role="button">Additional options</summary>
+                <div class="grid">
+                    <div>
+                        <label for="cc-input">CC</label>
+                        <input type="text" id="cc-input" placeholder="e.g., user@example.com or Display Name <user@example.com>">
+                    </div>
+                    <div>
+                        <label for="bcc-input">BCC</label>
+                        <input type="text" id="bcc-input" placeholder="e.g., user@example.com">
+                    </div>
                 </div>
-                <div>
-                    <label for="bcc-input">BCC</label>
-                    <input type="text" id="bcc-input" placeholder="e.g., user@example.com">
+                <div class="grid">
+                    <div>
+                        <label for="reply-to-input">Reply-To</label>
+                        <input type="text" id="reply-to-input" placeholder="e.g., user@example.com">
+                    </div>
+                    <div>
+                        <label for="importance-select">Importance</label>
+                        <select id="importance-select">
+                            <option value="">Default</option>
+                            <option value="low">Low</option>
+                            <option value="normal">Normal</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
                 </div>
-            </div>
-            <div class="grid">
-                <div>
-                    <label for="reply-to-input">Reply-To</label>
-                    <input type="text" id="reply-to-input" placeholder="e.g., user@example.com">
+                <label for="attachment-input">Attachments</label>
+                <input type="file" id="attachment-input" multiple>
+                <div class="grid">
+                    <div>
+                        <label for="filter-input">Filters <small>(one per line: column=value or column!=value)</small></label>
+                        <textarea id="filter-input" rows="2" placeholder="company=Acme"></textarea>
+                    </div>
                 </div>
-                <div>
-                    <label for="importance-select">Importance</label>
-                    <select id="importance-select">
-                        <option value="">Default</option>
-                        <option value="low">Low</option>
-                        <option value="normal">Normal</option>
-                        <option value="high">High</option>
-                    </select>
-                </div>
-            </div>
-            <label for="attachment-input">Attachments</label>
-            <input type="file" id="attachment-input" multiple>
-            <div class="grid">
-                <div>
-                    <label for="filter-input">Filters <small>(one per line: column=value or column!=value)</small></label>
-                    <textarea id="filter-input" rows="2" placeholder="company=Acme"></textarea>
-                </div>
-            </div>
-        </details>
+            </details>
 
-        <div class="nav-buttons">
-            <div></div>
-            <button type="button" id="btn-next-1" onclick="goToStep(2)">Next &rarr;</button>
+            <div class="nav-buttons">
+                <div></div>
+                <button type="button" id="btn-next-1" onclick="goToStep(2)">Next &rarr;</button>
+            </div>
         </div>
     </div>
 
     <!-- ===== STEP 2: Preview ===== -->
-    <div class="step-panel" id="step-2">
+    <div class="step-panel pico" id="step-2">
         <h3>Preview emails to send</h3>
         <div id="invalid-email-warning" class="hidden callout callout-warning"></div>
         <div class="preview-nav">
@@ -233,7 +239,7 @@
     </div>
 
     <!-- ===== STEP 3: Test Email ===== -->
-    <div class="step-panel" id="step-3">
+    <div class="step-panel pico" id="step-3">
         <h3>Send one test email</h3>
         <p>This step sends <strong>one real email</strong> to verify your setup. The email is personalized with the first recipient's data but delivered only to the test address below. No emails are sent to your actual recipients.</p>
 
@@ -260,9 +266,9 @@
     </div>
 
     <!-- ===== STEP 4: Verify (Dry Run) ===== -->
-    <div class="step-panel" id="step-4">
+    <div class="step-panel pico" id="step-4">
         <h3>Check emails to be sent</h3>
-        <p>Verifying that all <span id="verify-count">?</span> emails can be composed correctly. Review results below and click “Next” to proceed.</p>
+        <p>Verifying that all <span id="verify-count">?</span> emails can be composed correctly. Review results below and click "Next" to proceed.</p>
 
         <div id="verify-log" class="log-panel"></div>
         <div id="verify-result" class="hidden action-result"></div>
@@ -274,7 +280,7 @@
     </div>
 
     <!-- ===== STEP 5: Send ===== -->
-    <div class="step-panel" id="step-5">
+    <div class="step-panel pico" id="step-5">
         <h3>Send emails</h3>
 
         <div id="send-confirm" class="callout callout-danger">
@@ -306,7 +312,7 @@
         </div>
     </div>
 
-    <dialog id="session-timeout-modal">
+    <dialog class="pico" id="session-timeout-modal">
         <article>
             <h3>Session expired</h3>
             <p>Your security session has timed out due to inactivity or the 24-hour limit. To protect your data, the interface has been locked.</p>

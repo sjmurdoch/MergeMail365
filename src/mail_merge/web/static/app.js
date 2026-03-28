@@ -69,7 +69,8 @@ function apiFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 async function goToStep(n) {
     console.log("Navigating to step", n, "from", currentStep);
-    
+    flushQuill();
+
     // Only perform validation/trigger side-effects when advancing forward
     if (n > currentStep) {
         if (n === 2 && currentStep === 1) {
@@ -608,58 +609,12 @@ function showPlaceholderChips(columns) {
 }
 
 // ---------------------------------------------------------------------------
-// Quill HTML editor — mounted inside Shadow DOM for Pico CSS isolation
+// Quill HTML editor — sits outside .pico in the DOM for CSS isolation
 // ---------------------------------------------------------------------------
 function initQuill() {
     if (quillEditor) return;
 
-    const host = $('quill-editor');
-
-    // Create Shadow DOM to isolate Quill from Pico CSS
-    const shadow = host.attachShadow({ mode: 'open' });
-
-    // Load Quill's Snow theme CSS inside the shadow
-    const quillCssUrl = document.querySelector('script[src*="quill.min.js"]').src
-        .replace('quill.min.js', 'quill.snow.css');
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = quillCssUrl;
-    shadow.appendChild(link);
-
-    // Add custom styles for the editor inside the shadow
-    const style = document.createElement('style');
-    style.textContent = `
-        :host {
-            display: block;
-            min-height: 200px;
-            margin-bottom: 1rem;
-        }
-        .ql-toolbar.ql-snow {
-            border-color: #ccc;
-            border-radius: 4px 4px 0 0;
-            background: #fff;
-        }
-        .ql-container.ql-snow {
-            border-color: #ccc;
-            border-radius: 0 0 4px 4px;
-        }
-        .ql-editor {
-            font-family: -apple-system, 'Segoe UI', Roboto, Arial, Helvetica, sans-serif;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #1a1a1a;
-            min-height: 150px;
-        }
-    `;
-    shadow.appendChild(style);
-
-    // Create the container div that Quill will mount on
-    const editorDiv = document.createElement('div');
-    editorDiv.id = 'quill-inner';
-    shadow.appendChild(editorDiv);
-
-    // Initialize Quill on the element inside the shadow
-    quillEditor = new Quill(editorDiv, {
+    quillEditor = new Quill($('quill-editor'), {
         theme: 'snow',
         placeholder: 'Compose your HTML email...',
         modules: {
@@ -682,15 +637,22 @@ function initQuill() {
     });
 
     quillEditor.on('text-change', () => {
-        syncQuillToTextarea();
+        quillDirty = true;
         onTemplateChange();
     });
 }
 
-function syncQuillToTextarea() {
+let quillDirty = false;
+
+// Flush Quill HTML to the hidden textareas. Called only when
+// the value is actually needed (step navigation, source toggle,
+// localStorage save, validation).
+function flushQuill() {
+    if (!quillEditor || !quillDirty) return;
+    quillDirty = false;
     const html = quillEditor.getSemanticHTML();
-    // Normalise empty editor states to empty string
-    const cleaned = html.replace(/<p><br><\/p>/g, '')
+    const cleaned = html.replace(/\u00A0/g, ' ')
+                        .replace(/<p><br><\/p>/g, '')
                         .replace(/<p><\/p>/g, '')
                         .trim() || '';
     $('html-source').value = cleaned;
@@ -702,6 +664,7 @@ function syncTextareaToQuill() {
     const delta = quillEditor.clipboard.convert({ html });
     quillEditor.setContents(delta);
     $('body-input').value = html;
+    quillDirty = false;
 }
 
 function activateHtmlEditor() {
@@ -720,6 +683,7 @@ let validationTimer = null;
 function onTemplateChange() {
     clearTimeout(validationTimer);
     validationTimer = setTimeout(() => {
+        flushQuill();
         validatePlaceholders();
         validateHtmlBody();
     }, 500);
@@ -749,7 +713,7 @@ $("html-toggle").addEventListener("change", () => {
 });
 $("source-toggle").addEventListener("change", () => {
     if ($("source-toggle").checked) {
-        syncQuillToTextarea();
+        flushQuill();
         hide("quill-editor");
         show("html-source");
     } else {
@@ -1572,6 +1536,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(() => {
         if (!formDirty) return;
         formDirty = false;
+        flushQuill();
         try {
             localStorage.setItem("mm_subject", $("subject-input").value);
             localStorage.setItem("mm_body", $("body-input").value);
