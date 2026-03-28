@@ -368,6 +368,38 @@ class TestPreview:
         data = resp.get_json()
         assert data["html_warnings"] == []
 
+    def test_preview_html_warns_style_block(self, web_client):
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "<style>body { color: red; }</style><p>Hello</p>",
+                "sample_data": {},
+                "columns": [],
+                "html": True,
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert any("style" in w.lower() and "stripped" in w.lower() for w in data["html_warnings"])
+
+    def test_preview_html_warns_full_document(self, web_client):
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/preview-template",
+            json={
+                "subject": "Hi",
+                "body": "<!DOCTYPE html><html><body><p>Hello</p></body></html>",
+                "sample_data": {},
+                "columns": [],
+                "html": True,
+            },
+            headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
+        )
+        data = resp.get_json()
+        assert any("full html document" in w.lower() for w in data["html_warnings"])
+
 
 class TestRecipientAPI:
     def test_get_recipients_filtering(self, web_client, sample_xlsx):

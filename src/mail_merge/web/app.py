@@ -51,6 +51,8 @@ _STRIPPED_TAGS_RE = re.compile(
 _EXT_STYLESHEET_RE = re.compile(
     r"""<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>""", re.IGNORECASE,
 )
+_STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
+_FULL_HTML_DOC_RE = re.compile(r"<!doctype|<html\b", re.IGNORECASE)
 _GMAIL_CLIP_BYTES = 102 * 1024  # ~102 KB
 
 
@@ -812,6 +814,21 @@ def create_app(
             warnings.append(
                 "External stylesheets (<link rel=\"stylesheet\">) are not "
                 "supported in email. Use inline style attributes instead."
+            )
+
+        if _STYLE_BLOCK_RE.search(body):
+            warnings.append(
+                "Embedded <style> blocks may be stripped. Many email clients "
+                "(Gmail, Outlook.com) remove <style> tags. Use inline style "
+                "attributes for reliable rendering."
+            )
+
+        if _FULL_HTML_DOC_RE.search(body):
+            warnings.append(
+                "Full HTML document detected. Your own <html> structure will "
+                "be sent as-is, bypassing the app\u2019s standard email "
+                "compatibility wrappers (CSS resets, Outlook DPI fix, mobile "
+                "viewport)."
             )
 
         body_bytes = len(body.encode("utf-8"))

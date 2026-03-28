@@ -382,6 +382,23 @@ table caption {
     margin-bottom: 0.25rem;
 }
 
+/* HTML editor wrapper */
+.html-editor-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.25rem;
+    font-size: 0.85rem;
+}
+
+/* Source textarea in HTML mode */
+#html-source {
+    font-family: var(--pico-font-family-monospace);
+    font-size: 0.85rem;
+}
+
+/* Quill editor is mounted inside a Shadow DOM for complete Pico CSS isolation.
+   Only the host element (#quill-editor) needs styling here. */
+
 /* Hidden */
 .hidden {
     display: none !important;

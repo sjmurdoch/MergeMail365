@@ -111,7 +111,21 @@
             <input type="text" id="subject-input" placeholder="Hello {{name}}">
 
             <label for="body-input">Body</label>
+
+            <!-- Plain-text mode (default) -->
             <textarea id="body-input" rows="8" placeholder="Hello {{name}},&#10;&#10;Welcome from {{company}}."></textarea>
+
+            <!-- HTML editor mode (hidden by default) -->
+            <div id="html-editor-wrap" class="hidden">
+                <div class="html-editor-header">
+                    <label>
+                        <input type="checkbox" id="source-toggle"> View source
+                    </label>
+                </div>
+                <div id="quill-editor"></div>
+                <textarea id="html-source" rows="12" class="hidden" spellcheck="false"></textarea>
+                <small class="muted">Tip: if you include your own &lt;html&gt; tags, the app's email compatibility wrappers are skipped.</small>
+            </div>
 
             <label>
                 <input type="checkbox" id="html-toggle"> Send as HTML
@@ -308,6 +322,7 @@
 <script>
 const CSRF_TOKEN = {{ csrf_token | tojson }};
 </script>
+<script src="{{ url_for('static', filename='quill.min.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

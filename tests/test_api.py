@@ -1319,3 +1319,70 @@ class TestNameColumn:
                 email_column="email",
                 name_column="nonexistent",
             )
+
+
+class TestWrapHtmlForEmail:
+    """Tests for the _wrap_html_for_email helper."""
+
+    def test_wraps_fragment(self):
+        from mail_merge.api import _wrap_html_for_email
+
+        result = _wrap_html_for_email("<p>Hello</p>")
+        assert "<!DOCTYPE html>" in result
+        assert "<p>Hello</p>" in result
+        assert "</html>" in result
+
+    def test_preserves_full_document(self):
+        from mail_merge.api import _wrap_html_for_email
+
+        doc = "<!DOCTYPE html><html><body><p>Hello</p></body></html>"
+        assert _wrap_html_for_email(doc) == doc
+
+    def test_preserves_html_tag_only(self):
+        from mail_merge.api import _wrap_html_for_email
+
+        doc = "<html><body><p>Hello</p></body></html>"
+        assert _wrap_html_for_email(doc) == doc
+
+    def test_case_insensitive_detection(self):
+        from mail_merge.api import _wrap_html_for_email
+
+        doc = "<!doctype html><HTML><body>Hi</body></HTML>"
+        assert _wrap_html_for_email(doc) == doc
+
+    def test_includes_email_reset_styles(self):
+        from mail_merge.api import _wrap_html_for_email
+
+        result = _wrap_html_for_email("<p>Test</p>")
+        assert "margin: 0" in result
+        assert "font-family:" in result
+        assert "PixelsPerInch" in result
+
+    def test_preserves_template_placeholders(self):
+        from mail_merge.api import _wrap_html_for_email
+
+        result = _wrap_html_for_email("<p>Hello {{name}}</p>")
+        assert "{{name}}" in result
+
+    def test_html_flag_wraps_in_send_merge(self, sample_xlsx, body_template_file):
+        """send_merge with html=True wraps the body in an email document."""
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body_text="<p>Hello {{name}}</p>",
+            subject="Test",
+            email_column="email",
+            html=True,
+        )
+        assert len(results) == 2
+        assert all(r.success for r in results)
+
+    def test_html_false_does_not_wrap(self, sample_xlsx, body_template_file):
+        """send_merge without html=True does not wrap the body."""
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            body_text="Hello {{name}}",
+            subject="Test",
+            email_column="email",
+            html=False,
+        )
+        assert len(results) == 2

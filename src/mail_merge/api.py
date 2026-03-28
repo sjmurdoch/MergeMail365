@@ -6,6 +6,7 @@ import base64
 import logging
 import mimetypes
 import os
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from email.utils import parseaddr
@@ -99,6 +100,79 @@ def _process_attachments(
             "contentBytes": base64.b64encode(content_bytes).decode("ascii"),
         })
     return attachment_list
+
+
+_FULL_HTML_DOC_RE = re.compile(r"<!DOCTYPE|<html\b", re.IGNORECASE)
+
+_EMAIL_HTML_HEAD = """\
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+    <meta charset="utf-8">
+    <!--[if mso]>
+    <noscript><xml><o:OfficeDocumentSettings>
+    <o:PixelsPerInch>96</o:PixelsPerInch>
+    </o:OfficeDocumentSettings></xml></noscript>
+    <![endif]-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body, p, h1, h2, h3, ul, ol, li, blockquote {
+            margin: 0;
+            padding: 0;
+        }
+        p {
+            margin: 0 0 0.75em 0;
+        }
+        h1 {
+            font-size: 1.6em;
+            margin: 0 0 0.5em 0;
+        }
+        h2 {
+            font-size: 1.3em;
+            margin: 0 0 0.5em 0;
+        }
+        h3 {
+            font-size: 1.1em;
+            margin: 0 0 0.5em 0;
+        }
+        ul, ol {
+            margin: 0 0 0.75em 0;
+            padding-left: 1.5em;
+        }
+        li {
+            margin: 0 0 0.25em 0;
+        }
+        blockquote {
+            margin: 0 0 0.75em 0;
+            padding: 0.5em 0 0.5em 1em;
+            border-left: 3px solid #ccc;
+            color: #555;
+        }
+        a {
+            color: #1a73e8;
+        }
+    </style>
+</head>
+<body style="margin: 0; padding: 16px; font-family: -apple-system, 'Segoe UI', \
+Roboto, Arial, Helvetica, sans-serif; font-size: 14px; \
+line-height: 1.5; color: #1a1a1a;">
+"""
+
+_EMAIL_HTML_TAIL = """
+</body>
+</html>"""
+
+
+def _wrap_html_for_email(body: str) -> str:
+    """Wrap an HTML fragment in an email-compatible document structure.
+
+    If the body already contains ``<!DOCTYPE`` or ``<html`` (i.e. the user
+    provided a complete document), return it unchanged.
+    """
+    if _FULL_HTML_DOC_RE.search(body):
+        return body
+    return _EMAIL_HTML_HEAD + body + _EMAIL_HTML_TAIL
 
 
 def _parse_filter(expr: str) -> tuple[str, str, str]:
@@ -408,6 +482,10 @@ def send_merge(
 
     # --- Process attachments ---
     attachment_list = _process_attachments(attachment)
+
+    # --- Wrap HTML body for email compatibility ---
+    if html:
+        body_template = _wrap_html_for_email(body_template)
 
     # --- Bundle message options ---
     msg_opts = MessageOptions(

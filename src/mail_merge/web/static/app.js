@@ -13,6 +13,7 @@ let sendStarted = false;
 let currentJobId = null;
 let sendResults = null;
 let formDirty = false;
+let quillEditor = null;
 
 // Convenience getter — spreadsheetData.rows is the single source of truth
 function getRecipients() { return spreadsheetData ? spreadsheetData.rows : null; }
@@ -566,28 +567,141 @@ function showPlaceholderChips(columns) {
             // Use mousedown and preventDefault to avoid the input losing focus
             // when clicking the chip.
             e.preventDefault();
-            
-            // Target either the subject or the body, whichever was last focused
-            let target = document.activeElement;
-            if (target !== $("subject-input") && target !== $("body-input")) {
-                target = $("body-input");
-            }
-            
-            const start = target.selectionStart;
-            const end = target.selectionEnd;
-            const text = target.value;
             const insertion = "{{" + col + "}}";
-            
-            target.value = text.substring(0, start) + insertion + text.substring(end);
-            target.focus();
-            const newPos = start + insertion.length;
-            target.setSelectionRange(newPos, newPos);
-            
+
+            if ($("html-toggle").checked && quillEditor && !$("source-toggle").checked) {
+                // Insert into Quill editor
+                const range = quillEditor.getSelection(true);
+                if (range) {
+                    quillEditor.deleteText(range.index, range.length);
+                    quillEditor.insertText(range.index, insertion, 'user');
+                    const newPos = range.index + insertion.length;
+                    quillEditor.setSelection(newPos, 0);
+                    const bounds = quillEditor.getBounds(newPos);
+                    if (bounds) {
+                        quillEditor.scrollingContainer.scrollTop = bounds.top;
+                    }
+                }
+            } else {
+                // Insert into textarea (subject, body, or html-source)
+                let target = document.activeElement;
+                if (target !== $("subject-input") && target !== $("body-input")
+                    && target !== $("html-source")) {
+                    target = $("html-toggle").checked ? $("html-source") : $("body-input");
+                }
+
+                const start = target.selectionStart;
+                const end = target.selectionEnd;
+                const text = target.value;
+
+                target.value = text.substring(0, start) + insertion + text.substring(end);
+                target.focus();
+                const newPos = start + insertion.length;
+                target.setSelectionRange(newPos, newPos);
+            }
+
             // Trigger validation/auto-save
             onTemplateChange();
         });
         container.appendChild(chip);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Quill HTML editor — mounted inside Shadow DOM for Pico CSS isolation
+// ---------------------------------------------------------------------------
+function initQuill() {
+    if (quillEditor) return;
+
+    const host = $('quill-editor');
+
+    // Create Shadow DOM to isolate Quill from Pico CSS
+    const shadow = host.attachShadow({ mode: 'open' });
+
+    // Load Quill's Snow theme CSS inside the shadow
+    const quillCssUrl = document.querySelector('script[src*="quill.min.js"]').src
+        .replace('quill.min.js', 'quill.snow.css');
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = quillCssUrl;
+    shadow.appendChild(link);
+
+    // Add custom styles for the editor inside the shadow
+    const style = document.createElement('style');
+    style.textContent = `
+        :host {
+            display: block;
+            min-height: 200px;
+            margin-bottom: 1rem;
+        }
+        .ql-toolbar.ql-snow {
+            border-color: #ccc;
+            border-radius: 4px 4px 0 0;
+            background: #fff;
+        }
+        .ql-container.ql-snow {
+            border-color: #ccc;
+            border-radius: 0 0 4px 4px;
+        }
+        .ql-editor {
+            font-family: -apple-system, 'Segoe UI', Roboto, Arial, Helvetica, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #1a1a1a;
+            min-height: 150px;
+        }
+    `;
+    shadow.appendChild(style);
+
+    // Create the container div that Quill will mount on
+    const editorDiv = document.createElement('div');
+    editorDiv.id = 'quill-inner';
+    shadow.appendChild(editorDiv);
+
+    // Initialize Quill on the element inside the shadow
+    quillEditor = new Quill(editorDiv, {
+        theme: 'snow',
+        placeholder: 'Compose your HTML email...',
+        modules: {
+            toolbar: [
+                ['bold', 'italic', 'underline'],
+                ['link'],
+                [{ header: [1, 2, 3, false] }],
+                [{ list: 'ordered' }, { list: 'bullet' }],
+                ['blockquote'],
+                ['clean'],
+            ],
+        },
+        formats: [
+            'bold', 'italic', 'underline',
+            'link',
+            'header',
+            'list',
+            'blockquote',
+        ],
+    });
+
+    quillEditor.on('text-change', () => {
+        syncQuillToTextarea();
+        onTemplateChange();
+    });
+}
+
+function syncQuillToTextarea() {
+    const html = quillEditor.getSemanticHTML();
+    // Normalise empty editor states to empty string
+    const cleaned = html.replace(/<p><br><\/p>/g, '')
+                        .replace(/<p><\/p>/g, '')
+                        .trim() || '';
+    $('html-source').value = cleaned;
+    $('body-input').value = cleaned;
+}
+
+function syncTextareaToQuill() {
+    const html = $('html-source').value;
+    const delta = quillEditor.clipboard.convert({ html });
+    quillEditor.setContents(delta);
+    $('body-input').value = html;
 }
 
 // Real-time placeholder and HTML validation
@@ -605,7 +719,45 @@ $("subject-input").addEventListener("input", onTemplateChange);
 $("body-input").addEventListener("input", onTemplateChange);
 $("email-column").addEventListener("change", onTemplateChange);
 $("name-column").addEventListener("change", onTemplateChange);
-$("html-toggle").addEventListener("change", onTemplateChange);
+$("html-toggle").addEventListener("change", () => {
+    const isHtml = $("html-toggle").checked;
+    if (isHtml) {
+        initQuill();
+        const existingBody = $("body-input").value;
+        if (existingBody) {
+            const delta = quillEditor.clipboard.convert({ html: existingBody });
+            quillEditor.setContents(delta);
+        }
+        hide("body-input");
+        show("html-editor-wrap");
+    } else {
+        const html = $("body-input").value;
+        if (/<[a-zA-Z][^>]*>/.test(html)) {
+            if (!confirm("Body contains HTML formatting. Switch to plain text? Tags will be preserved as text.")) {
+                $("html-toggle").checked = true;
+                return;
+            }
+        }
+        show("body-input");
+        hide("html-editor-wrap");
+    }
+    onTemplateChange();
+});
+$("source-toggle").addEventListener("change", () => {
+    if ($("source-toggle").checked) {
+        syncQuillToTextarea();
+        hide("quill-editor");
+        show("html-source");
+    } else {
+        syncTextareaToQuill();
+        show("quill-editor");
+        hide("html-source");
+    }
+});
+$("html-source").addEventListener("input", () => {
+    $("body-input").value = $("html-source").value;
+    onTemplateChange();
+});
 $("cc-input").addEventListener("input", onTemplateChange);
 $("bcc-input").addEventListener("input", onTemplateChange);
 $("reply-to-input").addEventListener("input", onTemplateChange);
@@ -636,6 +788,8 @@ const HTML_TAG_RE = /<[a-zA-Z][^>]*>/;
 const BLOCK_OR_BR_RE = /<(br|p|div|table|tr|td|li|ul|ol|h[1-6])\b/i;
 const STRIPPED_TAGS_RE = /<(script|iframe|form|embed|object)\b/i;
 const EXT_STYLESHEET_RE = /<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>/i;
+const STYLE_BLOCK_RE = /<style\b/i;
+const FULL_HTML_DOC_RE = /<html\b|<!doctype/i;
 
 function validateHtmlBody() {
     const el = $("html-warnings");
@@ -678,6 +832,24 @@ function validateHtmlBody() {
         warnings.push(
             "<strong>External stylesheets ignored:</strong> <code>&lt;link rel=\"stylesheet\"&gt;</code> " +
             "is not supported in email. Use inline <code>style</code> attributes instead."
+        );
+    }
+
+    // Embedded <style> blocks
+    if (STYLE_BLOCK_RE.test(body)) {
+        warnings.push(
+            "<strong>Embedded &lt;style&gt; blocks may be stripped.</strong> Many email clients " +
+            "(Gmail, Outlook.com) remove &lt;style&gt; tags. Use inline <code>style</code> " +
+            "attributes for reliable rendering."
+        );
+    }
+
+    // Full HTML document bypass
+    if (FULL_HTML_DOC_RE.test(body)) {
+        warnings.push(
+            "<strong>Full HTML document detected.</strong> Your own &lt;html&gt; structure will " +
+            "be sent as-is, bypassing the app\u2019s standard email compatibility wrappers " +
+            "(CSS resets, Outlook DPI fix, mobile viewport)."
         );
     }
 
@@ -1162,6 +1334,13 @@ function newMerge() {
     $("email-column").innerHTML = '<option value="">-- select --</option>';
     $("name-column").innerHTML = '<option value="">-- none --</option>';
     $("html-toggle").checked = false;
+    $("source-toggle").checked = false;
+    if (quillEditor) {
+        quillEditor.setContents([]);
+    }
+    $("html-source").value = "";
+    show("body-input");
+    hide("html-editor-wrap");
     hide("placeholder-chips");
     hide("placeholder-errors");
     hide("html-warnings");
@@ -1219,6 +1398,7 @@ function newMerge() {
         localStorage.removeItem("mm_body");
         localStorage.removeItem("mm_email_col");
         localStorage.removeItem("mm_name_col");
+        localStorage.removeItem("mm_html");
     } catch (e) { /* ignore */ }
 
     goToStep(1);
@@ -1401,6 +1581,7 @@ document.addEventListener("DOMContentLoaded", () => {
             localStorage.setItem("mm_body", $("body-input").value);
             localStorage.setItem("mm_email_col", $("email-column").value);
             localStorage.setItem("mm_name_col", $("name-column").value);
+            localStorage.setItem("mm_html", $("html-toggle").checked ? "1" : "");
         } catch (e) { /* ignore */ }
     }, 5000);
 
@@ -1410,10 +1591,22 @@ document.addEventListener("DOMContentLoaded", () => {
         const savedBody = localStorage.getItem("mm_body");
         const savedEmailCol = localStorage.getItem("mm_email_col");
         const savedNameCol = localStorage.getItem("mm_name_col");
-        
+        const savedHtml = localStorage.getItem("mm_html");
+
         if (savedSubject && !$("subject-input").value) $("subject-input").value = savedSubject;
         if (savedBody && !$("body-input").value) $("body-input").value = savedBody;
         if (savedEmailCol && !$("email-column").value) $("email-column").value = savedEmailCol;
         if (savedNameCol && !$("name-column").value) $("name-column").value = savedNameCol;
+        if (savedHtml === "1") {
+            $("html-toggle").checked = true;
+            initQuill();
+            const existingBody = $("body-input").value;
+            if (existingBody) {
+                const delta = quillEditor.clipboard.convert({ html: existingBody });
+                quillEditor.setContents(delta);
+            }
+            hide("body-input");
+            show("html-editor-wrap");
+        }
     } catch (e) { /* ignore */ }
 });
