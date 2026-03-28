@@ -278,7 +278,7 @@ class TestPreviewStep:
     def test_back_returns_to_compose(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
         _setup_to_preview(page, sample_xlsx)
-        page.click("button:has-text('\u2190 Back')")
+        page.locator("#step-3 button:has-text('\u2190 Back')").click()
         page.wait_for_selector("#step-2.active", timeout=3000)
         # Subject should still be filled
         assert page.locator("#subject-input").input_value() == "Hello {{name}}"
@@ -487,7 +487,7 @@ class TestFullWizardFlow:
         page.wait_for_selector("#step-3.active", timeout=5000)
 
         # Go back to compose
-        page.click("button:has-text('\u2190 Back')")
+        page.locator("#step-3 button:has-text('\u2190 Back')").click()
         page.wait_for_selector("#step-2.active", timeout=3000)
 
         # Data should be preserved
