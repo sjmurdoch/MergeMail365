@@ -18,7 +18,10 @@
       "Bash(uv sync:*)",
       "Bash(grep:*)",
       "Bash(python3:*)",
-      "Bash(find /Users/smurdoch/w/MergeMail365 -type d -name __pycache__ -exec rm -rf {} +)"
+      "Bash(find /Users/smurdoch/w/MergeMail365 -type d -name __pycache__ -exec rm -rf {} +)",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js\" -o /Users/smurdoch/w/MergeMail365/src/mail_merge/web/static/quill.min.js)",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css\" -o /Users/smurdoch/w/MergeMail365/src/mail_merge/web/static/quill.snow.css)",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.min.js\" -o /Users/smurdoch/w/MergeMail365/src/mail_merge/web/static/quill.min.js)"
     ]
   }
 }

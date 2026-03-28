@@ -407,7 +407,7 @@ table caption {
 /* Recipient preview table wrapper */
 .table-wrap {
     max-height: 300px;
-    max-width: 900px;
+    max-width: 840px;
     overflow-y: auto;
 }
 
