@@ -29,7 +29,9 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(ls:*)",
       "Bash(npm view:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(brew install:*)",
+      "Bash(biome:*)"
     ]
   }
 }
