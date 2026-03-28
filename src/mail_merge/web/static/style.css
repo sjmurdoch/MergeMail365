@@ -396,19 +396,20 @@ table caption {
     font-size: 0.85rem;
 }
 
-/* Quill editor — sits outside .pico in the DOM so Pico selectors
-   don't match. Only cosmetic tweaks needed here. */
-#quill-editor {
-    min-height: 200px;
-    margin-bottom: 1rem;
-}
-
-#quill-editor .ql-editor {
+/* Trix editor — sits outside .pico in the DOM */
+trix-editor {
+    min-height: 150px;
     font-family: -apple-system, 'Segoe UI', Roboto, Arial, Helvetica, sans-serif;
     font-size: 14px;
     line-height: 1.5;
     color: #1a1a1a;
-    min-height: 150px;
+}
+
+/* Hide toolbar buttons not needed for email composition */
+.trix-button--icon-strike,
+.trix-button--icon-code,
+.trix-button-group--file-tools {
+    display: none;
 }
 
 /* Hidden */

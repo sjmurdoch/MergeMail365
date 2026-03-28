@@ -13,7 +13,7 @@ let sendStarted = false;
 let currentJobId = null;
 let sendResults = null;
 let formDirty = false;
-let quillEditor = null;
+let trixEditor = null;
 
 // Convenience getter — spreadsheetData.rows is the single source of truth
 function getRecipients() { return spreadsheetData ? spreadsheetData.rows : null; }
@@ -69,8 +69,6 @@ function apiFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 async function goToStep(n) {
     console.log("Navigating to step", n, "from", currentStep);
-    flushQuill();
-
     // Only perform validation/trigger side-effects when advancing forward
     if (n > currentStep) {
         if (n === 2 && currentStep === 1) {
@@ -570,19 +568,8 @@ function showPlaceholderChips(columns) {
             e.preventDefault();
             const insertion = "{{" + col + "}}";
 
-            if ($("html-toggle").checked && quillEditor && !$("source-toggle").checked) {
-                // Insert into Quill editor
-                const range = quillEditor.getSelection(true);
-                if (range) {
-                    quillEditor.deleteText(range.index, range.length);
-                    quillEditor.insertText(range.index, insertion, 'user');
-                    const newPos = range.index + insertion.length;
-                    quillEditor.setSelection(newPos, 0);
-                    const bounds = quillEditor.getBounds(newPos);
-                    if (bounds) {
-                        quillEditor.scrollingContainer.scrollTop = bounds.top;
-                    }
-                }
+            if ($("html-toggle").checked && trixEditor && !$("source-toggle").checked) {
+                trixEditor.insertString(insertion);
             } else {
                 // Insert into textarea (subject, body, or html-source)
                 let target = document.activeElement;
@@ -609,70 +596,25 @@ function showPlaceholderChips(columns) {
 }
 
 // ---------------------------------------------------------------------------
-// Quill HTML editor — sits outside .pico in the DOM for CSS isolation
+// Trix HTML editor — sits outside .pico in the DOM for CSS isolation
 // ---------------------------------------------------------------------------
-function initQuill() {
-    if (quillEditor) return;
+document.addEventListener('trix-initialize', (e) => {
+    trixEditor = e.target.editor;
+});
 
-    quillEditor = new Quill($('quill-editor'), {
-        theme: 'snow',
-        placeholder: 'Compose your HTML email...',
-        modules: {
-            toolbar: [
-                ['bold', 'italic', 'underline'],
-                ['link'],
-                [{ header: [1, 2, 3, false] }],
-                [{ list: 'ordered' }, { list: 'bullet' }],
-                ['blockquote'],
-                ['clean'],
-            ],
-        },
-        formats: [
-            'bold', 'italic', 'underline',
-            'link',
-            'header',
-            'list',
-            'blockquote',
-        ],
-    });
+document.addEventListener('trix-change', () => {
+    $('body-input').value = $('trix-input').value;
+    onTemplateChange();
+});
 
-    quillEditor.on('text-change', () => {
-        quillDirty = true;
-        onTemplateChange();
-    });
-}
-
-let quillDirty = false;
-
-// Flush Quill HTML to the hidden textareas. Called only when
-// the value is actually needed (step navigation, source toggle,
-// localStorage save, validation).
-function flushQuill() {
-    if (!quillEditor || !quillDirty) return;
-    quillDirty = false;
-    const html = quillEditor.getSemanticHTML();
-    const cleaned = html.replace(/\u00A0/g, ' ')
-                        .replace(/<p><br><\/p>/g, '')
-                        .replace(/<p><\/p>/g, '')
-                        .trim() || '';
-    $('html-source').value = cleaned;
-    $('body-input').value = cleaned;
-}
-
-function syncTextareaToQuill() {
-    const html = $('html-source').value;
-    const delta = quillEditor.clipboard.convert({ html });
-    quillEditor.setContents(delta);
-    $('body-input').value = html;
-    quillDirty = false;
-}
+document.addEventListener('trix-file-accept', (e) => {
+    e.preventDefault();
+});
 
 function activateHtmlEditor() {
-    initQuill();
     const existingBody = $("body-input").value;
-    if (existingBody) {
-        const delta = quillEditor.clipboard.convert({ html: existingBody });
-        quillEditor.setContents(delta);
+    if (existingBody && trixEditor) {
+        trixEditor.loadHTML(existingBody);
     }
     hide("body-input");
     show("html-editor-wrap");
@@ -683,7 +625,6 @@ let validationTimer = null;
 function onTemplateChange() {
     clearTimeout(validationTimer);
     validationTimer = setTimeout(() => {
-        flushQuill();
         validatePlaceholders();
         validateHtmlBody();
     }, 500);
@@ -712,13 +653,14 @@ $("html-toggle").addEventListener("change", () => {
     onTemplateChange();
 });
 $("source-toggle").addEventListener("change", () => {
+    const editorEl = document.querySelector("trix-editor");
     if ($("source-toggle").checked) {
-        flushQuill();
-        hide("quill-editor");
+        $("html-source").value = $("trix-input").value;
+        hide(editorEl);
         show("html-source");
     } else {
-        syncTextareaToQuill();
-        show("quill-editor");
+        trixEditor.loadHTML($("html-source").value);
+        show(editorEl);
         hide("html-source");
     }
 });
@@ -1295,9 +1237,10 @@ function newMerge() {
     $("name-column").innerHTML = '<option value="">-- none --</option>';
     $("html-toggle").checked = false;
     $("source-toggle").checked = false;
-    if (quillEditor) {
-        quillEditor.setContents([]);
+    if (trixEditor) {
+        trixEditor.loadHTML('');
     }
+    $("trix-input").value = "";
     $("html-source").value = "";
     show("body-input");
     hide("html-editor-wrap");
@@ -1536,7 +1479,6 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(() => {
         if (!formDirty) return;
         formDirty = false;
-        flushQuill();
         try {
             localStorage.setItem("mm_subject", $("subject-input").value);
             localStorage.setItem("mm_body", $("body-input").value);

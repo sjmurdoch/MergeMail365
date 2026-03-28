@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MergeMail365</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='quill.snow.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='trix.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -120,14 +120,15 @@
             </fieldset>
         </div>
 
-        <!-- HTML editor (outside .pico — Quill CSS isolation) -->
+        <!-- HTML editor (outside .pico — CSS isolation) -->
         <div id="html-editor-wrap" class="hidden">
             <div class="html-editor-header">
                 <label>
                     <input type="checkbox" id="source-toggle"> View source
                 </label>
             </div>
-            <div id="quill-editor"></div>
+            <input type="hidden" id="trix-input">
+            <trix-editor input="trix-input" placeholder="Compose your HTML email..."></trix-editor>
             <textarea id="html-source" rows="12" class="hidden" spellcheck="false"></textarea>
             <small>Tip: if you include your own &lt;html&gt; tags, the app's email compatibility wrappers are skipped.</small>
         </div>
@@ -328,7 +329,7 @@
 <script>
 const CSRF_TOKEN = {{ csrf_token | tojson }};
 </script>
-<script src="{{ url_for('static', filename='quill.min.js') }}"></script>
+<script src="{{ url_for('static', filename='trix.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
