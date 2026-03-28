@@ -444,3 +444,91 @@ The existing `renderPreviewRecipient()` function reads from `$("body-input").val
 ## 16. Template Placeholder Caveat
 
 If a user applies formatting to part of a `{{name}}` placeholder (e.g. makes `name` bold), Quill may produce `{{<strong>name}}</strong>` which breaks template matching. The existing placeholder validation (`validatePlaceholders()`) runs on the HTML source and will flag `{{name}}` as unresolved, alerting the user. No special handling needed beyond this — the warning is sufficient.
+
+## 17. Assessment and Improvements
+
+The plan is well-structured, maintainable, and correctly targets the integration points without disrupting the existing plain-text and template processing logic. The choice of Quill 2.x and the implementation of an email compatibility wrapper are excellent for ensuring clean and reliable HTML emails.
+
+However, several critical improvements are required to address CSS conflicts and ensure robust state synchronization:
+
+### Improvement 1: Pico CSS Conditional Styling Conflict with Quill Toolbar
+**Issue:** The app uses Pico CSS conditional styling (`<body class="pico">`). Pico aggressively styles standard semantic tags like `<button>`, `<select>`, and `<svg>` within the `.pico` container. Since Quill's toolbar (`.ql-toolbar`) is built using these tags, Pico will style them as large, primary-colored application buttons, completely breaking the toolbar's layout and appearance.
+**Fix:** In Section 11 (CSS Additions), add explicit CSS resets to isolate the Quill toolbar from Pico's styles:
+
+```css
+/* Reset Pico CSS overrides inside Quill Toolbar */
+.pico .ql-toolbar button {
+    background: none;
+    border: none;
+    padding: 3px 5px;
+    margin: 0;
+    width: 28px;
+    height: 24px;
+}
+.pico .ql-toolbar button:hover {
+    background: none;
+    outline: none;
+}
+.pico .ql-toolbar button svg {
+    width: 100%;
+    height: 100%;
+}
+.pico .ql-toolbar .ql-picker {
+    color: inherit;
+}
+```
+
+### Improvement 2: Quill Editor Typography Inheritance
+**Issue:** The content inside `.ql-editor` will inherit Pico's typography (fonts, margins, line-heights). This may misrepresent how the email will render on the recipient's end, since the email compatibility wrapper (Section 7) applies its own specific styles.
+**Fix:** In Section 11, add a CSS rule to align the editor's base typography with the email wrapper's styles:
+
+```css
+/* Align editor appearance with email wrapper */
+.ql-container .ql-editor {
+    font-family: -apple-system, 'Segoe UI', Roboto, Arial, Helvetica, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #1a1a1a;
+}
+```
+
+### Improvement 3: Use Quill 2.x Semantic HTML API
+**Issue:** In Section 4, the plan extracts HTML using `quillEditor.root.innerHTML`. In Quill 2.x, this can sometimes include internal Quill classes (e.g., `ql-cursor`, `ql-indent`) or `contenteditable` attributes.
+**Fix:** Update `syncQuillToTextarea()` to use Quill 2.0's `getSemanticHTML()` method, which guarantees clean, standards-compliant HTML output.
+
+```javascript
+// Replace quillEditor.root.innerHTML with:
+const html = quillEditor.getSemanticHTML();
+```
+
+### Improvement 4: Source View State Synchronization
+**Issue:** The plan states that syncing happens when the source toggle is clicked. However, if a user edits the HTML in the `#html-source` textarea and clicks "Next" or "Send" *without* toggling back to rich text view, their edits won't be captured because the hidden `#body-input` (the canonical field for form submission) hasn't been updated.
+**Fix:** Add an `input` event listener to `#html-source` to keep `#body-input` continuously synchronized and to trigger template validation while typing in source mode.
+
+```javascript
+$('html-source').addEventListener('input', () => {
+    $('body-input').value = $('html-source').value;
+    onTemplateChange();
+});
+```
+
+### Improvement 5: Preserve Undo Stack by Avoiding 'silent' Source
+**Issue:** In Sections 4 and 5, the plan uses `quillEditor.setContents(delta, 'silent')` to avoid triggering an infinite loop with the `text-change` listener. However, the Quill API documentation explicitly warns that using the `'silent'` source is not recommended because it breaks the undo stack and history module.
+**Fix:** Remove `'silent'` from `setContents()`. Since setting a textarea's `.value` programmatically (in `syncQuillToTextarea`) does *not* trigger DOM `input` or `change` events, there is no risk of an infinite event loop. The `text-change` event will fire, sync the identical content to the textarea once, and stop cleanly, while preserving the user's ability to undo changes.
+
+```javascript
+// Change this:
+// quillEditor.setContents(delta, 'silent');
+
+// To this:
+quillEditor.setContents(delta);
+```
+
+Additionally, in Section 6, when inserting placeholder chips, explicitly pass the `'user'` source so the insertion is captured properly in the undo stack:
+```javascript
+// Change this:
+// quillEditor.insertText(range.index, insertion);
+
+// To this:
+quillEditor.insertText(range.index, insertion, 'user');
+```
