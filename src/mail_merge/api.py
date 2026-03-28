@@ -117,11 +117,11 @@ _EMAIL_HTML_HEAD = """\
     <![endif]-->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body, p, h1, h2, h3, ul, ol, li, blockquote {
+        body, div, p, h1, h2, h3, ul, ol, li, blockquote {
             margin: 0;
             padding: 0;
         }
-        p {
+        div, p {
             margin: 0 0 0.75em 0;
         }
         h1 {

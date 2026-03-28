@@ -613,8 +613,14 @@ document.addEventListener('trix-file-accept', (e) => {
 
 function activateHtmlEditor() {
     const existingBody = $("body-input").value;
-    if (existingBody && trixEditor) {
-        trixEditor.loadHTML(existingBody);
+    if (existingBody) {
+        if (trixEditor) {
+            trixEditor.loadHTML(existingBody);
+        } else {
+            // trix-initialize hasn't fired yet; seed the hidden input
+            // so Trix picks up the content when it initialises.
+            $("trix-input").value = existingBody;
+        }
     }
     hide("body-input");
     show("html-editor-wrap");

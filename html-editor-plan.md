@@ -225,8 +225,9 @@ trix-editor {
 
 ## 6. Email Compatibility Wrapper
 
-Already implemented in `api.py` as `_wrap_html_for_email()`. No changes needed — the wrapper is editor-independent. It wraps HTML fragments in an email-compatible document structure with:
-- CSS resets for `<p>`, `<h1>`, `<ul>/<ol>`, `<blockquote>` (prevents oversized gaps in Outlook/Gmail)
+Already implemented in `api.py` as `_wrap_html_for_email()`. Updated to include `<div>` in the CSS resets because **Trix uses `<div>` for paragraphs, not `<p>`**. The wrapper now resets and adds spacing for both `div` and `p` elements:
+- CSS resets for `<div>`, `<p>`, `<h1>`, `<ul>/<ol>`, `<blockquote>` (prevents oversized gaps in Outlook/Gmail)
+- `div, p { margin: 0 0 0.75em 0; }` ensures paragraph spacing for Trix's `<div>` output
 - Outlook DPI fix (`PixelsPerInch` conditional comment)
 - Mobile viewport meta tag
 - Cross-platform font stack
@@ -266,3 +267,21 @@ If a user applies formatting to part of a `{{name}}` placeholder (e.g. makes `na
 4. **Don't use Shadow DOM for rich text editors.** `document.getSelection()` doesn't work across shadow boundaries. Cursor tracking breaks catastrophically.
 
 5. **Lazy sync is good, but no sync is better.** The `flushQuill()` dirty-flag pattern reduced per-keystroke work but added complexity (every consumer had to remember to flush). Trix's hidden input is always current — no sync code at all.
+
+## Trix-Specific Gotchas (Verified)
+
+1. **`<div>` not `<p>` for paragraphs.** Trix outputs `<div>` blocks, not `<p>` tags. The email wrapper CSS must reset and add spacing to `div` elements (done — see section 6).
+
+2. **`trix-initialize` timing.** The event may not fire reliably on Chrome page reloads (basecamp/trix#254). `activateHtmlEditor()` guards with `if (trixEditor)` and falls back to seeding `#trix-input` directly so Trix picks up content when it eventually initialises.
+
+3. **`trix-change` fires for programmatic changes.** `loadHTML()` and `insertString()` both fire `trix-change`. Our handler is safe (no feedback loop) but this means `loadHTML('')` during reset triggers an unnecessary validation cycle (harmless).
+
+4. **`loadHTML()` is not in the README** but is a well-known, widely-used method. The README documents `insertHTML()` (insert at cursor) and `loadJSON()`/`JSON.stringify()` (state persistence). `loadHTML()` replaces all content and is the standard approach.
+
+5. **`insertString()` steals focus** (basecamp/trix#635). Calling it on an unfocused editor moves focus to the editor. Our chip insertion uses `mousedown` + `preventDefault()` which is compatible with this behaviour.
+
+6. **File drag-and-drop enabled by default.** Disabled via `trix-file-accept` + `e.preventDefault()` since the app handles attachments separately.
+
+7. **CSP note.** Trix injects inline `<style>` blocks without nonces. If CSP headers are added in the future, `'unsafe-inline'` in `style-src` or a nonce-based approach will be needed.
+
+8. **XSS.** Trix 2.1.17+ includes DOMPurify sanitisation fixing CVE for stored XSS via `data-trix-serialized-attributes`. We use 2.1.18.
