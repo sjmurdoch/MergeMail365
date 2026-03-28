@@ -41,7 +41,7 @@ Source lives under `src/mail_merge/` (src layout). There are three entry points:
 
 1. **CLI** (`cli.py:main()`) — parses args, sets up logging, delegates to `send_merge()`, converts exceptions to exit codes.
 2. **Python API** (`api.py:send_merge()`) — single function mirroring all CLI flags. Raises exceptions (`FileNotFoundError`, `ValueError`, `RuntimeError`) instead of returning exit codes. Returns `list[SendResult]`.
-3. **Web UI** (`web/__init__.py:main()`) — Flask app with a 5-step wizard (Setup → Preview → Test → Verify → Send). Runs on localhost, opens browser automatically. See "Web UI" section below.
+3. **Web UI** (`web/__init__.py:main()`) — Flask app with a 6-step wizard (Data → Compose → Preview → Test → Verify → Send). Runs on localhost, opens browser automatically. See "Web UI" section below.
 
 The orchestration flow (in `api.py`) is strictly ordered: resolve config → read spreadsheet → validate emails → apply filters → resume (skip previous successes) → apply batch size → read body template → validate all placeholders (abort if any unresolvable) → parse CC/BCC/reply-to → validate recipient count → process attachments → confirm → authenticate → send → merge results → report. All validation happens before any sending. Resume and batch size are skipped for `--test-email` (which only needs one recipient's data for rendering). Resume works for both individual sends and BCC blast mode.
 
@@ -80,7 +80,7 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 **Key files:**
 - `web/__init__.py` — entry point: port discovery, startup token, browser launch
 - `web/app.py` — Flask app factory, all routes, background job management
-- `web/templates/index.html` — single Jinja2 template with all 5 wizard steps
+- `web/templates/index.html` — single Jinja2 template with all 6 wizard steps
 - `web/static/app.js` — wizard navigation, SSE streaming, client-side template preview
 - `web/static/style.css` — custom styles (step indicator, chips, log panel, callouts)
 - `web/static/pico.min.css` — bundled Pico CSS v2 (no CDN)
@@ -107,6 +107,7 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 | `/api/config` | GET | Config + full session state for recovery (includes `desktop_mode`) |
 | `/api/state` | POST | Save wizard step/validation state |
 | `/api/upload-spreadsheet` | POST | Upload .xlsx, return columns + preview rows |
+| `/api/change-sheet` | POST | Re-read preview for a different sheet |
 | `/api/get-recipients` | POST | Filtered, validated recipient list |
 | `/api/preview-template` | POST | Server-side template render + placeholder validation |
 | `/api/start-job` | POST | Start background send_merge(), return job ID |

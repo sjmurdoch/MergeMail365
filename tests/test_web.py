@@ -201,6 +201,57 @@ class TestUpload:
             assert sess["spreadsheet_tmp_dir"] != first_tmp
 
 
+class TestChangeSheet:
+    def test_change_sheet_returns_updated_data(self, web_client, tmp_path):
+        """Changing sheet re-reads preview with new columns and rows."""
+        csrf = get_csrf(web_client)
+        # Create a multi-sheet workbook
+        path = tmp_path / "multi.xlsx"
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "People"
+        ws1.append(["name", "email"])
+        ws1.append(["Alice", "alice@example.com"])
+        ws2 = wb.create_sheet("Products")
+        ws2.append(["product", "price"])
+        ws2.append(["Widget", "9.99"])
+        wb.save(path)
+
+        # Upload
+        with open(path, "rb") as f:
+            resp = web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "multi.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["columns"] == ["name", "email"]
+
+        # Change to "Products" sheet
+        resp = web_client.post(
+            "/api/change-sheet",
+            json={"sheet": "Products"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["columns"] == ["product", "price"]
+        assert data["rows"][0]["product"] == "Widget"
+        assert data["file_name"] == "multi.xlsx"
+
+    def test_change_sheet_no_upload(self, web_client):
+        """Changing sheet without a prior upload returns 400."""
+        csrf = get_csrf(web_client)
+        resp = web_client.post(
+            "/api/change-sheet",
+            json={"sheet": "Sheet1"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 400
+
+
 # ---- Reset / cleanup ----
 
 class TestReset:

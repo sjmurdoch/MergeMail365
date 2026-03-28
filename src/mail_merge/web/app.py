@@ -481,6 +481,36 @@ def create_app(
 
         return jsonify({**session["spreadsheet_info"], "rows": rows})
 
+    @app.route("/api/change-sheet", methods=["POST"])
+    def api_change_sheet() -> Response:
+        filepath = session.get("spreadsheet_path")
+        if not filepath or not os.path.exists(filepath):
+            return jsonify({"error": "No spreadsheet uploaded"}), 400  # type: ignore[return-value]
+
+        data = request.get_json()
+        sheet_name = data.get("sheet") if data else None
+
+        from mail_merge.excel import read_preview
+
+        try:
+            columns, rows, sheets, total_rows = read_preview(
+                filepath, sheet_name=sheet_name,
+            )
+        except Exception as exc:
+            logger.debug("change-sheet: read_preview failed", exc_info=True)
+            return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
+
+        # Update session metadata (preserve file_name from original upload)
+        info = session.get("spreadsheet_info") or {}
+        session["spreadsheet_info"] = {
+            "columns": columns,
+            "sheets": sheets,
+            "total_rows": total_rows,
+            "file_name": info.get("file_name", "upload.xlsx"),
+        }
+
+        return jsonify({**session["spreadsheet_info"], "rows": rows})
+
     @app.route("/api/get-recipients", methods=["POST"])
     def api_get_recipients() -> Response:
         filepath = session.get("spreadsheet_path")

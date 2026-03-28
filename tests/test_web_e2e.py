@@ -123,8 +123,25 @@ def authenticated_page(page: Page, live_server: str) -> Page:
     """Navigate to the app with valid startup token."""
     page.goto(f"{live_server}/?token={STARTUP_TOKEN}")
     # Should redirect to / and show the wizard
-    page.wait_for_selector("text=Setup")
+    page.wait_for_selector("text=Data")
     return page
+
+
+def _upload_and_go_to_compose(page: Page, xlsx_path: Path) -> None:
+    """Upload spreadsheet on step 1, advance to step 2 (Compose)."""
+    page.set_input_files("#spreadsheet-file", str(xlsx_path))
+    page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+    page.click("#btn-next-1")
+    page.wait_for_selector("#step-2.active", timeout=5000)
+
+
+def _setup_to_preview(page: Page, xlsx_path: Path) -> None:
+    """Upload, compose, and advance to step 3 (Preview)."""
+    _upload_and_go_to_compose(page, xlsx_path)
+    page.fill("#subject-input", "Hello {{name}}")
+    page.fill("#body-input", "Welcome to {{company}}, {{name}}!")
+    page.click("#btn-next-2")
+    page.wait_for_selector("#step-3.active", timeout=5000)
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +155,7 @@ class TestPageLoad:
         authenticated_page.on("pageerror", lambda exc: errors.append(str(exc)))
         # Reload to catch errors
         authenticated_page.reload()
-        authenticated_page.wait_for_selector("text=Setup")
+        authenticated_page.wait_for_selector("text=Data")
         assert errors == [], f"JS errors on page load: {errors}"
 
     def test_requires_auth_token(self, page: Page, live_server: str):
@@ -153,12 +170,14 @@ class TestPageLoad:
 
     def test_step_indicator_visible(self, authenticated_page: Page):
         expect(authenticated_page.locator(".step-indicator")).to_be_visible()
-        # All 5 steps should be listed
+        # All 6 steps should be listed
         steps = authenticated_page.locator(".step-indicator li")
-        assert steps.count() == 5
+        assert steps.count() == 6
 
 
-class TestSetupStep:
+class TestDataStep:
+    """Step 1: Data Source — auth + upload + sheet + preview."""
+
     def test_config_fields_visible(self, authenticated_page: Page):
         expect(authenticated_page.locator("#client-id")).to_be_visible()
         expect(authenticated_page.locator("#tenant-id")).to_be_visible()
@@ -173,94 +192,94 @@ class TestSetupStep:
         page.wait_for_selector("#auth-diagnostics:not(.hidden)", timeout=5000)
         expect(page.locator("#auth-diag-content")).to_be_visible()
 
-    def test_spreadsheet_upload_shows_columns(self, authenticated_page: Page, sample_xlsx: Path):
+    def test_spreadsheet_upload_shows_preview(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
         page.set_input_files("#spreadsheet-file", str(sample_xlsx))
         page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        # Column dropdowns should be populated
-        email_options = page.locator("#email-column option")
-        assert email_options.count() > 1  # more than just "-- select --"
-
-    def test_auto_detect_email_column(self, authenticated_page: Page, sample_xlsx: Path):
-        page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        # Should auto-detect "email" column
-        assert page.locator("#email-column").input_value() == "email"
-
-    def test_placeholder_chips_appear(self, authenticated_page: Page, sample_xlsx: Path):
-        page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#placeholder-chips:not(.hidden)", timeout=5000)
-        chips = page.locator(".chip")
-        assert chips.count() >= 3  # name, email, company
-
-    def test_placeholder_chip_inserts_text(self, authenticated_page: Page, sample_xlsx: Path):
-        page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector(".chip", timeout=5000)
-        # Click the body textarea first, then a chip
-        page.click("#body-input")
-        page.click(".chip >> nth=0")
-        body_val = page.locator("#body-input").input_value()
-        assert "{{" in body_val
+        # Preview table should be visible
+        expect(page.locator("#preview-table")).to_be_visible()
 
     def test_blocks_next_without_spreadsheet(self, authenticated_page: Page):
         page = authenticated_page
-        page.fill("#subject-input", "Test")
-        page.fill("#body-input", "Body")
         # Clicking Next without spreadsheet should show alert
         page.on("dialog", lambda dialog: dialog.accept())
         page.click("#btn-next-1")
         # Should still be on step 1
         expect(page.locator("#step-1")).to_have_class(re.compile("active"))
 
+
+class TestComposeStep:
+    """Step 2: Compose — column selection, message, options."""
+
+    def test_column_dropdowns_populated(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        email_options = page.locator("#email-column option")
+        assert email_options.count() > 1  # more than just "-- select --"
+
+    def test_auto_detect_email_column(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        # Should auto-detect "email" column
+        assert page.locator("#email-column").input_value() == "email"
+
+    def test_placeholder_chips_appear(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        expect(page.locator("#placeholder-chips")).not_to_have_class(re.compile("hidden"))
+        chips = page.locator(".chip")
+        assert chips.count() >= 3  # name, email, company
+
+    def test_placeholder_chip_inserts_text(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        # Click the body textarea first, then a chip
+        page.click("#body-input")
+        page.click(".chip >> nth=0")
+        body_val = page.locator("#body-input").input_value()
+        assert "{{" in body_val
+
     def test_blocks_next_without_subject(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        _upload_and_go_to_compose(page, sample_xlsx)
         page.fill("#subject-input", "")
         page.fill("#body-input", "Body")
         page.on("dialog", lambda dialog: dialog.accept())
-        page.click("#btn-next-1")
-        expect(page.locator("#step-1")).to_have_class(re.compile("active"))
+        page.click("#btn-next-2")
+        expect(page.locator("#step-2")).to_have_class(re.compile("active"))
+
+    def test_data_summary_shown(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        expect(page.locator("#compose-data-summary")).to_contain_text("3 columns")
 
 
 class TestPreviewStep:
-    def _setup_to_preview(self, page: Page, sample_xlsx: Path):
-        """Fill setup and navigate to preview."""
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        page.fill("#subject-input", "Hello {{name}}")
-        page.fill("#body-input", "Welcome to {{company}}, {{name}}!")
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
-
     def test_preview_renders_placeholders(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
-        self._setup_to_preview(page, sample_xlsx)
+        _setup_to_preview(page, sample_xlsx)
         # Preview should show rendered content
         expect(page.locator("#preview-subject")).to_contain_text("Hello Alice")
 
     def test_preview_body_rendered(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
-        self._setup_to_preview(page, sample_xlsx)
+        _setup_to_preview(page, sample_xlsx)
         expect(page.locator("#preview-body")).to_contain_text("Welcome to Acme, Alice!")
 
     def test_preview_navigation(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
-        self._setup_to_preview(page, sample_xlsx)
+        _setup_to_preview(page, sample_xlsx)
         expect(page.locator("#preview-recipient-label")).to_contain_text("1 of 2")
-        # Navigate to next recipient (scope to step-2 to avoid matching other step buttons)
-        page.locator("#step-2 button.outline", has_text="Next").click()
+        # Navigate to next recipient (scope to step-3 to avoid matching other step buttons)
+        page.locator("#step-3 button.outline", has_text="Next").click()
         expect(page.locator("#preview-recipient-label")).to_contain_text("2 of 2")
         expect(page.locator("#preview-subject")).to_contain_text("Hello Bob")
 
-    def test_back_returns_to_setup(self, authenticated_page: Page, sample_xlsx: Path):
+    def test_back_returns_to_compose(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
-        self._setup_to_preview(page, sample_xlsx)
-        page.click("button:has-text('← Back')")
-        page.wait_for_selector("#step-1.active", timeout=3000)
+        _setup_to_preview(page, sample_xlsx)
+        page.click("button:has-text('\u2190 Back')")
+        page.wait_for_selector("#step-2.active", timeout=3000)
         # Subject should still be filled
         assert page.locator("#subject-input").input_value() == "Hello {{name}}"
 
@@ -268,29 +287,27 @@ class TestPreviewStep:
 class TestRecipientCap:
     def test_over_99_recipients_blocked(self, authenticated_page: Page, big_xlsx: Path):
         page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(big_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        _upload_and_go_to_compose(page, big_xlsx)
         page.fill("#subject-input", "Hello {{name}}")
         page.fill("#body-input", "Body")
         # Clicking Next triggers client-side check (total_rows > 99, no filters)
         alert_text = []
         page.on("dialog", lambda dialog: (alert_text.append(dialog.message), dialog.accept()))
-        page.click("#btn-next-1")
+        page.click("#btn-next-2")
         page.wait_for_timeout(2000)
-        # Should stay on step 1
-        expect(page.locator("#step-1")).to_have_class(re.compile("active"))
+        # Should stay on step 2
+        expect(page.locator("#step-2")).to_have_class(re.compile("active"))
         assert any("Too many recipients" in t for t in alert_text)
 
 
 class TestInvalidEmailWarning:
     def test_invalid_emails_shown_in_preview(self, authenticated_page: Page, mixed_xlsx: Path):
         page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(mixed_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        _upload_and_go_to_compose(page, mixed_xlsx)
         page.fill("#subject-input", "Hello {{name}}")
         page.fill("#body-input", "Welcome to {{company}}")
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
         # Warning should be visible
         expect(page.locator("#invalid-email-warning")).to_be_visible()
         expect(page.locator("#invalid-email-warning")).to_contain_text("1 invalid email address skipped")
@@ -300,47 +317,44 @@ class TestInvalidEmailWarning:
 
     def test_no_warning_when_all_valid(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        _upload_and_go_to_compose(page, sample_xlsx)
         page.fill("#subject-input", "Hello {{name}}")
         page.fill("#body-input", "Welcome to {{company}}")
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
         # Warning should not be visible
         expect(page.locator("#invalid-email-warning")).to_be_hidden()
 
 
 class TestDryRunStep:
     def _navigate_to_verify(self, page: Page, sample_xlsx: Path):
-        """Setup + preview + skip test (mark as passed) + navigate to verify."""
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        page.fill("#subject-input", "Hello {{name}}")
-        page.fill("#body-input", "Body for {{name}}.")
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
+        """Setup + compose + preview + skip test (mark as passed) + navigate to verify."""
+        _setup_to_preview(page, sample_xlsx)
 
     def test_dry_run_log_appears(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
         self._navigate_to_verify(page, sample_xlsx)
-        # We need test to pass first - skip to step 3 and manually trigger
-        page.click("#btn-next-2")
-        page.wait_for_selector("#step-3.active", timeout=5000)
+        # We need test to pass first - advance to test step
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
 
 
 class TestSendMode:
-    def test_bcc_mode_toggle(self, authenticated_page: Page):
+    def test_bcc_mode_toggle(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
         # Click BCC blast mode
         page.click("#mode-bcc")
         expect(page.locator("#bcc-blast-options")).not_to_have_class(re.compile("hidden"))
 
-    def test_individual_mode_default(self, authenticated_page: Page):
+    def test_individual_mode_default(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
         expect(page.locator("#bcc-blast-options")).to_have_class(re.compile("hidden"))
 
-    def test_bcc_placeholder_warning(self, authenticated_page: Page):
+    def test_bcc_placeholder_warning(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
         page.fill("#subject-input", "Hello {{name}}")
         page.click("#mode-bcc")
         # Should show warning about placeholders
@@ -349,10 +363,9 @@ class TestSendMode:
 
 class TestPlaceholderValidation:
     def test_wizard_blocks_unresolved_placeholders(self, authenticated_page: Page, sample_xlsx: Path):
-        """Unresolved placeholders show a warning in Step 1."""
+        """Unresolved placeholders show a warning in Step 2 (Compose)."""
         page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        _upload_and_go_to_compose(page, sample_xlsx)
         page.fill("#subject-input", "Hello {{nonexistent_column}}")
         page.fill("#body-input", "Body")
         # Wait for debounced validation to run
@@ -362,51 +375,36 @@ class TestPlaceholderValidation:
 
 class TestStepGating:
     def test_test_email_required_before_verify(self, authenticated_page: Page, sample_xlsx: Path):
-        """Clicking Next on step 3 without passing test email should be disabled."""
+        """Clicking Next on step 4 without passing test email should be disabled."""
         page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        page.fill("#subject-input", "Hello {{name}}")
-        page.fill("#body-input", "Body for {{name}}.")
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
-        page.click("#btn-next-2")
-        page.wait_for_selector("#step-3.active", timeout=5000)
-        # The Next button on step 3 should be disabled
-        expect(page.locator("#btn-next-3")).to_be_disabled()
+        _setup_to_preview(page, sample_xlsx)
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
+        # The Next button on step 4 should be disabled
+        expect(page.locator("#btn-next-4")).to_be_disabled()
 
     def test_verify_required_before_send(self, authenticated_page: Page, sample_xlsx: Path):
         """Step 5 Next button should be disabled without completing verify."""
         page = authenticated_page
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        page.fill("#subject-input", "Hello {{name}}")
-        page.fill("#body-input", "Body for {{name}}.")
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
-        page.click("#btn-next-2")
-        page.wait_for_selector("#step-3.active", timeout=5000)
-        # The Next button on step 4 should also be disabled
-        expect(page.locator("#btn-next-4")).to_be_disabled()
+        _setup_to_preview(page, sample_xlsx)
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
+        # The Next button on step 5 should also be disabled
+        expect(page.locator("#btn-next-5")).to_be_disabled()
 
 
 class TestSendConfirmation:
     def _navigate_to_send(self, page: Page, sample_xlsx: Path):
-        """Navigate to step 2 (preview)."""
-        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
-        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        page.fill("#subject-input", "Hello {{name}}")
-        page.fill("#body-input", "Body for {{name}}.")
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
+        """Navigate to step 3 (preview)."""
+        _setup_to_preview(page, sample_xlsx)
 
     def test_send_confirmation_visible(self, authenticated_page: Page, sample_xlsx: Path):
-        """Step 5 should show the confirmation dialog with recipient count."""
+        """Step 6 should show the confirmation dialog with recipient count."""
         page = authenticated_page
         self._navigate_to_send(page, sample_xlsx)
-        # Force-navigate to step 5 via JS (bypassing gating for this UI test)
-        page.evaluate("() => { testPassed = true; verifyPassed = true; goToStep(5); }")
-        page.wait_for_selector("#step-5.active", timeout=5000)
+        # Force-navigate to step 6 via JS (bypassing gating for this UI test)
+        page.evaluate("() => { testPassed = true; verifyPassed = true; goToStep(6); }")
+        page.wait_for_selector("#step-6.active", timeout=5000)
         # Confirmation box should be visible
         expect(page.locator("#send-confirm")).to_be_visible()
         expect(page.locator("#send-count")).to_contain_text("2")
@@ -417,8 +415,8 @@ class TestSendConfirmation:
         """Typing SEND in the confirmation input enables the send button."""
         page = authenticated_page
         self._navigate_to_send(page, sample_xlsx)
-        page.evaluate("() => { testPassed = true; verifyPassed = true; goToStep(5); }")
-        page.wait_for_selector("#step-5.active", timeout=5000)
+        page.evaluate("() => { testPassed = true; verifyPassed = true; goToStep(6); }")
+        page.wait_for_selector("#step-6.active", timeout=5000)
         page.fill("#send-confirm-input", "SEND")
         expect(page.locator("#btn-do-send")).to_be_enabled()
 
@@ -452,15 +450,21 @@ class TestFullWizardFlow:
         """Upload spreadsheet, fill in subject/body, navigate to preview."""
         page = authenticated_page
 
-        # Step 1: Setup
+        # Step 1: Data Source — upload
         page.set_input_files("#spreadsheet-file", str(sample_xlsx))
         page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+
+        # Navigate to Compose
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+
+        # Step 2: Compose — fill message
         page.fill("#subject-input", "Hello {{name}}")
         page.fill("#body-input", "Welcome {{name}} from {{company}}")
 
-        # Navigate to preview
-        page.click("#btn-next-1")
-        page.wait_for_selector("#step-2.active", timeout=5000)
+        # Navigate to Preview
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
 
         # Verify preview renders
         expect(page.locator("#preview-subject")).to_contain_text("Hello Alice")
@@ -472,15 +476,19 @@ class TestFullWizardFlow:
 
         page.set_input_files("#spreadsheet-file", str(sample_xlsx))
         page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
-        page.fill("#subject-input", "Subject test 123")
-        page.fill("#body-input", "Body test")
 
         page.click("#btn-next-1")
         page.wait_for_selector("#step-2.active", timeout=5000)
 
-        # Go back
-        page.click("button:has-text('← Back')")
-        page.wait_for_selector("#step-1.active", timeout=3000)
+        page.fill("#subject-input", "Subject test 123")
+        page.fill("#body-input", "Body test")
+
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+
+        # Go back to compose
+        page.click("button:has-text('\u2190 Back')")
+        page.wait_for_selector("#step-2.active", timeout=3000)
 
         # Data should be preserved
         assert page.locator("#subject-input").input_value() == "Subject test 123"

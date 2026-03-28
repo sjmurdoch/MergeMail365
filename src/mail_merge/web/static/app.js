@@ -4,7 +4,7 @@
 // State
 // ---------------------------------------------------------------------------
 let currentStep = 1;
-let spreadsheetData = null;   // { columns, rows, sheets, file_name }
+let spreadsheetData = null;   // { columns, rows, sheets, file_name, total_rows }
 let previewIndex = 0;
 let sendMode = "individual";  // "individual" | "bcc"
 let testPassed = false;
@@ -48,10 +48,16 @@ function renderSpreadsheetSummary(data) {
     }
 }
 
-function populateDropdowns(data) {
-    populateSelect($("email-column"), data.columns, true);
-    populateSelect($("name-column"), data.columns, false);
-    populateSheetSelect(data.sheets);
+function populateSheetSelect(sheets) {
+    const sel = $("sheet-select");
+    sel.innerHTML = sheets.map(s =>
+        `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
+    ).join("");
+}
+
+function populateColumnDropdowns(columns) {
+    populateSelect($("email-column"), columns, true);
+    populateSelect($("name-column"), columns, false);
 }
 
 function apiFetch(url, opts = {}) {
@@ -71,22 +77,30 @@ async function goToStep(n) {
     console.log("Navigating to step", n, "from", currentStep);
     // Only perform validation/trigger side-effects when advancing forward
     if (n > currentStep) {
+        // Step 1 → 2: need a spreadsheet uploaded
         if (n === 2 && currentStep === 1) {
-            if (!validateSetup()) return;
+            if (!validateDataSource()) return;
+            initComposeStep();
+        }
+        // Step 2 → 3: validate compose fields, load recipient preview
+        if (n === 3 && currentStep === 2) {
+            if (!validateCompose()) return;
             const previewOk = await loadPreview();
             if (!previewOk) return;
         }
-        if (n === 3) {
+        // Step 3 → 4: pre-fill test email
+        if (n === 4) {
             if (!testPassed) {
-                // pre-fill test email
-                checkAuthForStep3();
+                checkAuthForStep4();
             }
         }
-        if (n === 4) {
+        // Step 4 → 5: need test to pass first
+        if (n === 5) {
             if (!testPassed) return;
             startVerify();
         }
-        if (n === 5) {
+        // Step 5 → 6: need verify to pass first
+        if (n === 6) {
             if (!verifyPassed) return;
             prepareSend();
         }
@@ -100,8 +114,8 @@ async function goToStep(n) {
 function resetTestAndVerify() {
     testPassed = false;
     verifyPassed = false;
-    $("btn-next-3").disabled = true;
     $("btn-next-4").disabled = true;
+    $("btn-next-5").disabled = true;
     $("test-log").innerHTML = "";
     hide("test-log");
     hide("test-result");
@@ -110,28 +124,69 @@ function resetTestAndVerify() {
 }
 
 function confirmGoBack(targetStep) {
-    if (currentStep >= 3 && (testPassed || verifyPassed)) {
+    // Going back from test/verify/send steps resets test and verify results
+    if (currentStep >= 4 && (testPassed || verifyPassed)) {
         if (!confirm("Going back will discard your test and verification results. You will need to complete these steps again. Continue?")) {
             return;
         }
         resetTestAndVerify();
     }
-    // Going back to step 1 from step 2 also invalidates test/verify
-    // since the user may change inputs that affect the merge
-    if (currentStep === 2 && targetStep === 1) {
+    // Going back from preview (step 3) to compose (step 2) also invalidates
+    if (currentStep === 3 && targetStep === 2) {
         resetTestAndVerify();
     }
     goToStep(targetStep);
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: Setup
+// Step 1: Data Source
 // ---------------------------------------------------------------------------
-function validateSetup() {
+function validateDataSource() {
     if (!spreadsheetData) {
         alert("Please upload a spreadsheet.");
         return false;
     }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Compose — initialisation and validation
+// ---------------------------------------------------------------------------
+function initComposeStep() {
+    if (!spreadsheetData) return;
+    // Update compose data summary
+    $("compose-data-summary").textContent =
+        `${spreadsheetData.file_name}: ${spreadsheetData.columns.length} columns, ${spreadsheetData.total_rows} rows.`;
+
+    // Build the read-only preview table on the compose step
+    buildComposePreviewTable(spreadsheetData.columns, spreadsheetData.rows, spreadsheetData.total_rows);
+
+    // Populate column dropdowns — preserve previous selections if they're
+    // still valid (user went back and came forward without changing data)
+    const prevEmail = $("email-column").value;
+    const prevName = $("name-column").value;
+    populateColumnDropdowns(spreadsheetData.columns);
+    if (prevEmail && spreadsheetData.columns.includes(prevEmail)) {
+        $("email-column").value = prevEmail;
+    } else {
+        // Auto-detect email column
+        const emailPatterns = ["email", "e-mail", "email address", "emailaddress", "mail"];
+        for (const col of spreadsheetData.columns) {
+            if (emailPatterns.includes(col.toLowerCase())) {
+                $("email-column").value = col;
+                break;
+            }
+        }
+    }
+    if (prevName && spreadsheetData.columns.includes(prevName)) {
+        $("name-column").value = prevName;
+    }
+
+    // Show placeholder chips
+    showPlaceholderChips(spreadsheetData.columns);
+}
+
+function validateCompose() {
     const emailCol = $("email-column").value;
     if (!emailCol) {
         alert("Please select an email column.");
@@ -216,7 +271,7 @@ async function loadConfig() {
     try {
         const resp = await apiFetch("/api/config");
         const data = await resp.json();
-        
+
         // Restore config
         if (data.client_id) {
             $("client-id").value = data.client_id;
@@ -239,8 +294,9 @@ async function loadConfig() {
             spreadsheetData = s;
             show("spreadsheet-info");
             renderSpreadsheetSummary(s);
-            populateDropdowns(s);
-            
+            populateSheetSelect(s.sheets);
+            buildPreviewTable(s.columns, s.rows, s.total_rows);
+
             // Restore chosen columns if they match what's in the sheet
             const savedEmailCol = localStorage.getItem("mm_email_col");
             if (savedEmailCol && s.columns.includes(savedEmailCol)) {
@@ -261,14 +317,14 @@ async function loadConfig() {
         if (data.active_job_id) {
             currentJobId = data.active_job_id;
             sendStarted = true;
-            // Jump to step 5 (Send) and connect to the existing stream
+            // Jump to step 6 (Send) and connect to the existing stream
             hide("send-confirm");
             show("send-progress");
             show("send-log");
-            $("btn-back-5").disabled = true;
+            $("btn-back-6").disabled = true;
             window.addEventListener("beforeunload", beforeUnloadWarn);
-            currentStep = 5;
-            updateStepUI(5);
+            currentStep = 6;
+            updateStepUI(6);
             streamEvents(currentJobId, "send-log", (result) => {
                 window.removeEventListener("beforeunload", beforeUnloadWarn);
                 if (result.status === "completed" || result.status === "stopped") {
@@ -285,8 +341,9 @@ async function loadConfig() {
             // On reload, we have the spreadsheet in session but not the
             // filtered recipients list.  We can only safely restore to
             // step 1 (let the user re-advance) or step 2 (re-run the
-            // preview fetch).  Steps 3-5 require test/verify to have
-            // actually run in this page session, so fall back to step 1.
+            // preview fetch).  Steps 3+ require loading recipients and
+            // steps 4-6 require test/verify to have actually run in this
+            // page session, so fall back to step 1.
             if (data.current_step >= 2 && spreadsheetData) {
                 // Restore to step 1 — the user can re-advance with one click
                 // since all their inputs are still populated.
@@ -459,7 +516,7 @@ $("btn-test-connection").addEventListener("click", async () => {
     try {
         const resp = await apiFetch("/auth/debug");
         const data = await resp.json();
-        
+
         // Build a summary of results
         let summary = "";
         if (data.error) {
@@ -471,7 +528,7 @@ $("btn-test-connection").addEventListener("click", async () => {
         } else {
             summary = `<div class="callout callout-danger mt-0"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
         }
-        
+
         $("auth-diag-content").innerHTML = summary + `<pre>${JSON.stringify(data, null, 2)}</pre>`;
     } catch (e) {
         $("auth-diag-content").innerHTML = `<div class="callout callout-danger mt-0"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
@@ -501,24 +558,36 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         show("spreadsheet-info");
         renderSpreadsheetSummary(data);
         $("btn-next-1").disabled = false;
-        populateDropdowns(data);
+        populateSheetSelect(data.sheets);
 
-        // Auto-detect email column
-        const emailPatterns = ["email", "e-mail", "email address", "emailaddress", "mail"];
-        for (const col of data.columns) {
-            if (emailPatterns.includes(col.toLowerCase())) {
-                $("email-column").value = col;
-                break;
-            }
-        }
-
-        // Build preview table
+        // Build preview table on step 1
         buildPreviewTable(data.columns, data.rows, data.total_rows);
-
-        // Show placeholder chips
-        showPlaceholderChips(data.columns);
     } catch (e) {
         alert("Upload error: " + e.message);
+    }
+});
+
+// Sheet change — re-read preview for the selected sheet
+$("sheet-select").addEventListener("change", async () => {
+    if (!spreadsheetData) return;
+    const sheet = $("sheet-select").value;
+
+    try {
+        const resp = await apiFetch("/api/change-sheet", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sheet: sheet || null }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert(data.error || "Failed to change sheet");
+            return;
+        }
+        spreadsheetData = data;
+        renderSpreadsheetSummary(data);
+        buildPreviewTable(data.columns, data.rows, data.total_rows);
+    } catch (e) {
+        alert("Error changing sheet: " + e.message);
     }
 });
 
@@ -528,13 +597,6 @@ function populateSelect(sel, cols, required) {
         html += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
     }
     sel.innerHTML = html;
-}
-
-function populateSheetSelect(sheets) {
-    const sel = $("sheet-select");
-    sel.innerHTML = sheets.map(s =>
-        `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
-    ).join("");
 }
 
 function buildPreviewTable(columns, rows, totalRows) {
@@ -549,6 +611,22 @@ function buildPreviewTable(columns, rows, totalRows) {
     if (totalRows > rows.length) {
         caption.textContent = `Showing ${rows.length} of ${totalRows} rows`;
         if (!caption.parentNode) document.querySelector("#preview-table").prepend(caption);
+    } else {
+        caption.remove();
+    }
+}
+
+function buildComposePreviewTable(columns, rows, totalRows) {
+    const thead = document.querySelector("#compose-preview-table thead");
+    const tbody = document.querySelector("#compose-preview-table tbody");
+    thead.innerHTML = "<tr>" + columns.map(c => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
+    tbody.innerHTML = rows.map(row =>
+        "<tr>" + columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("") + "</tr>"
+    ).join("");
+    const caption = document.querySelector("#compose-preview-table caption") || document.createElement("caption");
+    if (totalRows > rows.length) {
+        caption.textContent = `Showing ${rows.length} of ${totalRows} rows`;
+        if (!caption.parentNode) document.querySelector("#compose-preview-table").prepend(caption);
     } else {
         caption.remove();
     }
@@ -781,11 +859,11 @@ function validateHtmlBody() {
 }
 
 // ---------------------------------------------------------------------------
-// Step 2: Preview
+// Step 3: Preview
 // ---------------------------------------------------------------------------
 async function loadPreview() {
-    $("btn-next-1").ariaBusy = "true";
-    $("btn-next-1").disabled = true;
+    $("btn-next-2").ariaBusy = "true";
+    $("btn-next-2").disabled = true;
 
     try {
         const form = new FormData();
@@ -831,8 +909,8 @@ async function loadPreview() {
         alert("Error loading preview: " + e.message);
         return false;
     } finally {
-        $("btn-next-1").ariaBusy = "false";
-        $("btn-next-1").disabled = false;
+        $("btn-next-2").ariaBusy = "false";
+        $("btn-next-2").disabled = false;
     }
 }
 
@@ -932,9 +1010,9 @@ function showInvalidEmailWarning(invalidEmails, totalBefore) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 3: Test Email
+// Step 4: Test Email
 // ---------------------------------------------------------------------------
-function checkAuthForStep3() {
+function checkAuthForStep4() {
     // Pre-fill test email
     checkAuthStatus();
     updateTestPreview();
@@ -987,7 +1065,7 @@ async function sendTestEmail() {
             if (result.status === "completed") {
                 testPassed = true;
                 saveState();
-                $("btn-next-3").disabled = false;
+                $("btn-next-4").disabled = false;
                 showTestResult(true, "Test email sent successfully!");
             } else {
                 const errMsg = categoriseError(result.error || "Test email failed");
@@ -1010,14 +1088,14 @@ function showTestResult(success, msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 4: Verify (Dry Run)
+// Step 5: Verify (Dry Run)
 // ---------------------------------------------------------------------------
 function startVerify() {
     const recipients = getRecipients();
     $("verify-count").textContent = recipients ? recipients.length : "?";
     $("verify-log").innerHTML = "";
     hide("verify-result");
-    $("btn-next-4").disabled = true;
+    $("btn-next-5").disabled = true;
     verifyPassed = false;
     saveState();
 
@@ -1035,7 +1113,7 @@ function startVerify() {
                 if (result.status === "completed") {
                     verifyPassed = true;
                     saveState();
-                    $("btn-next-4").disabled = false;
+                    $("btn-next-5").disabled = false;
                     const recs = getRecipients();
                     const n = recs ? recs.length : "?";
                     const estSec = recs ? recs.length * 2 : "?";
@@ -1044,7 +1122,7 @@ function startVerify() {
                     if (tokenExpiresAt && recs) {
                         const estEndMs = Date.now() + recs.length * 2000;
                         if (estEndMs > tokenExpiresAt.getTime()) {
-                            msg += "\n⚠️ Warning: Your authentication token may expire before sending completes. Consider signing in again before proceeding.";
+                            msg += "\n\u26a0\ufe0f Warning: Your authentication token may expire before sending completes. Consider signing in again before proceeding.";
                         }
                     }
                     showVerifyResult(true, msg);
@@ -1064,7 +1142,7 @@ function showVerifyResult(success, msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 5: Send
+// Step 6: Send
 // ---------------------------------------------------------------------------
 function prepareSend() {
     sendStarted = false;
@@ -1110,7 +1188,7 @@ async function startSend() {
     show("send-progress");
     show("send-log");
     $("send-log").innerHTML = "";
-    $("btn-back-5").disabled = true;
+    $("btn-back-6").disabled = true;
 
     // beforeunload warning
     window.addEventListener("beforeunload", beforeUnloadWarn);
@@ -1238,7 +1316,7 @@ function newMerge() {
     hide("spreadsheet-info");
     $("btn-next-1").disabled = false;
 
-    // Clear Step 1 — message fields
+    // Clear Step 2 — compose fields
     $("subject-input").value = "";
     $("body-input").value = "";
     $("email-column").innerHTML = '<option value="">-- select --</option>';
@@ -1256,7 +1334,7 @@ function newMerge() {
     hide("placeholder-errors");
     hide("html-warnings");
 
-    // Clear Step 1 — options
+    // Clear Step 2 — options
     $("cc-input").value = "";
     $("bcc-input").value = "";
     $("reply-to-input").value = "";
@@ -1267,7 +1345,7 @@ function newMerge() {
     // Reset send mode to individual
     setSendMode("individual");
 
-    // Clear Step 2 (Preview)
+    // Clear Step 3 (Preview)
     $("preview-subject").textContent = "";
     $("preview-body").textContent = "";
     hide("preview-body-html");
@@ -1275,23 +1353,23 @@ function newMerge() {
     document.querySelector("#recipients-table thead").innerHTML = "";
     document.querySelector("#recipients-table tbody").innerHTML = "";
 
-    // Clear Step 3 (Test)
+    // Clear Step 4 (Test)
     $("test-email-input").value = "";
     $("test-log").innerHTML = "";
     hide("test-log");
     $("test-result").innerHTML = "";
     hide("test-result");
-    $("btn-next-3").disabled = true;
+    $("btn-next-4").disabled = true;
     hide("btn-retry-test");
 
-    // Clear Step 4 (Verify)
+    // Clear Step 5 (Verify)
     $("verify-log").innerHTML = "";
     hide("verify-log");
     $("verify-result").innerHTML = "";
     hide("verify-result");
-    $("btn-next-4").disabled = true;
+    $("btn-next-5").disabled = true;
 
-    // Clear Step 5 (Send)
+    // Clear Step 6 (Send)
     $("send-confirm-input").value = "";
     $("send-log").innerHTML = "";
     hide("send-log");
