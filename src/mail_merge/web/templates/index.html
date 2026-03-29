@@ -356,6 +356,7 @@
 const CSRF_TOKEN = {{ csrf_token | tojson }};
 </script>
 <script src="{{ url_for('static', filename='trix.js') }}"></script>
+<script>Trix.config.blockAttributes.default.tagName = "p";</script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

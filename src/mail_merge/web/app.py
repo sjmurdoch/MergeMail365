@@ -509,12 +509,18 @@ def create_app(
                 except Exception:
                     pass
 
+        from mail_merge.api import _EMAIL_HTML_HEAD, _EMAIL_HTML_TAIL
+
         return jsonify({
             "client_id": fixed_cid or _get_config_value("client_id") or "",
             "tenant_id": fixed_tid or _get_config_value("tenant_id") or "",
             "client_id_locked": bool(fixed_cid),
             "tenant_id_locked": bool(fixed_tid),
             "desktop_mode": app.config["DESKTOP_MODE"],
+            "email_wrapper": {
+                "head": _EMAIL_HTML_HEAD,
+                "tail": _EMAIL_HTML_TAIL,
+            },
             "spreadsheet": spreadsheet_info,
             "current_step": session.get("current_step", 1),
             "test_passed": session.get("test_passed", False),

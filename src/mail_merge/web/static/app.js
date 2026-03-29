@@ -31,6 +31,9 @@ const state = {
     // Trix rich-text editor instance
     trixEditor: null,
 
+    // Email wrapper (head/tail) for HTML preview — loaded from server config
+    emailWrapper: null,
+
     /** Convenience getter — spreadsheetData.rows is the single source of truth */
     getRecipients() {
         return this.spreadsheetData ? this.spreadsheetData.rows : null;
@@ -351,6 +354,9 @@ async function loadConfig() {
         }
         if (data.desktop_mode) {
             _auth.desktopMode = true;
+        }
+        if (data.email_wrapper) {
+            state.emailWrapper = data.email_wrapper;
         }
 
         // Restore session spreadsheet if it exists
@@ -758,12 +764,39 @@ document.addEventListener('trix-initialize', (e) => {
 });
 
 document.addEventListener('trix-change', () => {
-    $('body-input').value = $('trix-input').value;
+    // Trix appends <br> inside every <p>, producing <p><br></p> for blank
+    // lines.  The <br> adds a full line-height on top of the <p> margin,
+    // causing double spacing in email.  Strip trailing <br>, then remove
+    // empty <p></p> tags (the previous paragraph's margin provides spacing).
+    $('body-input').value = $('trix-input').value
+        .replace(/<br>\s*<\/p>/gi, "</p>")
+        .replace(/<p>\s*<\/p>/gi, "");
     onTemplateChange();
 });
 
 document.addEventListener('trix-file-accept', (e) => {
     e.preventDefault();
+});
+
+// Clean pasted HTML before Trix's parser converts block-element margins
+// into literal <br> tags (which causes double spacing).  Simplify the
+// block structure so Trix can rebuild it cleanly.
+document.addEventListener('trix-before-paste', (e) => {
+    const paste = e.paste;
+    if (!paste.html) return;
+    const div = document.createElement("div");
+    div.innerHTML = paste.html;
+    // Remove empty paragraphs/divs (margin-only spacers)
+    for (const el of div.querySelectorAll("p, div")) {
+        if (!el.textContent.trim() && !el.querySelector("img, table")) {
+            el.remove();
+        }
+    }
+    // Strip <br> that follows block-level content (Trix would double them)
+    for (const br of div.querySelectorAll("p > br:last-child, div > br:last-child")) {
+        if (br.previousSibling) br.remove();
+    }
+    paste.html = div.innerHTML;
 });
 
 function activateHtmlEditor() {
@@ -1021,7 +1054,10 @@ function renderPreviewRecipient() {
     if (isHtml) {
         hide("preview-body");
         show("preview-body-html");
-        $("preview-body-html").srcdoc = rendered_body;
+        const w = state.emailWrapper;
+        $("preview-body-html").srcdoc = w
+            ? w.head + stripHtmlDocTags(rendered_body) + w.tail
+            : rendered_body;
     } else {
         show("preview-body");
         hide("preview-body-html");

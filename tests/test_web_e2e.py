@@ -306,6 +306,131 @@ class TestComposeStep:
         trix_html = page.evaluate("() => state.trixEditor.getDocument().toString().trim()")
         assert "{{" not in trix_html
 
+    def test_trix_uses_p_tags(self, authenticated_page: Page, sample_xlsx: Path):
+        """Trix should produce <p> tags, not <div>, for paragraphs."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        page.evaluate("() => state.trixEditor.insertString('Hello world')")
+        body = page.locator("#body-input").input_value()
+        assert "<p>" in body
+        assert "<div>" not in body
+
+    def test_trix_output_strips_trailing_br(self, authenticated_page: Page, sample_xlsx: Path):
+        """Trailing <br> before </p> should be stripped in body-input."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        # Type a single paragraph — Trix adds a trailing <br> before </p>
+        page.evaluate("() => state.trixEditor.insertString('Hello world')")
+        body = page.locator("#body-input").input_value()
+        # The trailing <br> should have been stripped by the trix-change handler
+        assert "<br></p>" not in body
+        assert body.strip().endswith("</p>")
+
+    def test_trix_output_removes_empty_paragraphs(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        """Empty <p></p> tags (from blank lines) should be removed."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        # Simulate Trix producing empty paragraphs via the hidden input
+        page.evaluate("""() => {
+            document.getElementById('trix-input').value =
+                '<p>First<br></p><p><br></p><p>Second<br></p>';
+            document.getElementById('trix-input')
+                .dispatchEvent(new Event('input'));
+        }""")
+        # Trigger the trix-change handler by modifying Trix content
+        page.evaluate("""() => {
+            state.trixEditor.loadHTML(
+                '<p>First<br></p><p><br></p><p>Second<br></p>'
+            );
+        }""")
+        body = page.locator("#body-input").input_value()
+        assert "<p>First</p>" in body
+        assert "<p>Second</p>" in body
+        assert "<p></p>" not in body
+        assert "<br>" not in body
+
+    def test_trix_paste_cleans_html(self, authenticated_page: Page, sample_xlsx: Path):
+        """Pasting HTML with empty spacer divs should produce clean output."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        # Focus the Trix editor
+        page.click("trix-editor")
+        # Simulate paste with HTML containing empty spacer paragraphs
+        page.evaluate("""() => {
+            const html = '<p>First paragraph</p><p></p><p>Second paragraph</p>';
+            const event = new CustomEvent('trix-before-paste', {
+                cancelable: true,
+            });
+            event.paste = { html: html };
+            document.dispatchEvent(event);
+            // After the handler runs, empty <p> should be removed
+            return event.paste.html;
+        }""")
+        result = page.evaluate("""() => {
+            const html = '<p>Paragraph A</p><div><br></div><p>Paragraph B</p>';
+            const event = new CustomEvent('trix-before-paste', {
+                cancelable: true,
+            });
+            event.paste = { html: html };
+            document.dispatchEvent(event);
+            return event.paste.html;
+        }""")
+        # Empty spacer div should have been removed
+        assert "<div>" not in result
+        assert "Paragraph A" in result
+        assert "Paragraph B" in result
+
+    def test_trix_paste_preserves_content_paragraphs(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        """Paste cleanup should keep non-empty paragraphs intact."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        result = page.evaluate("""() => {
+            const html = '<p>Keep me</p><p>And me</p><p>Me too</p>';
+            const event = new CustomEvent('trix-before-paste', {
+                cancelable: true,
+            });
+            event.paste = { html: html };
+            document.dispatchEvent(event);
+            return event.paste.html;
+        }""")
+        assert "<p>Keep me</p>" in result
+        assert "<p>And me</p>" in result
+        assert "<p>Me too</p>" in result
+
+    def test_trix_paste_preserves_images_in_empty_blocks(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        """Empty paragraphs containing images should not be removed."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        result = page.evaluate("""() => {
+            const html = '<p><img src="logo.png"></p><p></p><p>Text</p>';
+            const event = new CustomEvent('trix-before-paste', {
+                cancelable: true,
+            });
+            event.paste = { html: html };
+            document.dispatchEvent(event);
+            return event.paste.html;
+        }""")
+        assert "logo.png" in result
+        assert "<p></p>" not in result
+
     def test_blocks_next_without_subject(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
         _upload_and_go_to_compose(page, sample_xlsx)
