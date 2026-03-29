@@ -153,7 +153,6 @@
                     <input type="checkbox" id="source-toggle"> View source
                 </label>
             </div>
-            <small>Tip: just provide the body content &mdash; the app adds email compatibility wrappers automatically. Use the CLI to send a full HTML document.</small>
         </div>
 
         <div class="pico">
@@ -161,13 +160,16 @@
                 <input type="checkbox" id="html-toggle"> Send as HTML
             </label>
 
+            <section>
             <div id="placeholder-chips" class="hidden">
                 <small>Available placeholders (click to insert):</small>
                 <div class="chip-container" id="chips"></div>
             </div>
             <div id="placeholder-errors" class="hidden callout callout-danger"></div>
             <div id="html-warnings" class="hidden callout callout-warning"></div>
+            </section>
 
+            <section>
             <!-- Options (collapsible) -->
             <details>
                 <summary role="button">Additional options</summary>
@@ -205,6 +207,7 @@
                     </div>
                 </div>
             </details>
+            </section>
 
             <div class="nav-buttons">
                 <button type="button" class="outline" onclick="goToStep(1)">&larr; Back</button>
