@@ -668,7 +668,7 @@ The version is defined in `pyproject.toml` (`version = "X.Y.Z"`). Update it befo
 
    ```bash
    git add pyproject.toml uv.lock
-   git commit -m "Bump version to 0.3.0"
+   git commit -m "Bump version to 0.3.1"
    git push
    ```
 
