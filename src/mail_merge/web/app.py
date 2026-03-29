@@ -488,7 +488,10 @@ def create_app(
             if os.path.exists(filepath):
                 try:
                     from mail_merge.excel import read_preview
-                    _cols, rows, _sheets, _total = read_preview(filepath)
+                    saved_sheet = spreadsheet_info.get("active_sheet")
+                    _cols, rows, _sheets, _total, _active = read_preview(
+                        filepath, sheet_name=saved_sheet,
+                    )
                     spreadsheet_info = {**spreadsheet_info, "rows": rows}
                 except Exception:
                     pass
@@ -563,7 +566,7 @@ def create_app(
         from mail_merge.excel import read_preview
 
         try:
-            columns, rows, sheets, total_rows = read_preview(filepath)
+            columns, rows, sheets, total_rows, active_sheet = read_preview(filepath)
         except Exception as exc:
             logger.debug("upload-spreadsheet: read_preview failed", exc_info=True)
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -580,6 +583,7 @@ def create_app(
             "sheets": sheets,
             "total_rows": total_rows,
             "file_name": file.filename,
+            "active_sheet": active_sheet,
         }
 
         return jsonify({**session["spreadsheet_info"], "rows": rows})
@@ -596,7 +600,7 @@ def create_app(
         from mail_merge.excel import read_preview
 
         try:
-            columns, rows, sheets, total_rows = read_preview(
+            columns, rows, sheets, total_rows, active_sheet = read_preview(
                 filepath, sheet_name=sheet_name,
             )
         except Exception as exc:
@@ -610,6 +614,7 @@ def create_app(
             "sheets": sheets,
             "total_rows": total_rows,
             "file_name": info.get("file_name", "upload.xlsx"),
+            "active_sheet": active_sheet,
         }
 
         return jsonify({**session["spreadsheet_info"], "rows": rows})

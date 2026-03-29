@@ -68,11 +68,12 @@ class TestReadRecipients:
 
 class TestReadPreview:
     def test_basic(self, sample_xlsx):
-        columns, rows, sheets, total_rows = read_preview(sample_xlsx)
+        columns, rows, sheets, total_rows, active_sheet = read_preview(sample_xlsx)
         assert "name" in columns
         assert "email" in columns
         assert total_rows == 3  # Alice, Bob, Charlie
         assert len(rows) == 3
+        assert active_sheet == "Sheet"
 
     def test_truncation(self, tmp_path):
         """read_preview with max_rows limits returned rows."""
@@ -85,7 +86,7 @@ class TestReadPreview:
             ws.append([f"User{i}", f"user{i}@example.com"])
         wb.save(path)
 
-        columns, rows, sheets, total_rows = read_preview(path, max_rows=5)
+        columns, rows, sheets, total_rows, _active = read_preview(path, max_rows=5)
         assert total_rows == 20
         assert len(rows) == 5
         assert rows[0]["name"] == "User0"
@@ -100,7 +101,7 @@ class TestReadPreview:
         ws.append(["Alice", "alice@example.com"])  # missing company
         wb.save(path)
 
-        columns, rows, sheets, total_rows = read_preview(path)
+        columns, rows, sheets, total_rows, _active = read_preview(path)
         assert len(rows) == 1
         assert rows[0]["company"] == ""
 

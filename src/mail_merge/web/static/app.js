@@ -360,12 +360,13 @@ async function loadConfig() {
             show("spreadsheet-info");
             renderSpreadsheetSummary(s);
             populateSheetSelect(s.sheets);
+            if (s.active_sheet) $("sheet-select").value = s.active_sheet;
             buildPreviewTable(s.columns, s.rows, s.total_rows);
 
-            // Restore saved sheet selection — if it differs from what the
-            // server returned, re-fetch the preview for that sheet.
+            // Restore saved sheet selection — if it differs from the
+            // server's active sheet, re-fetch the preview for that sheet.
             const savedSheet = localStorage.getItem("mm_sheet");
-            if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== s.sheets[0]) {
+            if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== (s.active_sheet || s.sheets[0])) {
                 $("sheet-select").value = savedSheet;
                 // Trigger a change to re-fetch the sheet's data
                 $("sheet-select").dispatchEvent(new Event("change"));
@@ -629,6 +630,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         renderSpreadsheetSummary(data);
         $("btn-next-1").disabled = false;
         populateSheetSelect(data.sheets);
+        if (data.active_sheet) $("sheet-select").value = data.active_sheet;
 
         // Build preview table on step 1
         buildPreviewTable(data.columns, data.rows, data.total_rows);

@@ -1038,7 +1038,7 @@ class TestSummarize:
 class TestReadPreview:
     def test_read_preview_returns_columns_and_rows(self, sample_xlsx_web):
         from mail_merge.excel import read_preview
-        columns, rows, sheets, total = read_preview(sample_xlsx_web)
+        columns, rows, sheets, total, _active = read_preview(sample_xlsx_web)
         assert "name" in columns
         assert "email" in columns
         assert len(rows) == 2
@@ -1056,7 +1056,7 @@ class TestReadPreview:
             ws.append([str(i), f"val{i}"])
         wb.save(path)
 
-        columns, rows, _sheets, total = read_preview(path, max_rows=3)
+        columns, rows, _sheets, total, _active = read_preview(path, max_rows=3)
         assert len(rows) == 3
         assert total == 20
 
