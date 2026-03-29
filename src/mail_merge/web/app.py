@@ -55,6 +55,12 @@ _STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
 _FULL_HTML_DOC_RE = re.compile(r"<!DOCTYPE|<html\b", re.IGNORECASE)
 _GMAIL_CLIP_BYTES = 102 * 1024  # ~102 KB
 
+# Strip full-document tags so the app's email wrapper is always applied.
+_STRIP_DOC_RE = re.compile(
+    r"<!DOCTYPE[^>]*>|</?html[^>]*>|<head\b[^>]*>.*?</head>|</?body[^>]*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 # ---------------------------------------------------------------------------
 # Job management
@@ -184,10 +190,10 @@ def _validate_html_body(body: str) -> list[str]:
 
     if _FULL_HTML_DOC_RE.search(body):
         warnings.append(
-            "Full HTML document detected. Your own <html> structure will "
-            "be sent as-is, bypassing the app\u2019s standard email "
-            "compatibility wrappers (CSS resets, Outlook DPI fix, mobile "
-            "viewport)."
+            "Full HTML document tags detected (<!DOCTYPE>, <html>, <head>, "
+            "<body>). These will be stripped \u2014 the app always adds its "
+            "own email compatibility wrappers. Just provide the body content. "
+            "Use the CLI to send a full HTML document."
         )
 
     body_bytes = len(body.encode("utf-8"))
@@ -709,6 +715,9 @@ def create_app(
         email_column = data.get("email_column", "")
         subject = data.get("subject", "")
         body_text_val = data.get("body", "")
+        # Strip full-document tags so the app's wrapper is always applied
+        if data.get("html") and _FULL_HTML_DOC_RE.search(body_text_val):
+            body_text_val = _STRIP_DOC_RE.sub("", body_text_val).strip()
         test_email_addr = data.get("test_email", "")
 
         if not email_column or not subject:

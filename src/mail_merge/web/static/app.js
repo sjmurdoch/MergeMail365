@@ -911,9 +911,10 @@ function validateHtmlBody() {
 
     if (FULL_HTML_DOC_RE.test(body)) {
         warnings.push(
-            "<strong>Full HTML document detected.</strong> Your own &lt;html&gt; structure will " +
-            "be sent as-is, bypassing the app\u2019s standard email compatibility wrappers " +
-            "(CSS resets, Outlook DPI fix, mobile viewport)."
+            "<strong>Full HTML document tags detected</strong> (&lt;!DOCTYPE&gt;, &lt;html&gt;, " +
+            "&lt;head&gt;, &lt;body&gt;). These will be stripped \u2014 the app always adds its " +
+            "own email compatibility wrappers. Just provide the body content. " +
+            "Use the CLI to send a full HTML document."
         );
     }
 
