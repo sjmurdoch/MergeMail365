@@ -31,7 +31,12 @@
       "Bash(npm view:*)",
       "Bash(curl:*)",
       "Bash(brew install:*)",
-      "Bash(biome:*)"
+      "Bash(biome:*)",
+      "Bash(wait:*)"
     ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
   }
 }

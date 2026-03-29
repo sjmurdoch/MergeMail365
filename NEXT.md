@@ -1,6 +1,4 @@
-Split the first step in the Wizard. The first step should be performing the authentication to the GraphAPI, uploading the spreadsheet, and selecting the sheet.
-
-The next step should be previewing the data, selecting the relevant columns and the rest of what is currently in step 1.
+UX can be confusing if an action on a page invalidates data on the same page, but when someone uploads a new workbook or changes the worksheet to be loaded, that affects the preview, placeholders, and field definitions. Split the first step in the Wizard. The first step should be performing the authentication to the GraphAPI, uploading the excel file, selecting the sheet, and showing the preview. The next step should be previewing the data again, selecting the relevant columns and the rest of what is currently in step 1. Pay careful attention to what state is stored, when it is invalidated, and whether it is client side, server side, or local storage to ensure good UX. The app is local so only ever has one session at any one time.
 
 Verify stage didn't show the results of the dry-run (once)
 
