@@ -41,6 +41,23 @@ def sample_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="module")
+def active_sheet2_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Spreadsheet where the active sheet is not the first one."""
+    path = tmp_path_factory.mktemp("data") / "active_sheet2.xlsx"
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Contacts"
+    ws1.append(["name", "email"])
+    ws1.append(["Alice", "alice@example.com"])
+    ws2 = wb.create_sheet("Orders")
+    ws2.append(["order_id", "email", "amount"])
+    ws2.append(["001", "bob@example.com", "99.99"])
+    wb.active = 1  # Make "Orders" the active sheet
+    wb.save(path)
+    return path
+
+
+@pytest.fixture(scope="module")
 def mixed_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Spreadsheet with some invalid email addresses."""
     path = tmp_path_factory.mktemp("data") / "mixed.xlsx"
@@ -198,6 +215,26 @@ class TestDataStep:
         page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
         # Preview table should be visible
         expect(page.locator("#preview-table")).to_be_visible()
+
+    def test_sheet_selector_matches_active_sheet(
+        self, authenticated_page: Page, active_sheet2_xlsx: Path,
+    ):
+        """When the workbook's active sheet isn't the first, the selector
+        and preview data should both reflect the active sheet."""
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(active_sheet2_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+
+        # The selector should show "Orders" (the active sheet), not "Contacts"
+        selected = page.locator("#sheet-select").input_value()
+        assert selected == "Orders"
+
+        # The preview table should show Orders columns, not Contacts columns
+        headers = page.eval_on_selector_all(
+            "#preview-table thead th", "ths => ths.map(th => th.textContent)",
+        )
+        assert "order_id" in headers
+        assert "amount" in headers
 
     def test_blocks_next_without_spreadsheet(self, authenticated_page: Page):
         page = authenticated_page
