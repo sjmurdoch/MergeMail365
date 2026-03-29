@@ -778,6 +778,10 @@ function activateHtmlEditor() {
         }
     }
     $("source-toggle").checked = false;
+    hide("html-source");
+    if (trixEditorEl) show(trixEditorEl);
+    const toolbar = trixEditorEl && trixEditorEl.toolbarElement;
+    if (toolbar) show(toolbar);
     hide("body-input");
     show("html-editor-wrap");
 }
