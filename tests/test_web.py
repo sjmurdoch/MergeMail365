@@ -435,7 +435,9 @@ class TestPreview:
         data = resp.get_json()
         assert any("style" in w.lower() and "stripped" in w.lower() for w in data["html_warnings"])
 
-    def test_preview_html_warns_full_document(self, web_client):
+    def test_preview_html_strips_full_document_tags(self, web_client):
+        """Full-document tags are stripped before validation, so a valid
+        body wrapped in <html> produces no warnings."""
         csrf = get_csrf(web_client)
         resp = web_client.post(
             "/api/preview-template",
@@ -449,7 +451,7 @@ class TestPreview:
             headers={"X-CSRF-Token": csrf, "Content-Type": "application/json"},
         )
         data = resp.get_json()
-        assert any("full html document" in w.lower() for w in data["html_warnings"])
+        assert data["html_warnings"] == []
 
 
 class TestRecipientAPI:
@@ -761,6 +763,29 @@ class TestJobs:
         assert status["status"] == "completed"
         assert status["summary"]["total"] == 2
         assert status["summary"]["sent"] == 2
+
+    def test_dry_run_strips_html_doc_tags(self, web_client, sample_xlsx_web):
+        """Full-document HTML tags are stripped so the wrapper is always applied."""
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        resp = web_client.post(
+            "/api/start-job",
+            data={
+                "mode": "dry_run",
+                "email_column": "email",
+                "subject": "Hello {{name}}",
+                "body": "<!DOCTYPE html><html><head><style>body{color:red}</style>"
+                        "</head><body><p>Hi {{name}}</p></body></html>",
+                "html": "true",
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        status = wait_for_job(web_client, data["job_id"])
+        assert status["status"] == "completed"
+        # The body passed to send_merge should be stripped content only
+        assert status["summary"]["total"] == 2
 
     def test_dry_run_validates_placeholders(self, web_client, sample_xlsx_web):
         csrf = self._setup_upload(web_client, sample_xlsx_web)

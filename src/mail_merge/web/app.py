@@ -146,8 +146,23 @@ def _unregister_temp_dir(path: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _strip_html_doc_tags(body: str) -> str:
+    """Remove full-document tags so the app's email wrapper is always applied."""
+    if _FULL_HTML_DOC_RE.search(body):
+        return _STRIP_DOC_RE.sub("", body).strip()
+    return body
+
+
+# Approximate size of the email wrapper added by _wrap_html_for_email.
+_EMAIL_WRAPPER_BYTES = 1500
+
+
 def _validate_html_body(body: str) -> list[str]:
-    """Return a list of warning strings for HTML email body content."""
+    """Return a list of warning strings for HTML email body content.
+
+    Expects body content only (no <!DOCTYPE>, <html>, <head>, or <body>
+    tags).  Call ``_strip_html_doc_tags`` first if needed.
+    """
     if not body.strip():
         return []
     warnings: list[str] = []
@@ -183,25 +198,17 @@ def _validate_html_body(body: str) -> list[str]:
 
     if _STYLE_BLOCK_RE.search(body):
         warnings.append(
-            "Embedded <style> blocks may be stripped. Many email clients "
-            "(Gmail, Outlook.com) remove <style> tags. Use inline style "
-            "attributes for reliable rendering."
+            "Inline <style> blocks may be stripped by email clients "
+            "(Gmail, Outlook.com). Use inline style attributes on each "
+            "element for reliable rendering."
         )
 
-    if _FULL_HTML_DOC_RE.search(body):
-        warnings.append(
-            "Full HTML document tags detected (<!DOCTYPE>, <html>, <head>, "
-            "<body>). These will be stripped \u2014 the app always adds its "
-            "own email compatibility wrappers. Just provide the body content. "
-            "Use the CLI to send a full HTML document."
-        )
-
-    body_bytes = len(body.encode("utf-8"))
+    body_bytes = len(body.encode("utf-8")) + _EMAIL_WRAPPER_BYTES
     if body_bytes > _GMAIL_CLIP_BYTES:
         size_kb = body_bytes // 1024
         warnings.append(
-            f"Large body ({size_kb} KB): Gmail clips emails over ~102 KB. "
-            "Recipients may see a truncated message."
+            f"Large body (~{size_kb} KB with email wrapper): Gmail clips "
+            "emails over ~102 KB. Recipients may see a truncated message."
         )
 
     return warnings
@@ -693,7 +700,9 @@ def create_app(
 
         html_warnings: list[str] = []
         if data.get("html"):
-            html_warnings = _validate_html_body(rendered_body)
+            html_warnings = _validate_html_body(
+                _strip_html_doc_tags(rendered_body),
+            )
 
         return jsonify({
             "subject": rendered_subject,
@@ -715,9 +724,8 @@ def create_app(
         email_column = data.get("email_column", "")
         subject = data.get("subject", "")
         body_text_val = data.get("body", "")
-        # Strip full-document tags so the app's wrapper is always applied
-        if data.get("html") and _FULL_HTML_DOC_RE.search(body_text_val):
-            body_text_val = _STRIP_DOC_RE.sub("", body_text_val).strip()
+        if data.get("html"):
+            body_text_val = _strip_html_doc_tags(body_text_val)
         test_email_addr = data.get("test_email", "")
 
         if not email_column or not subject:

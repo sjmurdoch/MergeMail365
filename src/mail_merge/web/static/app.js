@@ -855,12 +855,20 @@ function validatePlaceholders() {
 }
 
 const GMAIL_CLIP_KB = 102;
+const EMAIL_WRAPPER_KB = 1.5;
 const HTML_TAG_RE = /<[a-zA-Z][^>]*>/;
 const BLOCK_OR_BR_RE = /<(br|p|div|table|tr|td|li|ul|ol|h[1-6])\b/i;
 const STRIPPED_TAGS_RE = /<(script|iframe|form|embed|object)\b/i;
 const EXT_STYLESHEET_RE = /<link\b[^>]*rel\s*=\s*["']stylesheet["'][^>]*>/i;
 const STYLE_BLOCK_RE = /<style\b/i;
 const FULL_HTML_DOC_RE = /<html\b|<!doctype/i;
+const STRIP_DOC_RE = /<!DOCTYPE[^>]*>|<\/?html[^>]*>|<head\b[^>]*>[\s\S]*?<\/head>|<\/?body[^>]*>/gi;
+
+/** Strip full-document HTML tags; the app always adds its own wrapper. */
+function stripHtmlDocTags(body) {
+    if (!FULL_HTML_DOC_RE.test(body)) return body;
+    return body.replace(STRIP_DOC_RE, "").trim();
+}
 
 function validateHtmlBody() {
     const el = $("html-warnings");
@@ -903,26 +911,25 @@ function validateHtmlBody() {
 
     if (STYLE_BLOCK_RE.test(body)) {
         warnings.push(
-            "<strong>Embedded &lt;style&gt; blocks may be stripped.</strong> Many email clients " +
-            "(Gmail, Outlook.com) remove &lt;style&gt; tags. Use inline <code>style</code> " +
-            "attributes for reliable rendering."
+            "<strong>Inline &lt;style&gt; blocks may be stripped</strong> by email clients " +
+            "(Gmail, Outlook.com). Use inline <code>style</code> attributes on each " +
+            "element for reliable rendering."
         );
     }
 
     if (FULL_HTML_DOC_RE.test(body)) {
         warnings.push(
             "<strong>Full HTML document tags detected</strong> (&lt;!DOCTYPE&gt;, &lt;html&gt;, " +
-            "&lt;head&gt;, &lt;body&gt;). These will be stripped \u2014 the app always adds its " +
-            "own email compatibility wrappers. Just provide the body content. " +
-            "Use the CLI to send a full HTML document."
+            "&lt;head&gt;, &lt;body&gt;). These will be stripped before sending — the app " +
+            "always adds its own email compatibility wrappers. Just provide the body content."
         );
     }
 
-    const sizeKb = new Blob([body]).size / 1024;
+    const sizeKb = new Blob([body]).size / 1024 + EMAIL_WRAPPER_KB;
     if (sizeKb > GMAIL_CLIP_KB) {
         warnings.push(
-            `<strong>Large body (${Math.round(sizeKb)} KB):</strong> Gmail clips emails over ~102 KB. ` +
-            "Recipients may see a truncated message with a \"View entire message\" link."
+            `<strong>Large body (~${Math.round(sizeKb)} KB with email wrapper):</strong> Gmail clips ` +
+            "emails over ~102 KB. Recipients may see a truncated message."
         );
     }
 
@@ -1517,7 +1524,10 @@ function buildJobFormData(mode) {
     form.set("mode", mode);
     form.set("email_column", $("email-column").value);
     form.set("subject", $("subject-input").value);
-    form.set("body", $("body-input").value);
+    const isHtml = $("html-toggle").checked;
+    let body = $("body-input").value;
+    if (isHtml) body = stripHtmlDocTags(body);
+    form.set("body", body);
 
     if ($("name-column").value) form.set("name_column", $("name-column").value);
     if ($("sheet-select").value) form.set("sheet", $("sheet-select").value);
@@ -1525,7 +1535,7 @@ function buildJobFormData(mode) {
     if ($("cc-input").value) form.set("cc", $("cc-input").value);
     if ($("bcc-input").value) form.set("bcc", $("bcc-input").value);
     if ($("reply-to-input").value) form.set("reply_to", $("reply-to-input").value);
-    if ($("html-toggle").checked) form.set("html", "true");
+    if (isHtml) form.set("html", "true");
     form.set("save_to_sent_items", "true");
     if ($("filter-input").value.trim()) form.set("filters", $("filter-input").value.trim());
 
