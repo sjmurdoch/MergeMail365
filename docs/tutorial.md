@@ -675,14 +675,14 @@ The version is defined in `pyproject.toml` (`version = "X.Y.Z"`). Update it befo
 3. **Create a git tag matching the version (prefixed with `v`):**
 
    ```bash
-   git tag v0.3.0
-   git push origin v0.3.0
+   git tag v0.3.1
+   git push origin v0.3.1
    ```
 
 4. **Create a GitHub release** from the tag. This triggers the `release.yml` workflow which builds macOS and Windows bundles via PyInstaller and uploads them as release assets:
 
    ```bash
-   gh release create v0.3.0 --title "v0.3.0" --generate-notes
+   gh release create v0.3.1 --title "v0.3.1" --generate-notes
    ```
 
    Alternatively, create the release from the GitHub web UI at **Releases** > **Draft a new release**, selecting the tag you just pushed.
