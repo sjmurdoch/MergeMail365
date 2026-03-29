@@ -815,13 +815,16 @@ $("html-toggle").addEventListener("change", () => {
     onTemplateChange();
 });
 $("source-toggle").addEventListener("change", () => {
+    const toolbar = trixEditorEl && trixEditorEl.toolbarElement;
     if ($("source-toggle").checked) {
         $("html-source").value = $("trix-input").value;
         hide(trixEditorEl);
+        if (toolbar) hide(toolbar);
         show("html-source");
     } else {
         if (state.trixEditor) state.trixEditor.loadHTML($("html-source").value);
         show(trixEditorEl);
+        if (toolbar) show(toolbar);
         hide("html-source");
     }
 });
