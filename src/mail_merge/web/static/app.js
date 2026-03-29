@@ -813,7 +813,7 @@ function activateHtmlEditor() {
     $("source-toggle").checked = false;
     hide("html-source");
     if (trixEditorEl) show(trixEditorEl);
-    const toolbar = trixEditorEl && trixEditorEl.toolbarElement;
+    const toolbar = trixEditorEl?.toolbarElement;
     if (toolbar) show(toolbar);
     hide("body-input");
     show("html-editor-wrap");
@@ -852,7 +852,7 @@ $("html-toggle").addEventListener("change", () => {
     onTemplateChange();
 });
 $("source-toggle").addEventListener("change", () => {
-    const toolbar = trixEditorEl && trixEditorEl.toolbarElement;
+    const toolbar = trixEditorEl?.toolbarElement;
     if ($("source-toggle").checked) {
         $("html-source").value = $("trix-input").value;
         hide(trixEditorEl);
