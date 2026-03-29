@@ -719,11 +719,13 @@ function showPlaceholderChips(columns) {
             e.preventDefault();
             const insertion = `{{${col}}}`;
 
-            if ($("html-toggle").checked && state.trixEditor && !$("source-toggle").checked) {
+            const active = document.activeElement;
+            if ($("html-toggle").checked && state.trixEditor && !$("source-toggle").checked
+                && active !== $("subject-input")) {
                 state.trixEditor.insertString(insertion);
             } else {
                 // Insert into textarea (subject, body, or html-source)
-                let target = document.activeElement;
+                let target = active;
                 if (target !== $("subject-input") && target !== $("body-input")
                     && target !== $("html-source")) {
                     target = $("html-toggle").checked ? $("html-source") : $("body-input");

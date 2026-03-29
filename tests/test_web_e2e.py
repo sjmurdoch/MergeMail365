@@ -239,6 +239,36 @@ class TestComposeStep:
         body_val = page.locator("#body-input").input_value()
         assert "{{" in body_val
 
+    def test_placeholder_chip_inserts_into_subject_when_focused(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.click("#subject-input")
+        page.click(".chip >> nth=0")
+        subject_val = page.locator("#subject-input").input_value()
+        assert "{{" in subject_val
+        # Body should remain empty
+        body_val = page.locator("#body-input").input_value()
+        assert "{{" not in body_val
+
+    def test_placeholder_chip_inserts_into_subject_in_html_mode(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        """Chip click targets subject even when Trix HTML editor is active."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        # Wait for Trix to initialise
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        page.click("#subject-input")
+        page.click(".chip >> nth=0")
+        subject_val = page.locator("#subject-input").input_value()
+        assert "{{" in subject_val
+        # Trix body should remain empty
+        trix_html = page.evaluate("() => state.trixEditor.getDocument().toString().trim()")
+        assert "{{" not in trix_html
+
     def test_blocks_next_without_subject(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
         _upload_and_go_to_compose(page, sample_xlsx)
