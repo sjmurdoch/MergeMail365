@@ -32,7 +32,9 @@
       "Bash(curl:*)",
       "Bash(brew install:*)",
       "Bash(biome:*)",
-      "Bash(wait:*)"
+      "Bash(wait:*)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:codepen.io)"
     ]
   },
   "sandbox": {

@@ -406,6 +406,11 @@ trix-editor {
     color: #1a1a1a;
 }
 
+/* Match email wrapper paragraph spacing */
+trix-editor p {
+    margin: 0 0 0.75em 0;
+}
+
 /* Hide toolbar buttons not needed for email composition */
 .trix-button--icon-strike,
 .trix-button--icon-code,
