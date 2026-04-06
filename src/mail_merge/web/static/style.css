@@ -415,7 +415,7 @@ trix-editor p {
 .trix-button--icon-strike,
 .trix-button--icon-code,
 .trix-button-group--file-tools {
-    display: none;
+    display: none !important;
 }
 
 /* Hidden */
