@@ -306,6 +306,35 @@ class TestComposeStep:
         trix_html = page.evaluate("() => state.trixEditor.getDocument().toString().trim()")
         assert "{{" not in trix_html
 
+    def test_filter_chips_appear(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.click("summary >> text=Additional options")
+        expect(page.locator("#filter-chips")).not_to_have_class(re.compile("hidden"))
+        chips = page.locator("#filter-chips-container .chip")
+        assert chips.count() >= 3  # name, email, company
+
+    def test_filter_chip_inserts_column_name(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.click("summary >> text=Additional options")
+        page.click("#filter-input")
+        page.click("#filter-chips-container .chip >> nth=0")
+        val = page.locator("#filter-input").input_value()
+        assert "=" in val
+        assert "{{" not in val
+
+    def test_filter_chip_newline_handling(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.click("summary >> text=Additional options")
+        page.fill("#filter-input", "company=Acme")
+        page.click("#filter-chips-container .chip >> nth=0")
+        val = page.locator("#filter-input").input_value()
+        assert "\n" in val
+        lines = val.strip().split("\n")
+        assert len(lines) == 2
+
     def test_trix_uses_p_tags(self, authenticated_page: Page, sample_xlsx: Path):
         """Trix should produce <p> tags, not <div>, for paragraphs."""
         page = authenticated_page

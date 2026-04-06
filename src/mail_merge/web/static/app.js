@@ -368,6 +368,8 @@ async function loadConfig() {
             populateSheetSelect(s.sheets);
             if (s.active_sheet) $("sheet-select").value = s.active_sheet;
             buildPreviewTable(s.columns, s.rows, s.total_rows);
+            showPlaceholderChips(s.columns);
+            showFilterChips(s.columns);
 
             // Restore saved sheet selection — if it differs from the
             // server's active sheet, re-fetch the preview for that sheet.
@@ -640,6 +642,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
 
         // Build preview table on step 1
         buildPreviewTable(data.columns, data.rows, data.total_rows);
+        showFilterChips(data.columns);
     } catch (e) {
         alert(`Upload error: ${e.message}`);
     }
@@ -664,6 +667,7 @@ $("sheet-select").addEventListener("change", async () => {
         state.spreadsheetData = data;
         renderSpreadsheetSummary(data);
         buildPreviewTable(data.columns, data.rows, data.total_rows);
+        showFilterChips(data.columns);
         try { localStorage.setItem("mm_sheet", sheet); } catch (_e) { /* ignore */ }
     } catch (e) {
         alert(`Error changing sheet: ${e.message}`);
@@ -753,6 +757,50 @@ function showPlaceholderChips(columns) {
         container.appendChild(chip);
     }
 }
+
+function showFilterChips(columns) {
+    show("filter-chips");
+    const container = $("filter-chips-container");
+    container.innerHTML = "";
+    for (const col of columns) {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = col;
+        chip.dataset.col = col;
+        container.appendChild(chip);
+    }
+}
+
+$("filter-chips-container").addEventListener("mousedown", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    e.preventDefault();
+    const col = chip.dataset.col;
+    const target = $("filter-input");
+    const text = target.value;
+    const insertion = `${col}=`;
+
+    // Prepend newline if there is existing content not ending with a newline
+    const prefix = text.trimEnd().length > 0 && !text.endsWith("\n") ? "\n" : "";
+
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    // When cursor is at the end (or textarea has no focus), append with newline logic
+    const atEnd = start === text.length;
+    if (atEnd) {
+        target.value = text + prefix + insertion;
+    } else {
+        target.value = text.substring(0, start) + insertion + text.substring(end);
+    }
+    target.focus();
+    const newPos = target.value.length;
+    if (atEnd) {
+        target.setSelectionRange(newPos, newPos);
+    } else {
+        const pos = start + insertion.length;
+        target.setSelectionRange(pos, pos);
+    }
+});
 
 // ---------------------------------------------------------------------------
 // Trix HTML editor — sits outside .pico in the DOM for CSS isolation
@@ -1450,6 +1498,7 @@ function newMerge() {
     show("body-input");
     hide("html-editor-wrap");
     hide("placeholder-chips");
+    hide("filter-chips");
     hide("placeholder-errors");
     hide("html-warnings");
 

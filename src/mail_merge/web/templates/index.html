@@ -204,6 +204,10 @@
                     <div>
                         <label for="filter-input">Filters <small>(one per line: column=value or column!=value)</small></label>
                         <textarea id="filter-input" rows="2" placeholder="company=Acme"></textarea>
+                        <div id="filter-chips" class="hidden">
+                            <small>Insert column name (click to add):</small>
+                            <div class="chip-container" id="filter-chips-container"></div>
+                        </div>
                     </div>
                 </div>
             </details>
