@@ -144,12 +144,20 @@ def authenticated_page(page: Page, live_server: str) -> Page:
     return page
 
 
+def _assert_dom_valid(page: Page) -> None:
+    """Run client-side validateDOM() and fail if any issues are found."""
+    errors = page.evaluate("validateDOM()")
+    assert errors == [], f"DOM validation errors: {errors}"
+
+
 def _upload_and_go_to_compose(page: Page, xlsx_path: Path) -> None:
     """Upload spreadsheet on step 1, advance to step 2 (Compose)."""
     page.set_input_files("#spreadsheet-file", str(xlsx_path))
     page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+    _assert_dom_valid(page)
     page.click("#btn-next-1")
     page.wait_for_selector("#step-2.active", timeout=5000)
+    _assert_dom_valid(page)
 
 
 def _setup_to_preview(page: Page, xlsx_path: Path) -> None:
@@ -159,6 +167,7 @@ def _setup_to_preview(page: Page, xlsx_path: Path) -> None:
     page.fill("#body-input", "Welcome to {{company}}, {{name}}!")
     page.click("#btn-next-2")
     page.wait_for_selector("#step-3.active", timeout=5000)
+    _assert_dom_valid(page)
 
 
 # ---------------------------------------------------------------------------

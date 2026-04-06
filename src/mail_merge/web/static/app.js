@@ -1777,3 +1777,80 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     } catch (_e) { /* ignore */ }
 });
+
+// ---------------------------------------------------------------------------
+// DOM validation — checks the live DOM for HTML spec violations
+// ---------------------------------------------------------------------------
+
+// Elements whose content model forbids block/flow children.
+const INLINE_ONLY = new Set(["p", "span", "a", "label", "em", "strong", "small", "b", "i", "u"]);
+const BLOCK_TAGS = new Set([
+    "div", "p", "section", "article", "aside", "nav", "header", "footer",
+    "main", "figure", "figcaption", "blockquote", "pre", "ol", "ul", "li",
+    "dl", "dt", "dd", "table", "form", "fieldset", "details", "summary", "h1",
+    "h2", "h3", "h4", "h5", "h6", "hr",
+]);
+const INTERACTIVE = new Set(["a", "button", "details", "select", "textarea"]);
+
+function validateDOM() {
+    const errors = [];
+
+    // 1. Duplicate IDs
+    const ids = {};
+    for (const el of document.querySelectorAll("[id]")) {
+        const id = el.id;
+        if (ids[id]) errors.push(`Duplicate id="${id}"`);
+        else ids[id] = true;
+    }
+
+    // 2. Block elements inside inline-only parents
+    for (const tag of INLINE_ONLY) {
+        for (const parent of document.querySelectorAll(tag)) {
+            for (const child of parent.children) {
+                if (BLOCK_TAGS.has(child.tagName.toLowerCase())) {
+                    errors.push(
+                        `<${child.tagName.toLowerCase()}> inside <${tag}>` +
+                        (parent.id ? ` (#${parent.id})` : "")
+                    );
+                }
+            }
+        }
+    }
+
+    // 3. Interactive elements nested inside <a> or <button>
+    for (const tag of ["a", "button"]) {
+        for (const parent of document.querySelectorAll(tag)) {
+            for (const innerTag of INTERACTIVE) {
+                for (const child of parent.querySelectorAll(innerTag)) {
+                    if (child !== parent) {
+                        errors.push(
+                            `<${innerTag}> nested inside <${tag}>` +
+                            (parent.id ? ` (#${parent.id})` : "")
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Images missing alt attribute
+    for (const img of document.querySelectorAll("img:not([alt])")) {
+        errors.push(`<img> missing alt attribute (src="${img.src.slice(-40)}")`);
+    }
+
+    // 5. Labels with for= pointing to non-existent IDs
+    for (const label of document.querySelectorAll("label[for]")) {
+        if (!document.getElementById(label.htmlFor)) {
+            errors.push(`<label for="${label.htmlFor}"> targets non-existent id`);
+        }
+    }
+
+    if (errors.length === 0) {
+        console.log("validateDOM: no issues found");
+    } else {
+        console.warn(`validateDOM: ${errors.length} issue(s) found`);
+        for (const e of errors) console.warn("  •", e);
+    }
+    return errors;
+}
+window.validateDOM = validateDOM;
