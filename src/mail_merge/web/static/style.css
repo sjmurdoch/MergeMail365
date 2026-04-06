@@ -27,6 +27,11 @@
     font-weight: 700;
 }
 
+/* Remove gap between Message fieldset and the HTML toggle below */
+#step-2 .pico:first-child fieldset:last-child {
+    margin-bottom: 0;
+}
+
 /* Hide placeholder on focus */
 .pico input:focus::placeholder,
 .pico textarea:focus::placeholder {

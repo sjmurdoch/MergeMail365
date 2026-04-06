@@ -160,19 +160,20 @@
                 <input type="checkbox" id="html-toggle"> Send as HTML
             </label>
 
-            <section>
+            <article>
             <div id="placeholder-chips" class="hidden">
                 <small>Available placeholders (click to insert):</small>
                 <div class="chip-container" id="chips"></div>
             </div>
             <div id="placeholder-errors" class="hidden callout callout-danger"></div>
             <div id="html-warnings" class="hidden callout callout-warning"></div>
-            </section>
+            </article>
 
             <section>
             <!-- Options (collapsible) -->
             <details>
                 <summary role="button">Additional options</summary>
+                <article>
                 <div class="grid">
                     <div>
                         <label for="cc-input">CC</label>
@@ -200,15 +201,16 @@
                 </div>
                 <label for="attachment-input">Attachments</label>
                 <input type="file" id="attachment-input" multiple>
+                </article>
                 <div class="grid">
-                    <div>
+                    <article>
                         <label for="filter-input">Filters <small>(one per line: column=value or column!=value)</small></label>
                         <textarea id="filter-input" rows="2" placeholder="company=Acme"></textarea>
                         <div id="filter-chips" class="hidden">
                             <small>Insert column name (click to add):</small>
                             <div class="chip-container" id="filter-chips-container"></div>
                         </div>
-                    </div>
+                    </article>
                 </div>
             </details>
             </section>
