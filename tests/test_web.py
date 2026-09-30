@@ -121,6 +121,98 @@ class TestAccessControl:
         assert resp.status_code == 403
 
 
+@pytest.fixture(params=[False, True], ids=["browser", "desktop"])
+def any_mode_app(request):
+    """App in browser or desktop mode — access control must be identical."""
+    application = create_app(
+        startup_token="test-token-abc", port=5050, desktop_mode=request.param
+    )
+    application.config["TESTING"] = True
+    return application
+
+
+class TestAccessControlBothModes:
+    """Both modes serve over a localhost port, so both need the same checks."""
+
+    def test_requires_startup_token(self, any_mode_app):
+        c = any_mode_app.test_client()
+        assert c.get("/").status_code == 403
+        assert c.get("/api/config").status_code == 403
+
+    def test_post_without_session_rejected(self, any_mode_app):
+        c = any_mode_app.test_client()
+        resp = c.post("/api/state", json={"current_step": 2})
+        assert resp.status_code == 403
+
+    def test_empty_startup_token_never_authenticates(self, any_mode_app):
+        mode = any_mode_app.config["DESKTOP_MODE"]
+        application = create_app(port=5050, desktop_mode=mode)
+        c = application.test_client()
+        c.get("/?token=")
+        assert c.get("/").status_code == 403
+
+    def test_startup_token_grants_access(self, any_mode_app):
+        c = any_mode_app.test_client()
+        resp = c.get("/?token=test-token-abc", follow_redirects=False)
+        assert resp.status_code == 302
+        assert c.get("/").status_code == 200
+
+    def test_post_without_csrf_rejected(self, any_mode_app):
+        c = any_mode_app.test_client()
+        c.get("/?token=test-token-abc")
+        resp = c.post("/api/state", json={"current_step": 2})
+        assert resp.status_code == 403
+
+    def test_post_with_csrf_accepted(self, any_mode_app):
+        c = any_mode_app.test_client()
+        c.get("/?token=test-token-abc")
+        csrf = get_csrf(c)
+        resp = c.post("/api/state", json={"current_step": 2},
+                      headers={"X-CSRF-Token": csrf})
+        assert resp.status_code == 200
+
+    @pytest.mark.parametrize("url", [
+        "http://localhost:5050",
+        "http://127.0.0.1:5050",
+        "http://[::1]:5050",
+        "http://LOCALHOST:5050",
+    ])
+    def test_loopback_host_header_accepted(self, any_mode_app, url):
+        c = any_mode_app.test_client()
+        resp = c.get("/?token=test-token-abc", base_url=url)
+        assert resp.status_code == 302
+
+    @pytest.mark.parametrize("url", [
+        "http://evil.example:5050",
+        "http://evil.example",
+        "http://localhost.evil.example:5050",
+        "http://127.0.0.1.evil.example:5050",
+    ])
+    def test_foreign_host_header_rejected(self, any_mode_app, url):
+        """DNS rebinding: a page on evil.example resolved to 127.0.0.1."""
+        c = any_mode_app.test_client()
+        resp = c.get("/?token=test-token-abc", base_url=url)
+        assert resp.status_code == 403
+        # Even an already-authenticated session is refused on a foreign host
+        c.get("/?token=test-token-abc")
+        assert c.get("/", base_url=url).status_code == 403
+        assert c.get("/static/app.js", base_url=url).status_code == 403
+
+    def test_custom_bind_host_accepted(self):
+        application = create_app(startup_token="t", port=5050, host="myhost.lan")
+        c = application.test_client()
+        assert c.get("/?token=t", base_url="http://myhost.lan:5050").status_code == 302
+        assert c.get("/?token=t", base_url="http://localhost:5050").status_code == 302
+        assert c.get("/?token=t", base_url="http://evil.example").status_code == 403
+
+    @pytest.mark.parametrize("wildcard", ["0.0.0.0", "::"])
+    def test_wildcard_bind_host_skips_host_check(self, wildcard):
+        """Bound to all interfaces, the Host could be any of the machine's names."""
+        application = create_app(startup_token="t", port=5050, host=wildcard)
+        c = application.test_client()
+        assert c.get("/?token=t", base_url="http://192.0.2.7:5050").status_code == 302
+
+
 # ---- Config ----
 
 class TestConfig:
@@ -1294,17 +1386,18 @@ class TestDesktopMode:
     @pytest.fixture
     def desktop_app(self):
         """Create a Flask app in desktop mode."""
-        application = create_app(desktop_mode=True)
+        application = create_app(
+            startup_token="test-token-abc", port=5050, desktop_mode=True
+        )
         application.config["TESTING"] = True
         return application
 
     @pytest.fixture
     def desktop_client(self, desktop_app):
-        """Flask test client auto-authenticated in desktop mode."""
+        """Flask test client authenticated with the startup token."""
         c = desktop_app.test_client()
-        # Desktop mode auto-authenticates on first request
-        resp = c.get("/")
-        assert resp.status_code == 200
+        resp = c.get("/?token=test-token-abc", follow_redirects=False)
+        assert resp.status_code == 302
         return c
 
     def test_auth_interactive_returns_400_in_browser_mode(self, web_client):
@@ -1325,10 +1418,10 @@ class TestDesktopMode:
         with desktop_client.session_transaction() as sess:
             sess["client_id"] = "test-client"
             sess["tenant_id"] = "common"
-        # Desktop mode skips CSRF — no X-CSRF-Token header needed
         resp = desktop_client.post(
             "/auth/interactive",
             json={"client_id": "test-client", "tenant_id": "common"},
+            headers={"X-CSRF-Token": get_csrf(desktop_client)},
         )
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "started"

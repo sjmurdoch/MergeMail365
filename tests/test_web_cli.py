@@ -101,27 +101,70 @@ class TestDesktopMode:
         monkeypatch.setitem(sys.modules, "webview", fake)
         return fake
 
-    def test_desktop_opens_native_window_with_flask_app(self, fake_webview):
+    @pytest.fixture
+    def fake_server(self):
+        """Stand-in for the werkzeug server desktop mode runs in a thread."""
+        with patch("werkzeug.serving.make_server") as make_server, \
+             patch("mail_merge.web._find_open_port", return_value=5057):
+            yield make_server
+
+    def test_desktop_opens_native_window_at_token_url(self, fake_webview, fake_server):
         from flask import Flask
 
         with patch("threading.Timer") as timer:
             main(["--desktop", "--client-id", "cid", "--tenant-id", "tid"])
 
+        fake_server.assert_called_once()
+        host, port, app = fake_server.call_args.args[:3]
+        assert (host, port) == ("localhost", 5057)
+        assert isinstance(app, Flask)
+        assert app.config["DESKTOP_MODE"] is True
+        assert app.config["FIXED_CLIENT_ID"] == "cid"
+        fake_server.return_value.serve_forever.assert_called_once()
+
         fake_webview.create_window.assert_called_once()
         args, kwargs = fake_webview.create_window.call_args
         assert args[0] == "MergeMail365"
-        assert isinstance(args[1], Flask)
-        assert args[1].config["DESKTOP_MODE"] is True
+        token = app.config["STARTUP_TOKEN"]
+        assert len(token) >= 32
+        assert args[1] == f"http://localhost:5057/?token={token}"
         assert kwargs == {"width": 1100, "height": 800}
         fake_webview.start.assert_called_once_with()
         timer.assert_not_called()  # no system browser launch in desktop mode
 
-    def test_create_window_accepts_wsgi_app_as_url(self):
-        """We pass the Flask app as ``url``; pywebview must still document that."""
+    def test_desktop_app_enforces_token_and_csrf(self, fake_webview, fake_server):
+        """The app handed to the server must not auto-authenticate."""
+        with patch("threading.Timer"):
+            main(["--desktop"])
+        app = fake_server.call_args.args[2]
+        c = app.test_client()
+        assert c.get("/").status_code == 403
+        assert c.get("/", base_url="http://evil.example:5057").status_code == 403
+        c.get("/?token=" + app.config["STARTUP_TOKEN"])
+        assert c.get("/").status_code == 200
+        assert c.post("/api/state", json={}).status_code == 403
+
+    def test_desktop_and_browser_build_the_app_the_same_way(self, fake_webview, fake_server):
+        calls = {}
+        for mode, argv in (("browser", []), ("desktop", ["--desktop"])):
+            with patch("mail_merge.web.app.create_app") as mock_create, \
+                 patch("threading.Timer"):
+                main(argv + ["--host", "127.0.0.1"])
+            kwargs = dict(mock_create.call_args.kwargs)
+            assert kwargs.pop("desktop_mode", False) is (mode == "desktop")
+            assert kwargs["startup_token"]
+            kwargs.pop("startup_token")
+            calls[mode] = kwargs
+        assert calls["browser"] == calls["desktop"]
+        assert calls["desktop"]["host"] == "127.0.0.1"
+        assert calls["desktop"]["port"] == 5057
+
+    def test_create_window_accepts_url_string(self):
+        """We pass a URL string as ``url``; pywebview must still accept that."""
         webview = pytest.importorskip("webview")
         params = inspect.signature(webview.create_window).parameters
         assert list(params)[:2] == ["title", "url"]
-        assert "callable" in str(params["url"].annotation)
+        assert "str" in str(params["url"].annotation)
         assert {"width", "height"} <= params.keys()
 
     def test_bundled_app_without_webview_falls_back_to_browser(self, monkeypatch):
@@ -150,3 +193,12 @@ class TestDesktopMode:
         with pytest.raises(SystemExit) as exc:
             main(["--desktop"])
         assert exc.value.code == 1
+
+
+def test_browser_mode_passes_bind_host_to_app():
+    """The Host-header allowlist needs to know which host we bound to."""
+    with patch("mail_merge.web.app.create_app") as mock_create, \
+         patch("mail_merge.web._find_open_port", return_value=5050), \
+         patch("threading.Timer"):
+        main(["--host", "myhost.lan"])
+    assert mock_create.call_args.kwargs["host"] == "myhost.lan"

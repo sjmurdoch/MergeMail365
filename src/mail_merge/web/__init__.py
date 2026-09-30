@@ -62,38 +62,42 @@ def main(argv: list[str] | None = None) -> None:
 
     from mail_merge.web.app import create_app
 
+    # Both modes serve the app on a localhost port and open it at the same
+    # token URL; only what opens that URL differs.
+    port = _find_open_port(args.port)
+    if port != args.port:
+        logger.info("Port %d in use, using %d instead", args.port, port)
+
+    startup_token = secrets.token_urlsafe(32)
+    app = create_app(
+        startup_token=startup_token,
+        port=port,
+        client_id=args.client_id,
+        tenant_id=args.tenant_id,
+        desktop_mode=desktop,
+        host=args.host,
+    )
+
+    url = f"http://{args.host}:{port}/?token={startup_token}"
+    logger.info("Starting MergeMail365 web UI on http://%s:%d", args.host, port)
+
     if desktop:
-        # Pass the Flask app directly to pywebview — no localhost listener,
-        # so no CSRF risk.  Auth happens via the system browser
-        # (acquire_token_interactive_flow), not via OAuth redirect callbacks.
-        app = create_app(
-            client_id=args.client_id,
-            tenant_id=args.tenant_id,
-            desktop_mode=True,
-        )
-        webview.create_window("MergeMail365", app, width=1100, height=800)
+        # Serve the app ourselves rather than handing it to pywebview, whose
+        # own server would open the window without the startup token.
+        # Auth happens via the system browser (acquire_token_interactive_flow),
+        # not via OAuth redirect callbacks.
+        from werkzeug.serving import make_server
+
+        server = make_server(args.host, port, app, threaded=True)
+        threading.Thread(target=server.serve_forever, name="http-server", daemon=True).start()
+        webview.create_window("MergeMail365", url, width=1100, height=800)
         webview.start()
     else:
-        port = _find_open_port(args.port)
-        if port != args.port:
-            logger.info("Port %d in use, using %d instead", args.port, port)
-
-        startup_token = secrets.token_urlsafe(32)
-        app = create_app(
-            startup_token=startup_token,
-            port=port,
-            client_id=args.client_id,
-            tenant_id=args.tenant_id,
-        )
-
-        url = f"http://{args.host}:{port}/?token={startup_token}"
-        logger.info("Starting MergeMail365 web UI on http://%s:%d", args.host, port)
         logger.info("Access URL: %s", url)
 
         # Open browser after a short delay
         threading.Timer(1.0, webbrowser.open, args=[url]).start()
         app.run(host=args.host, port=port, debug=False)
-
 
 if __name__ == "__main__":
     main()

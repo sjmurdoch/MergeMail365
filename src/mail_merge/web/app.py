@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import werkzeug
 werkzeug.serving._log_add_style = False
@@ -253,6 +254,27 @@ def _validated_recipient_count(
 # App factory
 # ---------------------------------------------------------------------------
 
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+_WILDCARD_HOSTS = frozenset({"", "0.0.0.0", "::"})
+
+
+def _allowed_hostnames(bind_host: str) -> frozenset[str] | None:
+    """Hostnames the Host header may name, or None to allow any.
+
+    Rejecting other names blocks DNS rebinding, where a web page on an
+    attacker's domain re-resolves it to 127.0.0.1 to reach this server.
+    A wildcard bind can be reached under any of the machine's names, so
+    the check is skipped there and the startup token is the only guard.
+    """
+    if bind_host in _WILDCARD_HOSTS:
+        return None
+    return _LOOPBACK_HOSTNAMES | {bind_host.strip("[]").lower()}
+
+
+def _request_hostname() -> str:
+    return (urlsplit("//" + request.host).hostname or "").lower()
+
+
 
 def create_app(
     startup_token: str = "",
@@ -260,6 +282,7 @@ def create_app(
     client_id: str = "",
     tenant_id: str = "",
     desktop_mode: bool = False,
+    host: str = "localhost",
 ) -> Flask:
     app = Flask(
         __name__,
@@ -280,17 +303,24 @@ def create_app(
     app.config["DESKTOP_MODE"] = desktop_mode
 
     # ----- Auth middleware -----
+    # Desktop mode is served over a localhost port too (the native window
+    # opens the same token URL a browser would), so both modes share these
+    # checks.
+
+    allowed_hostnames = _allowed_hostnames(host)
+
+    @app.before_request
+    def _check_host() -> Response | None:
+        if allowed_hostnames is None or _request_hostname() in allowed_hostnames:
+            return None
+        return Response(
+            "Forbidden -- unexpected Host header.\n",
+            status=403,
+            content_type="text/plain; charset=utf-8",
+        )
 
     @app.before_request
     def _check_auth() -> Any:
-        # Desktop mode: native window is the access control — no localhost
-        # listener, so auto-authenticate without a startup token.
-        if desktop_mode:
-            if not session.get("authenticated"):
-                session["authenticated"] = True
-                session.permanent = True
-            return None
-
         # Allow static files and auth routes without session auth
         if request.endpoint == "static":
             return None
@@ -327,9 +357,6 @@ def create_app(
 
     @app.before_request
     def _check_csrf() -> Response | None:
-        # Desktop mode has no localhost listener — CSRF is not possible.
-        if desktop_mode:
-            return None
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return None
         if request.endpoint in ("auth_login", "auth_callback"):
