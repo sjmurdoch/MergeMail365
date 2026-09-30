@@ -1,20 +1,18 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
-  "files": {
-    "includes": ["src/mail_merge/web/static/app.js"]
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "recommended": true
-    }
-  },
-  "formatter": {
-    "enabled": false
-  },
-  "javascript": {
-    "globals": [
-      "CSRF_TOKEN"
-    ]
-  }
+	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+	"files": {
+		"includes": ["src/mail_merge/web/static/app.js"]
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended"
+		}
+	},
+	"formatter": {
+		"enabled": false
+	},
+	"javascript": {
+		"globals": ["CSRF_TOKEN"]
+	}
 }
