@@ -88,7 +88,7 @@ Raise the supported floor from 3.10 to 3.14, the newest stable release (3.15 is 
 
 1. ✅ `requires-python = ">=3.14"`, drop the `tomli` dependency and its `sys.version_info` fallback in `config.py`, mypy `python_version = "3.14"`, re-lock.
 2. ✅ Drop `from __future__ import annotations` (annotations are lazily evaluated by default since 3.14, PEP 649/749).
-3. ⏳ CI test matrix → 3.14 only; update `CLAUDE.md` and `docs/tutorial.md`.
+3. ✅ CI test matrix → 3.14 only; update `CLAUDE.md` and `docs/tutorial.md`.
 
 ## Other findings
 

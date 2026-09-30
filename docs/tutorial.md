@@ -4,7 +4,7 @@ This tutorial walks you through setting up MergeMail365 and sending your first b
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - An Azure AD app registration with **Mail.Send** delegated permission
 - A Microsoft 365 account that can send email
