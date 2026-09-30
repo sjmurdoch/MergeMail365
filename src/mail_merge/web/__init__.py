@@ -42,6 +42,10 @@ def main(argv: list[str] | None = None) -> None:
 
     from mail_merge.console import maybe_enable_file_logging
     is_bundled = maybe_enable_file_logging(args.log_file)
+    if is_bundled or args.log_file:
+        from mail_merge._paths import log_dir
+        from mail_merge.diagnostics import start_diagnostics
+        start_diagnostics(log_dir())
 
     desktop = args.desktop or is_bundled
 

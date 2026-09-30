@@ -7,6 +7,14 @@ import pytest
 
 from mail_merge.web import main
 
+
+@pytest.fixture(autouse=True)
+def fake_diagnostics():
+    """Don't start a real stall watchdog (it writes to the user's log dir)."""
+    with patch("mail_merge.diagnostics.start_diagnostics") as start:
+        yield start
+
+
 def test_web_host_default_is_localhost():
     """Verify that the web interface defaults to 'localhost' for session consistency."""
     # We mock create_app and app.run to avoid actually starting a server
@@ -43,6 +51,25 @@ def test_log_file_flag_enables_file_logging(tmp_path):
                 with patch("mail_merge.console.setup_file_logging", return_value=tmp_path / "test.log") as mock_file_log:
                     main(["--log-file"])
                     mock_file_log.assert_called_once()
+
+def test_log_file_flag_starts_diagnostics(fake_diagnostics):
+    """--log-file also starts the stall watchdog, dumping into the log dir."""
+    with patch("mail_merge.web.app.create_app"), \
+         patch("mail_merge.web._find_open_port", return_value=5050), \
+         patch("threading.Timer"), \
+         patch("mail_merge.console.setup_file_logging", return_value=None), \
+         patch("mail_merge._paths.log_dir", return_value="LOGDIR"):
+        main(["--log-file"])
+    fake_diagnostics.assert_called_once_with("LOGDIR")
+
+
+def test_no_diagnostics_without_file_logging(fake_diagnostics):
+    with patch("mail_merge.web.app.create_app"), \
+         patch("mail_merge.web._find_open_port", return_value=5050), \
+         patch("threading.Timer"):
+        main([])
+    fake_diagnostics.assert_not_called()
+
 
 def test_debug_level_does_not_enable_file_logging(tmp_path):
     """--log-level DEBUG alone does NOT trigger setup_file_logging."""
@@ -107,6 +134,16 @@ class TestDesktopMode:
             main([])
         assert mock_create.call_args.kwargs.get("desktop_mode") in (None, False)
         mock_create.return_value.run.assert_called_once()
+
+    def test_bundled_app_starts_diagnostics(self, monkeypatch, fake_diagnostics):
+        monkeypatch.setitem(sys.modules, "webview", None)
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        with patch("mail_merge.web.app.create_app"), \
+             patch("mail_merge.web._find_open_port", return_value=5050), \
+             patch("mail_merge.console.setup_file_logging", return_value=None), \
+             patch("threading.Timer"):
+            main([])
+        fake_diagnostics.assert_called_once()
 
     def test_desktop_without_webview_exits(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "webview", None)

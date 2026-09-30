@@ -571,6 +571,10 @@ The web UI exposes `GET /api/log-path` which returns the log file path and wheth
 
 When the web UI encounters an error (e.g. a corrupt spreadsheet, invalid column name, or send failure), the error message is shown in the browser. The full Python stack trace is logged at DEBUG level in the log file for troubleshooting. This applies to all API error paths: spreadsheet upload, recipient validation, job startup, and background send failures.
 
+Each line in the log file names the thread that wrote it (for example `[MainThread]` or `[job-1a2b3c4d]` for a send job), and when file logging is on the web UI records the Python, operating system and key package versions at startup.
+
+**Freeze diagnostics (web UI):** when file logging is on, `mergemail365-web` also runs a watchdog thread that checks in every second. If it is held up for 10 seconds or more, a warning such as `The app was unresponsive for 165 seconds` is logged. If a freeze lasts 30 seconds or more, the stack of every thread is written to `mergemail365-stalls.log` in the same directory as the log file. That file is only written during a freeze and is not rotated. When reporting a hang, send both files.
+
 ## 11. Python API
 
 If you want to call MergeMail365 from Python code instead of the command line, use the `send_merge()` function. It mirrors the CLI flags and returns a list of `SendResult` objects.

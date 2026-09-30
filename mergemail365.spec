@@ -16,6 +16,8 @@ config file as usual).
 import os
 import sys
 
+from PyInstaller.utils.hooks import copy_metadata
+
 block_cipher = None
 
 # Optional: hard-code Azure AD credentials into the standalone app.
@@ -26,6 +28,15 @@ FIXED_TENANT_ID = os.environ.get("MERGEMAIL365_TENANT_ID", "")
 # Locate source files
 src_dir = os.path.join("src", "mail_merge")
 web_dir = os.path.join(src_dir, "web")
+
+# Package metadata, so the log can record which versions are bundled
+# (mail_merge.diagnostics.log_environment).  pythonnet is Windows-only.
+_metadata = []
+for _dist in ("mergemail365", "pywebview", "pythonnet", "msal", "requests"):
+    try:
+        _metadata += copy_metadata(_dist)
+    except Exception:
+        pass
 
 # Write a runtime hook that injects the hard-coded values as CLI arguments.
 # PyInstaller runtime hooks run before the main script.
@@ -49,6 +60,7 @@ a = Analysis(
     datas=[
         (os.path.join(web_dir, "templates"), os.path.join("mail_merge", "web", "templates")),
         (os.path.join(web_dir, "static"), os.path.join("mail_merge", "web", "static")),
+        *_metadata,
     ],
     hiddenimports=[
         "mail_merge",
@@ -58,6 +70,7 @@ a = Analysis(
         "mail_merge.auth",
         "mail_merge.config",
         "mail_merge.console",
+        "mail_merge.diagnostics",
         "mail_merge.excel",
         "mail_merge.report",
         "mail_merge.sender",
