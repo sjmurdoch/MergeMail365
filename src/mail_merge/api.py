@@ -508,6 +508,8 @@ def send_merge(
         confirm = False
 
     if confirm:
+        from rich.markup import escape
+
         from mail_merge.console import console
 
         console.print()
@@ -516,23 +518,23 @@ def send_merge(
             reserved = 1 + len(msg_opts.cc or []) + len(msg_opts.bcc or [])
             max_per_batch = max(1, MAX_RECIPIENTS_PER_MESSAGE - reserved)
             blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
-            console.print(f"[bold]Subject:[/bold]  {subject}")
-            console.print(f"[bold]To:[/bold]       {blast_to.address}")
+            console.print(f"[bold]Subject:[/bold]  {escape(subject)}")
+            console.print(f"[bold]To:[/bold]       {escape(blast_to.address)}")
             console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
         else:
             sample = recipients[0]
-            console.print(f"[bold]Subject:[/bold]  {render(subject, sample)}")
+            console.print(f"[bold]Subject:[/bold]  {escape(render(subject, sample))}")
             console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
         if msg_opts.cc:
-            console.print(f"[bold]CC:[/bold]       {_format_addrs(msg_opts.cc)}")
+            console.print(f"[bold]CC:[/bold]       {escape(_format_addrs(msg_opts.cc))}")
         if not bcc_blast and msg_opts.bcc:
-            console.print(f"[bold]BCC:[/bold]      {_format_addrs(msg_opts.bcc)}")
+            console.print(f"[bold]BCC:[/bold]      {escape(_format_addrs(msg_opts.bcc))}")
         if attachment:
             names = [Path(a).name for a in attachment]
-            console.print(f"[bold]Attach:[/bold]   {', '.join(names)}")
+            console.print(f"[bold]Attach:[/bold]   {escape(', '.join(names))}")
         console.print()
         try:
-            answer = console.input("[bold]Send? [y/N][/bold] ")
+            answer = console.input(r"[bold]Send? \[y/N][/bold] ")
         except EOFError:
             answer = ""
         if answer.lower() not in ("y", "yes"):

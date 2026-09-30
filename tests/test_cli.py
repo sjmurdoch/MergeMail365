@@ -1,6 +1,7 @@
 import json
 from unittest.mock import patch
 
+import pytest
 import responses
 
 from mail_merge.cli import main, parse_args
@@ -496,6 +497,70 @@ class TestConfirm:
         ])
         assert exit_code == 0
         assert len(responses.calls) == 2  # 2 recipients
+
+    @pytest.fixture
+    def captured_console(self, monkeypatch):
+        """Replace the shared rich console with one that records output and declines.
+
+        Stubs builtins.input rather than console.input so the prompt itself
+        is rendered by rich into the captured output.
+        """
+        import io
+
+        from rich.console import Console
+
+        console = Console(file=io.StringIO(), width=200, color_system=None)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+        monkeypatch.setattr("mail_merge.console.console", console)
+        return console
+
+    def _run_send(self, sample_xlsx, body_template_file, *extra):
+        return main([
+            "--spreadsheet", str(sample_xlsx),
+            "--body", str(body_template_file),
+            "--email-column", "email",
+            "--client-id", "fake-client-id",
+            "--send",
+            *extra,
+        ])
+
+    def test_summary_shows_rendered_subject_and_counts(
+        self, sample_xlsx, body_template_file, captured_console
+    ):
+        exit_code = self._run_send(
+            sample_xlsx, body_template_file,
+            "--subject", "Hello {{name}}", "--cc", "Boss <boss@example.com>",
+        )
+        out = captured_console.file.getvalue()
+        assert exit_code == 130
+        assert "Subject:  Hello Alice" in out
+        assert "To:       2 recipients" in out
+        assert "CC:       Boss <boss@example.com>" in out
+        assert "Send? [y/N]" in out
+
+    @pytest.mark.parametrize("subject", [
+        "Q3 [draft] for {{name}}",
+        "[bold]Important[/bold] {{name}}",
+        "Odd [/] brackets {{name}}",
+    ])
+    def test_summary_shows_square_brackets_literally(
+        self, sample_xlsx, body_template_file, captured_console, subject
+    ):
+        """User text in the summary must not be interpreted as rich markup."""
+        exit_code = self._run_send(sample_xlsx, body_template_file, "--subject", subject)
+        out = captured_console.file.getvalue()
+        assert exit_code == 130
+        assert f"Subject:  {subject.replace('{{name}}', 'Alice')}" in out
+
+    def test_summary_shows_bracketed_display_names_literally(
+        self, sample_xlsx, body_template_file, captured_console
+    ):
+        exit_code = self._run_send(
+            sample_xlsx, body_template_file,
+            "--subject", "Hi", "--cc", "[Team] Lead <lead@example.com>",
+        )
+        assert exit_code == 130
+        assert "[Team] Lead <lead@example.com>" in captured_console.file.getvalue()
 
     def test_dry_run_skips_confirm(self, sample_xlsx, body_template_file):
         """Default (dry run) should not prompt for confirmation."""
