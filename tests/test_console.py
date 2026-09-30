@@ -159,3 +159,54 @@ class TestMakeConsole:
             c = _make_console()
         assert isinstance(c.file, io.TextIOWrapper)
         assert c.file.encoding == "utf-8"
+
+
+class TestRichLogOutput:
+    """Check what the RichHandler actually renders, not just that it exists."""
+
+    def _log_through_setup_logging(self, monkeypatch, *messages):
+        from rich.console import Console
+
+        console = Console(file=io.StringIO(), width=200, color_system=None)
+        monkeypatch.setattr("mail_merge.console.console", console)
+        root = logging.getLogger()
+        original_handlers, original_level = list(root.handlers), root.level
+        root.handlers.clear()
+        try:
+            setup_logging(logging.INFO)
+            logger = logging.getLogger("mail_merge.test")
+            for msg, args in messages:
+                logger.info(msg, *args)
+        finally:
+            root.handlers[:] = original_handlers
+            root.level = original_level
+        return console.file.getvalue()
+
+    def test_message_and_level_rendered(self, monkeypatch):
+        out = self._log_through_setup_logging(monkeypatch, ("Sent %d of %d", (3, 5)))
+        assert "INFO" in out
+        assert "Sent 3 of 5" in out
+
+    def test_square_brackets_not_treated_as_markup(self, monkeypatch):
+        """markup=False: subjects and names containing [..] must appear verbatim."""
+        out = self._log_through_setup_logging(
+            monkeypatch,
+            ("Subject: %s", ("[bold]Q3[/bold] [draft]",)),
+            ("Odd [/] brackets", ()),
+        )
+        assert "[bold]Q3[/bold] [draft]" in out
+        assert "Odd [/] brackets" in out
+
+    def test_utf8_output_on_non_utf8_stderr(self):
+        """Emoji and accents survive when stderr uses a legacy codepage (Windows)."""
+        raw = io.BytesIO()
+        with patch("mail_merge.console.sys") as mock_sys:
+            mock_sys.stderr = io.TextIOWrapper(raw, encoding="cp1252")
+            console = _make_console()
+        handler = RichHandler(console=console, show_path=False, markup=False)
+        record = logging.LogRecord(
+            "mail_merge", logging.INFO, "", 0, "🔑 Signed in as Zoë Łukasz", None, None,
+        )
+        handler.emit(record)
+        console.file.flush()
+        assert "🔑 Signed in as Zoë Łukasz" in raw.getvalue().decode("utf-8")
