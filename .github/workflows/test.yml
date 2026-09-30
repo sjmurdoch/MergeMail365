@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # Oldest supported (and used for release builds) and current local version
-        python-version: ["3.10", "3.13"]
+        # Oldest supported and current (matches .python-version and release builds)
+        python-version: ["3.10", "3.14"]
 
     runs-on: ${{ matrix.os }}
 

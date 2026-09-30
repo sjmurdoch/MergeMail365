@@ -17,7 +17,7 @@ Goal: before bumping any vendored code or pins, make sure the test suite would c
 | pyinstaller | 6.19.0 | 6.22.3 | Medium — release only |
 | pytest / pytest-cov / responses | 9.0.2 / 7.0.0 / 0.26.0 | 9.1.1 / 7.1.0 / 0.26.3 | Tooling |
 | actions/checkout, setup-python, setup-uv | v4 / v5 / v4 | v7 / v7 / v10 | Medium — release only |
-| CI Python | 3.10 | 3.10 EOL Oct 2026 | Medium |
+| Python (local, CI, release) | 3.13 / 3.10 | 3.14 | ✅ Done — see below |
 | uv | 0.11.2 | 0.12.21 | Tooling |
 | Biome (schema in biome.json) | 2.4.9 | 2.5.14 | Tooling |
 
@@ -48,22 +48,26 @@ Each step is a separate commit, with the full suite run before committing.
 4. ✅ Rich tests: rendered log output, literal `[brackets]`, UTF-8 on a cp1252 stderr, and the confirmation summary. Writing these exposed an existing bug — user text in the send confirmation was parsed as rich markup (`Q3 [draft]` lost `[draft]`, `[/]` crashed, the `[y/N]` hint was never shown) — fixed in its own commit.
 5. ✅ `--desktop` path tested against an autospec of the real `webview` module, plus bundled-fallback and missing-pywebview paths.
 6. ✅ Trix E2E: real clipboard paste checks Trix still passes `paste.html` as a string and honours edits to it; toolbar bold/bullet; links and placeholders through `loadHTML`.
-7. ✅ `.github/workflows/test.yml`: Python 3.10 and 3.13 on Ubuntu, macOS and Windows, running pytest (incl. Playwright), mypy and Biome. Suite also verified locally on 3.10. Not yet run on GitHub — first push will be its first run.
+7. ✅ `.github/workflows/test.yml`: Python 3.10 and 3.14 on Ubuntu, macOS and Windows, running pytest (incl. Playwright), mypy and Biome. Suite also verified locally on 3.10. Not yet run on GitHub — first push will be its first run.
 8. ⏳ PyInstaller smoke test — open question: needs a way to run the bundled app headlessly, e.g. a `--self-check` flag that imports everything, verifies bundled templates/static exist, then exits. Until then, manually launch the built app after upgrading pyinstaller or pywebview.
 
 After steps 1–7: 470 passed, 14 skipped (was 444 / 14).
 
 ## Upgrade order
 
-One commit per group, full suite (3.13 and 3.10) before each:
+One commit per group, full suite (3.14 and 3.10) before each:
 
 1. Trix 2.1.19 (`scripts/update-vendor.sh`)
 2. Python lock, non-major bumps (msal, requests, pywebview, playwright + `playwright install chromium`, pytest-playwright, pyinstaller, pytest, pytest-cov, responses)
 3. rich 15
 4. mypy 2 (fix any new strict errors separately from the bump)
-5. Release workflow: Actions majors, and CI/release Python off 3.10
+5. Release workflow: Actions majors
 6. Biome schema (`biome migrate`)
 7. Manually launch a PyInstaller build of the desktop app (see step 8)
+
+## Python 3.14
+
+Local (`.python-version`), CI test matrix (3.10 + 3.14) and release builds moved to 3.14. `requires-python` stays `>=3.10` and mypy still targets 3.10. This required one lock change: pythonnet 3.0.5 (pywebview's Windows backend) declares `<3.14`, so it was upgraded to 3.1.0 (supports 3.10–3.14), which also brought clr-loader 0.2.10 → 0.3.1. pythonnet 3.2.0 is newer but drops 3.10 and is inside the 7-day `exclude-newer` window. The Windows side can only be verified on CI or a Windows machine.
 
 ## Other findings
 

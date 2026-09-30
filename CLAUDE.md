@@ -256,4 +256,4 @@ Tests use `responses` library to mock HTTP calls to Graph API. An autouse fixtur
 - `test_api_additions.py` — `body_text`, `token_provider`, and `device_code` parameters on `send_merge()`.
 - `test_msal_contract.py` — real msal against mocked Entra endpoints (auth code, device code, token cache, sign-out).
 
-Playwright tests cannot launch Chromium inside the Claude Code sandbox (mach-port permission error); run them outside it. CI (`.github/workflows/test.yml`) runs the full suite on Python 3.10 and 3.13 across Linux, macOS and Windows.
+Playwright tests cannot launch Chromium inside the Claude Code sandbox (mach-port permission error); run them outside it. CI (`.github/workflows/test.yml`) runs the full suite on Python 3.10 and 3.14 across Linux, macOS and Windows.
