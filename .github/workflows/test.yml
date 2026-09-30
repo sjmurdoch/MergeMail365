@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Oldest supported (and used for release builds) and current local version
+        python-version: ["3.10", "3.13"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Install Playwright browser
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Type check
+        run: uv run mypy
+
+  lint-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: biomejs/setup-biome@v2
+        with:
+          version: 2.5.9
+
+      - name: Lint app.js
+        run: biome lint src/mail_merge/web/static/app.js
