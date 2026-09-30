@@ -469,6 +469,77 @@ class TestComposeStep:
         assert "logo.png" in result
         assert "<p></p>" not in result
 
+    def _open_trix(self, page: Page, sample_xlsx: Path) -> None:
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        page.click("trix-editor")
+
+    def test_trix_clipboard_paste_honours_before_paste_edits(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        """A real clipboard paste goes through Trix's own paste pipeline.
+
+        The synthetic trix-before-paste tests above check our cleanup logic;
+        this checks the Trix contract that logic depends on: Trix passes
+        ``event.paste.html`` as a string and inserts whatever the listeners
+        leave there.
+        """
+        page = authenticated_page
+        page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+        self._open_trix(page, sample_xlsx)
+        page.evaluate("""async () => {
+            window._pasteSeen = null;
+            document.addEventListener('trix-before-paste', (e) => {
+                window._pasteSeen = typeof (e.paste && e.paste.html);
+                e.paste.html = e.paste.html.replace('Para A', 'Rewritten');
+            }, {once: true});
+            const html = '<p>Para A</p><p></p><div><br></div><p>Hi {{name}}</p>';
+            await navigator.clipboard.write([new ClipboardItem({
+                'text/html': new Blob([html], {type: 'text/html'}),
+                'text/plain': new Blob(['Para A Hi {{name}}'], {type: 'text/plain'}),
+            })]);
+        }""")
+        page.focus("trix-editor")
+        page.keyboard.press("ControlOrMeta+V")
+        page.wait_for_function(
+            "() => document.getElementById('body-input').value.includes('Hi {{name}}')"
+        )
+        assert page.evaluate("() => window._pasteSeen") == "string"
+        assert page.locator("#body-input").input_value() == "<p>Rewritten</p><p>Hi {{name}}</p>"
+
+    def test_trix_toolbar_bold(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        self._open_trix(page, sample_xlsx)
+        page.click("trix-toolbar button[data-trix-attribute='bold']")
+        page.keyboard.type("Important")
+        expect(page.locator("#body-input")).to_have_value(
+            re.compile(r"<strong>Important</strong>")
+        )
+
+    def test_trix_toolbar_bullet_list(self, authenticated_page: Page, sample_xlsx: Path):
+        page = authenticated_page
+        self._open_trix(page, sample_xlsx)
+        page.click("trix-toolbar button[data-trix-attribute='bullet']")
+        page.keyboard.type("One")
+        page.keyboard.press("Enter")
+        page.keyboard.type("Two")
+        expect(page.locator("#body-input")).to_have_value(
+            re.compile(r"<ul><li>One</li><li>Two</li></ul>")
+        )
+
+    def test_trix_preserves_links_and_placeholders(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        page = authenticated_page
+        self._open_trix(page, sample_xlsx)
+        page.evaluate("""() => state.trixEditor.loadHTML(
+            '<p>Dear {{name}}, see <a href="https://example.com/?a=1&amp;b=2">here</a>.</p>'
+        )""")
+        body = page.locator("#body-input").input_value()
+        assert "Dear {{name}}" in body
+        assert '<a href="https://example.com/?a=1&amp;b=2">here</a>' in body
+
     def test_blocks_next_without_subject(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
         _upload_and_go_to_compose(page, sample_xlsx)
