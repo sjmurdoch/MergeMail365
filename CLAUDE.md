@@ -25,7 +25,7 @@ uv run pytest --cov=mail_merge
 # Type checking
 uv run mypy
 
-# JS linting (requires Biome — brew install biome)
+# JS linting (requires Biome — brew install biome; CI pins the version in .github/workflows/test.yml)
 biome lint src/mail_merge/web/static/app.js
 
 # CLI usage (after install) — dry run by default, add --send to deliver
@@ -242,6 +242,10 @@ Tested empirically via `examples/test_empty_to.py` (results in `out.txt`):
 - **`undisclosed-recipients:;`** as a To address — rejected (HTTP 400). The Graph API does not resolve this RFC 2822 group syntax and returns "Recipient is not resolved".
 
 Implication for BCC blast: it is safe to send with `toRecipients: []` or omit the field, but `--bcc-blast-to` uses a real address in the To field to avoid surprising recipients with a blank To header.
+
+## Supply-chain policy
+
+Never adopt a package, tool, action or vendored file version that has been public for less than 7 days. Python packages are enforced by `exclude-newer = "7 days"` in `pyproject.toml` — don't remove or shorten it. Vendored JS/CSS go through `scripts/update-vendor.sh` (pinned versions, npm-date check). GitHub Actions are pinned to commit SHAs with a version comment, and uv/Biome versions are pinned in the workflows; check release dates before bumping any of them. See `docs/upgrade-plan.md`.
 
 ## Testing
 

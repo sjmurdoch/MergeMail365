@@ -21,6 +21,8 @@ Goal: before bumping any vendored code or pins, make sure the test suite would c
 | uv | 0.11.2 | 0.12.21 | Tooling |
 | Biome (schema in biome.json) | 2.4.9 | 2.5.14 | Tooling |
 
+All of the above were upgraded on 2026-09-30 — see *Upgrade order*.
+
 ## Baseline
 
 - `uv run pytest`: 444 passed, 14 skipped (all skips are Windows-only tests in `test_windows.py`). Line coverage 92%.
@@ -55,15 +57,26 @@ After steps 1–7: 470 passed, 14 skipped (was 444 / 14).
 
 ## Upgrade order
 
-One commit per group, full suite (3.14 and 3.10) before each:
+Done 2026-09-30, one commit per group, full suite and mypy on 3.14 and 3.10 before each:
 
-1. Trix 2.1.19 (`scripts/update-vendor.sh`)
-2. Python lock, non-major bumps (msal, requests, pywebview, playwright + `playwright install chromium`, pytest-playwright, pyinstaller, pytest, pytest-cov, responses)
-3. rich 15
-4. mypy 2 (fix any new strict errors separately from the bump)
-5. Release workflow: Actions majors
-6. Biome schema (`biome migrate`)
-7. Manually launch a PyInstaller build of the desktop app (see step 8)
+1. ✅ Python lock, non-major bumps (msal 1.39.0, requests 2.34.2, pywebview 6.2.1, playwright 1.63.0, pytest-playwright 0.9.0, pyinstaller 6.22.3, pytest 9.1.1, pytest-cov 7.1.0, responses 0.26.3, plus transitive)
+2. ✅ rich 15.0.0
+3. ✅ mypy 2.3.1 — no new errors
+4. ✅ Trix 2.1.19; Pico re-vendored from the official 2.1.1 build (the old copy differed from it)
+5. ✅ Actions: checkout v7.0.1, setup-python v7.0.0, setup-uv v10.2.0, setup-biome v2.7.1 — pinned to SHAs; uv 0.12.18 and Biome 2.5.14 pinned in CI
+6. ✅ Biome schema → 2.5.14
+7. ⏳ Manually launch a PyInstaller build of the desktop app (see step 8), and check the first CI and release runs
+
+## Supply-chain policy
+
+Nothing is used until it has been public for at least 7 days:
+
+- **Python:** `exclude-newer = "7 days"` in `pyproject.toml` (recorded in `uv.lock` as `exclude-newer-span = "P7D"`). CI and release use `uv sync --locked`, and the release build uses `uv run --frozen`, so neither re-resolves.
+- **Vendored JS/CSS:** `scripts/update-vendor.sh` downloads pinned versions only and refuses any version npm shows as younger than 7 days.
+- **GitHub Actions:** pinned to commit SHAs (tags can be moved). uv and Biome versions are pinned explicitly, since `setup-uv` and `setup-biome` would otherwise install the latest release.
+- **Playwright browsers** are tied to the locked `playwright` version.
+
+When updating any of these, check the release date first.
 
 ## Python 3.14
 
