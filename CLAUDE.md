@@ -245,7 +245,7 @@ Implication for BCC blast: it is safe to send with `toRecipients: []` or omit th
 
 ## Testing
 
-Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge.auth.acquire_token` and `mail_merge.auth.acquire_token_interactive_flow`) is monkeypatched in CLI/API tests that need authentication. The `sample_xlsx` and `body_template_file` fixtures in `conftest.py` create temporary test files.
+Tests use `responses` library to mock HTTP calls to Graph API. An autouse fixture in `conftest.py` fails any test that makes a real HTTP request to a non-localhost host. MSAL mocks use `create_autospec` against the real `PublicClientApplication` so signature changes are caught; `test_msal_contract.py` runs real msal end to end against `responses`-mocked Entra endpoints. Auth (`mail_merge.auth.acquire_token` and `mail_merge.auth.acquire_token_interactive_flow`) is monkeypatched in CLI/API tests that need authentication. The `sample_xlsx` and `body_template_file` fixtures in `conftest.py` create temporary test files.
 
 **Web UI tests** span four files:
 - `test_web.py` — Flask test client tests for all routes, CSRF, auth, job lifecycle, options pass-through. Uses `web_client` fixture (pre-authenticated test client).
@@ -254,3 +254,6 @@ Tests use `responses` library to mock HTTP calls to Graph API. Auth (`mail_merge
 - `test_web_robustness.py` — edge cases (empty uploads, malformed requests).
 - `test_auth_additions.py` — auth code flow, `diagnose_auth()`, `token_expires_at()`.
 - `test_api_additions.py` — `body_text`, `token_provider`, and `device_code` parameters on `send_merge()`.
+- `test_msal_contract.py` — real msal against mocked Entra endpoints (auth code, device code, token cache, sign-out).
+
+Playwright tests cannot launch Chromium inside the Claude Code sandbox (mach-port permission error); run them outside it. CI (`.github/workflows/test.yml`) runs the full suite on Python 3.10 and 3.13 across Linux, macOS and Windows.

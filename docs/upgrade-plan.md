@@ -42,13 +42,29 @@ Goal: before bumping any vendored code or pins, make sure the test suite would c
 
 Each step is a separate commit, with the full suite run before committing.
 
-1. Make the three network-dependent tests hermetic (mock the openid-configuration GET with `responses`). Add a guard fixture that fails any test making a non-localhost HTTP request.
-2. Autospec MSAL mocks so call signatures are checked against the installed `msal`.
-3. Add MSAL contract tests that run the real `PublicClientApplication` against `responses`-mocked endpoints: token-cache round-trip + `acquire_token_silent` returning a cached token; `initiate_auth_code_flow` producing an `auth_uri`; `acquire_token_by_auth_code_flow` exchanging a code.
-4. Add rich rendering tests: `setup_logging()` output contains the message; literal `[bold]` text is not interpreted as markup.
-5. Add pywebview contract test: when installed, `create_window` accepts `(title, app, width=, height=)` and `start` exists; test the `--desktop` code path with `webview` stubbed.
-6. Add Trix E2E tests: real clipboard paste of HTML, and toolbar bold/list buttons producing the expected HTML.
-7. Add `.github/workflows/test.yml`: matrix of Python 3.10 and 3.13 on macOS, Windows and Ubuntu, running pytest (incl. Playwright) and mypy.
-8. (Open question) PyInstaller smoke test — needs a way to run the bundled app headlessly, e.g. a `--self-check` flag that imports everything and verifies bundled templates/static exist, then exits.
+1. ✅ Make the three network-dependent tests hermetic, and add an autouse guard (`tests/conftest.py`) that fails any test making a non-localhost HTTP request.
+2. ✅ Autospec MSAL mocks so call signatures are checked against the installed `msal`.
+3. ✅ MSAL contract tests (`tests/test_msal_contract.py`) run the real `PublicClientApplication` against `responses`-mocked endpoints: auth code + PKCE, device code, token-cache round-trip and silent reuse, `diagnose_auth`, `sign_out`, and the `port`/`timeout` kwargs of `acquire_token_interactive` (which autospec cannot check because of `**kwargs`).
+4. ✅ Rich tests: rendered log output, literal `[brackets]`, UTF-8 on a cp1252 stderr, and the confirmation summary. Writing these exposed an existing bug — user text in the send confirmation was parsed as rich markup (`Q3 [draft]` lost `[draft]`, `[/]` crashed, the `[y/N]` hint was never shown) — fixed in its own commit.
+5. ✅ `--desktop` path tested against an autospec of the real `webview` module, plus bundled-fallback and missing-pywebview paths.
+6. ✅ Trix E2E: real clipboard paste checks Trix still passes `paste.html` as a string and honours edits to it; toolbar bold/bullet; links and placeholders through `loadHTML`.
+7. ✅ `.github/workflows/test.yml`: Python 3.10 and 3.13 on Ubuntu, macOS and Windows, running pytest (incl. Playwright), mypy and Biome. Suite also verified locally on 3.10. Not yet run on GitHub — first push will be its first run.
+8. ⏳ PyInstaller smoke test — open question: needs a way to run the bundled app headlessly, e.g. a `--self-check` flag that imports everything, verifies bundled templates/static exist, then exits. Until then, manually launch the built app after upgrading pyinstaller or pywebview.
 
-Then upgrade, one commit per group: Trix → Python lock (non-major) → rich 15 → mypy 2 → Actions + CI Python → Biome schema.
+After steps 1–7: 470 passed, 14 skipped (was 444 / 14).
+
+## Upgrade order
+
+One commit per group, full suite (3.13 and 3.10) before each:
+
+1. Trix 2.1.19 (`scripts/update-vendor.sh`)
+2. Python lock, non-major bumps (msal, requests, pywebview, playwright + `playwright install chromium`, pytest-playwright, pyinstaller, pytest, pytest-cov, responses)
+3. rich 15
+4. mypy 2 (fix any new strict errors separately from the bump)
+5. Release workflow: Actions majors, and CI/release Python off 3.10
+6. Biome schema (`biome migrate`)
+7. Manually launch a PyInstaller build of the desktop app (see step 8)
+
+## Other findings
+
+- msal warns that `initiate_auth_code_flow` should use `response_mode='form_post'` (RFC 9700 §4.3.1). Not changed here; the `/auth/callback` route currently expects a GET.
