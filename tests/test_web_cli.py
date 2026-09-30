@@ -1,5 +1,6 @@
 import inspect
 import sys
+import types
 from unittest.mock import create_autospec, patch
 
 import pytest
@@ -55,7 +56,7 @@ def test_debug_level_does_not_enable_file_logging(tmp_path):
 
 
 class TestDesktopMode:
-    """--desktop path, run against an autospec of the real pywebview module.
+    """--desktop path, run against autospecs of the real pywebview functions.
 
     Autospec makes create_window/start calls fail if pywebview renames or
     removes the parameters we use, without opening a native window.
@@ -64,7 +65,12 @@ class TestDesktopMode:
     @pytest.fixture
     def fake_webview(self, monkeypatch):
         webview = pytest.importorskip("webview")
-        fake = create_autospec(webview)
+        # Autospec only the functions we call: autospeccing the whole module
+        # touches webview.screens, a lazy proxy that initialises the GUI
+        # backend and fails on Linux runners without GTK/Qt.
+        fake = types.ModuleType("webview")
+        fake.create_window = create_autospec(webview.create_window)
+        fake.start = create_autospec(webview.start)
         monkeypatch.setitem(sys.modules, "webview", fake)
         return fake
 
