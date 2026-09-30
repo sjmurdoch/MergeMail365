@@ -84,6 +84,7 @@ class TestSetupFileLogging:
 
         content = log_file.read_text(encoding="utf-8")
         assert "something failed" in content
+        assert "[MainThread] mail_merge.test_file_logging:" in content
         assert "ValueError: test error" in content
         assert "Traceback" in content
 

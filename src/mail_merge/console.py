@@ -85,7 +85,7 @@ def setup_file_logging(level: int = logging.DEBUG) -> Path | None:
         )
         handler.setLevel(level)
         handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+            "%(asctime)s %(levelname)-8s [%(threadName)s] %(name)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         ))
         handler.addFilter(_StripAnsiFilter())

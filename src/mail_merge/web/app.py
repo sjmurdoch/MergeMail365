@@ -475,7 +475,7 @@ def create_app(
             except Exception as exc:
                 logger.warning("Interactive auth failed: %s", exc)
 
-        thread = threading.Thread(target=_run_interactive, daemon=True)
+        thread = threading.Thread(target=_run_interactive, name="interactive-auth", daemon=True)
         thread.start()
         return jsonify({"status": "started"})
 
@@ -843,6 +843,7 @@ def create_app(
 
         def _run_job() -> None:
             job.status = JobStatus.RUNNING
+            logger.debug("Job %s started (mode=%r)", job.id, mode)
             handler = JobLogHandler(job)
             handler.setLevel(logging.INFO)
             handler.setFormatter(logging.Formatter("%(message)s"))
@@ -869,7 +870,9 @@ def create_app(
                 mm_logger.removeHandler(handler)
                 job.events.put(None)  # Sentinel
 
-        thread = threading.Thread(target=_run_job, daemon=True)
+        thread = threading.Thread(
+            target=_run_job, name=f"job-{job.id[:8]}", daemon=True,
+        )
         thread.start()
 
         session["job_id"] = job.id
