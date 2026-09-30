@@ -47,7 +47,7 @@ All core features from this plan have been implemented. The implementation close
 
 **Active job reconnection:** Original implementation called an undefined `connectSSE()` function, referenced `jobs` instead of `_jobs`, and never stored the job ID in the session. Fixed: `app.js` now calls `streamEvents()` with full send-step UI setup, `app.py` references `_jobs` and stores `session["job_id"]` when starting a job.
 
-**Desktop mode architecture:** Plan specified passing the Flask app directly to pywebview's internal server. This broke OAuth because pywebview serves on a random internal port that doesn't match the auth callback redirect URI. Fixed by running Flask in a background thread on the real port and passing the URL (with startup token) to pywebview. Desktop auto-auth was removed — with Flask on a known port, any local process could access the server without a token, so the startup token is now required in desktop mode too.
+**Desktop mode architecture:** Plan specified passing the Flask app directly to pywebview's internal server. This broke OAuth because pywebview serves on a random internal port that doesn't match the auth callback redirect URI. Fixed by running Flask in a background thread on the real port and passing the URL (with startup token) to pywebview. Desktop auto-auth was removed — with Flask on a known port, any local process could access the server without a token, so the startup token is now required in desktop mode too. (Commit e0e6594 later reverted to passing the Flask app to pywebview on the mistaken belief that this opened no port; pywebview serves a WSGI app on its own `127.0.0.1` listener, so desktop mode had no token or CSRF check until this was restored. Both modes now share the same `create_app()` call, token URL and checks, and `TestAccessControlBothModes` runs the access-control tests against both.)
 
 **Config precedence fix:** `_get_config_value()` checked the config file before environment variables, opposite to `api.py`'s documented precedence (CLI flag > env var > config file > default). Fixed by swapping the `or` operands so env vars take priority.
 
@@ -243,7 +243,7 @@ mail_merge_web.spec      # PyInstaller spec for building standalone app
 `main()` parses `--host` (default `127.0.0.1`), `--port` (default `5050`), and `--desktop` flag. Two modes:
 
 - **Browser mode** (default): Binds the socket first (confirms port availability), opens the default browser via a short-delay Timer thread, then starts Flask on the pre-bound socket. This avoids the browser hitting a connection-refused page before Flask is ready.
-- **Desktop mode** (`--desktop`): Uses `pywebview` to open a native OS window with the Flask app embedded. No external browser needed.
+- **Desktop mode** (`--desktop`): Serves the app on the same port as browser mode (werkzeug `make_server` in a daemon thread) and opens a native `pywebview` window at the same `?token=` URL. No external browser needed. Don't pass the Flask app to `webview.create_window()`: pywebview would serve it on its own localhost port and open the window without the token.
 
 **Port conflict handling:** If the default port (5050) is in use, auto-increment and try the next port (5051, 5052, ...) up to 5099. Log the actual port being used. The auth callback redirect URI uses the actual port, but **Entra ignores the port component for localhost redirect URIs** — so a single registered `http://localhost:5050/auth/callback` (or `http://localhost/auth/callback`) will work on any port. No additional Entra configuration needed when the port changes.
 
@@ -514,6 +514,14 @@ This prevents other local users from accessing the server — they don't know th
 - Use Flask's `flask.g` + a per-session CSRF token sent as a header (`X-CSRF-Token`) from JavaScript.
 - The token is rendered into the HTML page and included in all `fetch()` calls.
 - SSE (`GET /api/job/<id>/events`) and other GET endpoints are safe (read-only).
+
+#### DNS rebinding: Host header allowlist
+
+A web page on an attacker's domain can re-resolve that domain to `127.0.0.1` and then talk to the server as same-origin, which gets past CSRF protection and lets it read responses. Every request (including static files) is rejected with 403 unless the `Host` header names `localhost`, `127.0.0.1`, `::1` or the `--host` value. When bound to a wildcard address (`0.0.0.0`, `::`), the check is skipped because the machine can be reached under any of its names; the startup token is then the only guard.
+
+#### Desktop mode
+
+Desktop mode applies all of the above unchanged. The pywebview window is just another client of the localhost server, opened at the token URL.
 
 #### PII handling
 
