@@ -316,6 +316,10 @@ class TestAuthFailure:
     ):
         """When acquire_token raises, it's wrapped in a RuntimeError."""
         monkeypatch.setattr(
+            "mail_merge.auth.acquire_token_interactive_flow",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("no display")),
+        )
+        monkeypatch.setattr(
             "mail_merge.auth.acquire_token",
             lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("network down")),
         )

@@ -217,7 +217,8 @@ class TestDiagnoseAuthEdgeCases:
         """When authority check raises an exception, authority_reachable is False."""
         from mail_merge.auth import diagnose_auth
 
-        with patch("requests.get", side_effect=ConnectionError("network down")):
+        with patch("requests.get", side_effect=ConnectionError("network down")), \
+             patch.object(auth_module, "_build_msal_app", side_effect=ConnectionError("network down")):
             info = diagnose_auth("fake-client", "common")
 
         assert info["authority_reachable"] is False

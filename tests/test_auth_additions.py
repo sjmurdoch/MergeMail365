@@ -85,9 +85,13 @@ class TestAcquireTokenByAuthCode:
 
 
 class TestDiagnoseAuth:
+    @patch("requests.get")
+    @patch("mail_merge.auth.msal.PublicClientApplication")
     @patch("mail_merge.auth._load_cache")
-    def test_no_cache(self, mock_cache, tmp_path):
+    def test_no_cache(self, mock_cache, mock_app_cls, mock_get, tmp_path):
         mock_cache.return_value = MagicMock()
+        mock_app_cls.return_value.get_accounts.return_value = []
+        mock_get.return_value = MagicMock(status_code=200)
 
         with patch("mail_merge.auth.CACHE_PATH", tmp_path / "nonexistent.json"):
             info = diagnose_auth("test-client-id")
