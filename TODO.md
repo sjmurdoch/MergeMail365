@@ -1,0 +1,2 @@
+- Don't allow progress if not signed in
+- Validate user flow state machine
