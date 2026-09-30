@@ -1,7 +1,5 @@
 """Flask application for MergeMail365 web UI."""
 
-from __future__ import annotations
-
 import atexit
 import enum
 import hashlib

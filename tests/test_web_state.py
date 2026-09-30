@@ -5,8 +5,6 @@ testing navigation guards, invalidation cascades, and state transitions
 without full UI interactions.
 """
 
-from __future__ import annotations
-
 import re
 import threading
 import time

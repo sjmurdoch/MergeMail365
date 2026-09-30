@@ -87,7 +87,7 @@ Local (`.python-version`), CI test matrix (3.10 + 3.14) and release builds moved
 Raise the supported floor from 3.10 to 3.14, the newest stable release (3.15 is still a release candidate). Users on 3.10–3.13 will no longer be able to install the package. Steps, each tested and committed separately:
 
 1. ✅ `requires-python = ">=3.14"`, drop the `tomli` dependency and its `sys.version_info` fallback in `config.py`, mypy `python_version = "3.14"`, re-lock.
-2. ⏳ Drop `from __future__ import annotations` (annotations are lazily evaluated by default since 3.14, PEP 649/749).
+2. ✅ Drop `from __future__ import annotations` (annotations are lazily evaluated by default since 3.14, PEP 649/749).
 3. ⏳ CI test matrix → 3.14 only; update `CLAUDE.md` and `docs/tutorial.md`.
 
 ## Other findings

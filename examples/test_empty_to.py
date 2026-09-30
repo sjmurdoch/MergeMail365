@@ -17,8 +17,6 @@ A 202 response means the API accepted that form; anything else is printed
 with its status code and error body.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

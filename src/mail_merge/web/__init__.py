@@ -1,7 +1,5 @@
 """Web interface for MergeMail365."""
 
-from __future__ import annotations
-
 import argparse
 import logging
 import secrets

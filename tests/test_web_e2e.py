@@ -4,8 +4,6 @@ Uses the Playwright Python API per project conventions. Flask runs in a
 background thread with mocked Graph API (responses) and MSAL (monkeypatch).
 """
 
-from __future__ import annotations
-
 import re
 import threading
 import time
