@@ -82,6 +82,14 @@ When updating any of these, check the release date first.
 
 Local (`.python-version`), CI test matrix (3.10 + 3.14) and release builds moved to 3.14. `requires-python` stays `>=3.10` and mypy still targets 3.10. This required one lock change: pythonnet 3.0.5 (pywebview's Windows backend) declares `<3.14`, so it was upgraded to 3.1.0 (supports 3.10–3.14), which also brought clr-loader 0.2.10 → 0.3.1. pythonnet 3.2.0 is newer but drops 3.10 and is inside the 7-day `exclude-newer` window. The Windows side can only be verified on CI or a Windows machine.
 
+## Minimum Python 3.14 (plan)
+
+Raise the supported floor from 3.10 to 3.14, the newest stable release (3.15 is still a release candidate). Users on 3.10–3.13 will no longer be able to install the package. Steps, each tested and committed separately:
+
+1. ✅ `requires-python = ">=3.14"`, drop the `tomli` dependency and its `sys.version_info` fallback in `config.py`, mypy `python_version = "3.14"`, re-lock.
+2. ⏳ Drop `from __future__ import annotations` (annotations are lazily evaluated by default since 3.14, PEP 649/749).
+3. ⏳ CI test matrix → 3.14 only; update `CLAUDE.md` and `docs/tutorial.md`.
+
 ## Other findings
 
 - msal warns that `initiate_auth_code_flow` should use `response_mode='form_post'` (RFC 9700 §4.3.1). Not changed here; the `/auth/callback` route currently expects a GET.

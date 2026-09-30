@@ -2,12 +2,8 @@
 
 import logging
 import sys
+import tomllib
 from pathlib import Path
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 from mail_merge._paths import data_dir
 
