@@ -1,7 +1,8 @@
 """Tests for new auth functions: initiate_auth_code_flow, acquire_token_by_auth_code, diagnose_auth, sign_out."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
+import msal
 import pytest
 
 from mail_merge.auth import (
@@ -12,12 +13,21 @@ from mail_merge.auth import (
 )
 
 
+# Captured at import, before any test patches msal.PublicClientApplication.
+_RealPublicClientApplication = msal.PublicClientApplication
+
+
+def _mock_msal_app():
+    """An MSAL app mock whose methods enforce the real msal signatures."""
+    return create_autospec(_RealPublicClientApplication, instance=True)
+
+
 class TestInitiateAuthCodeFlow:
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_returns_flow_with_auth_uri(self, mock_cache, mock_app_cls):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.initiate_auth_code_flow.return_value = {
             "auth_uri": "https://login.microsoftonline.com/...",
             "state": "abc123",
@@ -28,11 +38,11 @@ class TestInitiateAuthCodeFlow:
         assert "auth_uri" in flow
         mock_app.initiate_auth_code_flow.assert_called_once()
 
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_raises_on_failure(self, mock_cache, mock_app_cls):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.initiate_auth_code_flow.return_value = {"error": "bad"}
         mock_app_cls.return_value = mock_app
 
@@ -46,11 +56,11 @@ class TestInitiateAuthCodeFlow:
 
 class TestAcquireTokenByAuthCode:
     @patch("mail_merge.auth._save_cache")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_returns_token(self, mock_cache, mock_app_cls, mock_save):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.acquire_token_by_auth_code_flow.return_value = {
             "access_token": "test-token-123",
         }
@@ -65,11 +75,11 @@ class TestAcquireTokenByAuthCode:
         mock_save.assert_called_once()
 
     @patch("mail_merge.auth._save_cache")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_raises_on_error(self, mock_cache, mock_app_cls, mock_save):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.acquire_token_by_auth_code_flow.return_value = {
             "error": "invalid_grant",
             "error_description": "Code expired",
@@ -86,7 +96,7 @@ class TestAcquireTokenByAuthCode:
 
 class TestDiagnoseAuth:
     @patch("requests.get")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_no_cache(self, mock_cache, mock_app_cls, mock_get, tmp_path):
         mock_cache.return_value = MagicMock()
@@ -104,11 +114,11 @@ class TestDiagnoseAuth:
         assert info["error"] is not None
         assert "Invalid tenant_id" in info["error"]
 
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_with_valid_token(self, mock_cache, mock_app_cls):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = [{"username": "user@example.com", "home_account_id": "123"}]
         mock_app.acquire_token_silent.return_value = {"access_token": "eyJ.eyJleHAiOjE3MDAwMDAwMDB9.sig"}
         mock_app_cls.return_value = mock_app
@@ -127,12 +137,12 @@ class TestDiagnoseAuth:
         assert len(info["accounts"]) == 1
         assert info["authority_reachable"] is True
 
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_expired_token(self, mock_cache, mock_app_cls):
         """Silent acquisition fails for expired tokens — token_valid should be False."""
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = [{"username": "user@example.com", "home_account_id": "123"}]
         # Silent acquisition returns error (expired refresh token)
         mock_app.acquire_token_silent.return_value = {
@@ -158,11 +168,11 @@ class TestDiagnoseAuth:
 
 class TestSignOut:
     @patch("mail_merge.auth._save_cache")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_removes_accounts(self, mock_cache, mock_app_cls, mock_save):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         account1 = {"username": "user@example.com"}
         mock_app.get_accounts.return_value = [account1]
         mock_app_cls.return_value = mock_app
@@ -174,11 +184,11 @@ class TestSignOut:
         mock_save.assert_called_once()
 
     @patch("mail_merge.auth._save_cache")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     @patch("mail_merge.auth._load_cache")
     def test_returns_false_when_no_accounts(self, mock_cache, mock_app_cls, mock_save):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app_cls.return_value = mock_app
 

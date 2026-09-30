@@ -3,14 +3,24 @@
 import os
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
 import openpyxl
+import msal
 import pytest
 import responses
 
 from mail_merge.sender import GRAPH_SEND_URL
 from mail_merge.web.app import create_app
+
+
+# Captured at import, before any test patches msal.PublicClientApplication.
+_RealPublicClientApplication = msal.PublicClientApplication
+
+
+def _mock_msal_app():
+    """An MSAL app mock whose methods enforce the real msal signatures."""
+    return create_autospec(_RealPublicClientApplication, instance=True)
 
 
 @pytest.fixture
@@ -607,10 +617,10 @@ class TestAuth:
         assert "#auth-error=" in resp.headers["Location"]
 
     @patch("mail_merge.auth._load_cache")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     def test_auth_status_authenticated(self, mock_app_cls, mock_cache, web_client):
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
         mock_app.acquire_token_silent.return_value = {"access_token": "eyJ.eyJleHAiOjk5OTk5OTk5OTl9.sig"}
         mock_app_cls.return_value = mock_app
@@ -708,14 +718,14 @@ class TestAuth:
                 assert "auth_flow" in sess
 
     @patch("mail_merge.auth._load_cache")
-    @patch("mail_merge.auth.msal.PublicClientApplication")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
     def test_auth_status_includes_token_expiry(self, mock_app_cls, mock_cache, web_client):
         import base64, json as _json
         # Create a JWT with exp claim for 2026-03-19T12:00:00+00:00
         payload = base64.urlsafe_b64encode(_json.dumps({"exp": 1773921600}).encode()).rstrip(b"=").decode()
         fake_jwt = f"eyJ.{payload}.sig"
         mock_cache.return_value = MagicMock()
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
         mock_app.acquire_token_silent.return_value = {"access_token": fake_jwt}
         mock_app_cls.return_value = mock_app

@@ -1,12 +1,21 @@
 """Tests for mail_merge.auth — cache loading/saving and JWT parsing."""
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
 import msal
 import pytest
 
 import mail_merge.auth as auth_module
 from mail_merge.auth import _load_cache, _save_cache
+
+
+# Captured at import, before any test patches msal.PublicClientApplication.
+_RealPublicClientApplication = msal.PublicClientApplication
+
+
+def _mock_msal_app():
+    """An MSAL app mock whose methods enforce the real msal signatures."""
+    return create_autospec(_RealPublicClientApplication, instance=True)
 
 
 class TestLoadCache:
@@ -126,11 +135,11 @@ class TestTenantIdValidation:
     def test_common_accepted(self):
         """'common' is a valid tenant_id and passes validation."""
         from unittest.mock import patch
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
         mock_app.acquire_token_by_device_flow.return_value = {"access_token": "tok"}
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token
             token = acquire_token("fake-client", tenant_id="common")
@@ -139,11 +148,11 @@ class TestTenantIdValidation:
     def test_uuid_accepted(self):
         """A valid UUID tenant_id passes validation."""
         from unittest.mock import patch
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
         mock_app.acquire_token_by_device_flow.return_value = {"access_token": "tok"}
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token
             token = acquire_token("fake-client", tenant_id="12345678-1234-1234-1234-123456789abc")
@@ -152,11 +161,11 @@ class TestTenantIdValidation:
     def test_domain_accepted(self):
         """A domain name tenant_id passes validation."""
         from unittest.mock import patch
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
         mock_app.acquire_token_by_device_flow.return_value = {"access_token": "tok"}
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token
             token = acquire_token("fake-client", tenant_id="contoso.onmicrosoft.com")
@@ -168,11 +177,11 @@ class TestAcquireTokenEdgeCases:
 
     def test_silent_acquisition_from_cache(self):
         """When a cached account exists, silent acquisition is tried first."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
         mock_app.acquire_token_silent.return_value = {"access_token": "cached-tok"}
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token
             token = acquire_token("fake-client")
@@ -183,11 +192,11 @@ class TestAcquireTokenEdgeCases:
 
     def test_device_code_flow_failure(self):
         """When device code flow returns no user_code, RuntimeError is raised."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.initiate_device_flow.return_value = {"error": "something went wrong"}
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token
             with pytest.raises(RuntimeError, match="Device code flow failed"):
@@ -195,7 +204,7 @@ class TestAcquireTokenEdgeCases:
 
     def test_missing_access_token(self):
         """When token result has no access_token, RuntimeError is raised."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.initiate_device_flow.return_value = {"user_code": "ABC", "message": "go here"}
         mock_app.acquire_token_by_device_flow.return_value = {
@@ -203,7 +212,7 @@ class TestAcquireTokenEdgeCases:
             "error_description": "User cancelled",
         }
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token
             with pytest.raises(RuntimeError, match="Authentication failed"):
@@ -228,7 +237,7 @@ class TestDiagnoseAuthEdgeCases:
         from mail_merge.auth import diagnose_auth
 
         with patch("requests.get") as mock_get, \
-             patch("msal.PublicClientApplication", side_effect=Exception("bad client")), \
+             patch("msal.PublicClientApplication", autospec=True, side_effect=Exception("bad client")), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock()):
             mock_get.return_value = MagicMock(status_code=200)
             info = diagnose_auth("bad-client", "common")
@@ -242,11 +251,11 @@ class TestAcquireTokenInteractiveFlow:
 
     def test_silent_acquisition_from_cache(self):
         """When a cached account exists, silent acquisition is tried first."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = [{"username": "user@example.com"}]
         mock_app.acquire_token_silent.return_value = {"access_token": "cached-tok"}
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token_interactive_flow
             token = acquire_token_interactive_flow("fake-client")
@@ -257,11 +266,11 @@ class TestAcquireTokenInteractiveFlow:
 
     def test_interactive_flow_success(self):
         """When no cached account, interactive flow is used."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.acquire_token_interactive.return_value = {"access_token": "interactive-tok"}
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token_interactive_flow
             token = acquire_token_interactive_flow("fake-client")
@@ -271,14 +280,14 @@ class TestAcquireTokenInteractiveFlow:
 
     def test_interactive_flow_failure_raises(self):
         """When interactive flow returns an error, RuntimeError is raised."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.acquire_token_interactive.return_value = {
             "error": "auth_failed",
             "error_description": "User cancelled",
         }
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token_interactive_flow
             with pytest.raises(RuntimeError, match="Authentication failed"):
@@ -286,11 +295,11 @@ class TestAcquireTokenInteractiveFlow:
 
     def test_timeout_passed_through(self):
         """The timeout parameter is forwarded to acquire_token_interactive."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.acquire_token_interactive.return_value = {"access_token": "tok"}
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token_interactive_flow
             acquire_token_interactive_flow("fake-client", timeout=60)
@@ -300,11 +309,11 @@ class TestAcquireTokenInteractiveFlow:
 
     def test_timeout_none_omits_kwarg(self):
         """When timeout=None, the timeout kwarg is not passed to MSAL."""
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.acquire_token_interactive.return_value = {"access_token": "tok"}
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=MagicMock(has_state_changed=False)):
             from mail_merge.auth import acquire_token_interactive_flow
             acquire_token_interactive_flow("fake-client", timeout=None)
@@ -317,7 +326,7 @@ class TestAcquireTokenInteractiveFlow:
         cache_path = tmp_path / "cache.json"
         monkeypatch.setattr(auth_module, "CACHE_PATH", cache_path)
 
-        mock_app = MagicMock()
+        mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
         mock_app.acquire_token_interactive.return_value = {"access_token": "tok"}
 
@@ -325,7 +334,7 @@ class TestAcquireTokenInteractiveFlow:
         mock_cache.has_state_changed = True
         mock_cache.serialize.return_value = '{"tokens": "here"}'
 
-        with patch("msal.PublicClientApplication", return_value=mock_app), \
+        with patch("msal.PublicClientApplication", autospec=True, return_value=mock_app), \
              patch.object(auth_module, "_load_cache", return_value=mock_cache):
             from mail_merge.auth import acquire_token_interactive_flow
             acquire_token_interactive_flow("fake-client")
