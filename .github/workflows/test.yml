@@ -1,5 +1,9 @@
 name: Tests
 
+# Supply-chain policy: actions are pinned to commit SHAs and tool versions
+# (uv, Biome) are pinned explicitly. Only use releases that have been public
+# for at least 7 days, matching exclude-newer in pyproject.toml.
+
 on:
   push:
     branches: [master]
@@ -21,11 +25,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.12.18"
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
@@ -44,11 +49,11 @@ jobs:
   lint-js:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: biomejs/setup-biome@v2
+      - uses: biomejs/setup-biome@4c91541eaada48f67d7dbd7833600ce162b68f51 # v2.7.1
         with:
-          version: 2.5.9
+          version: 2.5.14
 
       - name: Lint app.js
         run: biome lint src/mail_merge/web/static/app.js

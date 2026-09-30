@@ -1,5 +1,9 @@
 name: Build release bundles
 
+# Supply-chain policy: actions are pinned to commit SHAs and tool versions
+# (uv, Biome) are pinned explicitly. Only use releases that have been public
+# for at least 7 days, matching exclude-newer in pyproject.toml.
+
 on:
   release:
     types: [published]
@@ -26,17 +30,19 @@ jobs:
     environment: UCL
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.18"
 
       - name: Install dependencies
-        run: uv sync --extra desktop
+        run: uv sync --locked --extra desktop
 
       - name: Inject version from release tag
         shell: bash
@@ -55,7 +61,7 @@ jobs:
         env:
           MERGEMAIL365_CLIENT_ID: ${{ vars.MERGEMAIL365_CLIENT_ID }}
           MERGEMAIL365_TENANT_ID: ${{ vars.MERGEMAIL365_TENANT_ID }}
-        run: uv run pyinstaller mergemail365.spec
+        run: uv run --frozen pyinstaller mergemail365.spec
 
       - name: Sign bundle (Windows)
         if: runner.os == 'Windows'
