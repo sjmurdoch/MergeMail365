@@ -1,6 +1,6 @@
 # Formal model of the web UI wizard (Quint)
 
-Status: steps 1 and 2 done (2026-10-02); step 2b (coverage and server-side job model) next.
+Status: steps 1 and 2 done (2026-10-02); steps 2b (coverage and server-side job model) and 2c (requirements, auth, dead ends) next.
 
 ## Motivation
 
@@ -30,6 +30,10 @@ Fixes (modelled by the `fixed` variant, where all invariants hold, and implement
 
 Found outside the model while fixing: **"Stop sending" does nothing.** `/api/job/<id>/stop` sets `job.stop_requested`, but neither `send_merge()` nor `sender.py` reads it, so the send runs to completion. Not fixed yet.
 
+Reported by the user (2026-10-03): **a signed-out user can go on to the Test step.** `goToStep(4)` only calls `checkAuthForStep4()`, which refreshes the auth display; nothing gates the step, the "Send test email" button or the send on being signed in. Confirmed by reading the code; no regression test yet.
+
+Found while checking that report, confirmed by `test_test_email_when_signed_out_waits_in_device_flow` in `tests/test_web.py`: **a signed-out web job falls into the CLI device-code flow.** The job's `token_provider` calls `auth.acquire_token()`, which falls back to `initiate_device_flow()` when the cache has no account. The device-code prompt (URL and code) is posted to the test log and the job thread blocks in `acquire_token_by_device_flow()` until the code is used or expires (Entra device codes typically last 15 minutes), with the job shown as running. A user who notices the code can sign in this way, so it is an undesigned second sign-in path rather than a hard failure. The same applies to a real send. The test characterises current behaviour and should be inverted when this is fixed. Not fixed yet.
+
 ## Why the model missed "Stop sending", and how the plan closes the gap
 
 The checker can only find bugs in behaviour the model describes. Stop was missed for three separate reasons, each of which would hide other bugs too:
@@ -39,6 +43,14 @@ The checker can only find bugs in behaviour the model describes. Stop was missed
 3. **Modelled from intent, not code.** Even with a Stop action, the natural way to write it ("stop sets a flag, the job ends as stopped") encodes the intended behaviour, and every check passes. The bug only appears if the action's guards and effects are copied from what the code does: the send loop's guard never reads `stop_requested`. Similar risk: any action written from documentation or memory rather than the handler.
 
 The changes below address these in turn: step 2b makes the model complete and code-faithful, and step 4 checks it against the real code, which catches intent-vs-code mistakes that careful modelling misses.
+
+## Why the model missed the signed-out Test step
+
+Two reasons. The first is reason 2 again: sign-in is not in the model at all (step 1 planned a `signedIn` variable, but it was dropped and auth deferred to step 5), so a test email failing for lack of sign-in is folded into "the job may fail". The second is new:
+
+4. **Missing requirement.** Even with sign-in modelled, no invariant says the state is wrong. All current invariants are safety properties of the form "nothing false is claimed or sent", and entering step 4 signed out breaks none of them: the test fails, Next stays disabled, nothing bad is sent. The bug is a dead end, a step the user can enter but never complete, and nobody had written down "don't let the user into a step they cannot finish". Stop had an intended behaviour the code fell short of; this requirement was never stated anywhere, so the checker had nothing to check against.
+
+The general property ("from every reachable state there is still a way to finish") is a possibility property that LTL, and so `quint verify --temporal`, cannot express. Step 2c therefore approximates it three ways: an explicit requirements list turned into invariants, a computed "can make progress" invariant, and witnesses that flag suspicious states for review.
 
 ## Step 1 results
 
@@ -125,6 +137,36 @@ Goal: every user-reachable control and server route is either modelled or delibe
 
 Then fix Stop: pass a stop check (e.g. a `should_stop` callable) from the job into `send_merge()` and the sender loops, set `JobStatus.STOPPED`, and add a Flask test (start a multi-recipient send with a gated `send_one`, stop, assert fewer than all were sent and status is `stopped`) plus a scenario test in the spec.
 
+### Step 2c — Requirements list, auth model and dead-end checks
+
+Goal: invariants come from written requirements, including "can this step succeed?", not only from honesty properties, and auth is modelled. Brought forward from step 5.
+
+**Requirements list (reason 4).**
+
+- Add `spec/requirements.md`: one numbered line per user-facing requirement, each naming the invariant or witness that checks it, or saying why it is unchecked. `tests/test_spec_coverage.py` (step 2b) also checks that every named invariant exists in `wizard.qnt` and is run by `spec/check.sh`.
+- For each step, write its gate as two requirements: what must be true to *enter* it, and what must be true for its main action to *succeed*. The entry gate must imply the success conditions that are under the app's control. Initial list:
+  - R1: entering step 2 requires a spreadsheet (exists: `stepNeedsData`).
+  - R2: entering step 4 requires being signed in (new: `step4NeedsSignIn`, checked on the transition, because a token can expire while on step 4).
+  - R3: while on step 4 signed out, "Send test email" is disabled and the sign-in control is shown (new: `testNeedsSignIn`).
+  - R4: "Send emails" on step 6 is only enabled while signed in (new: `sendNeedsSignIn`).
+  - R5: no web job ever waits for interactive input: a job started without a usable token fails at once with a "sign in" error (new: `noInteractiveAuthInJob`; the job's token provider is modelled from `_make_token_provider` and `acquire_token`, including the device-code fallback).
+  - R6: existing honesty invariants (`noUntestedSend`, `next4Honest`, `next5Honest`, `buttonsMatchFlags`, `sendScreenHonest`, `sendScreenNotStuck`, `back6Usable`) and the step 2b stop invariants.
+- Adding a step, button or job mode means adding its entry and success requirements to this list in the same change.
+
+**Auth in the model (reason 2).**
+
+- State: `signedIn` (the token cache has an account with a usable token), `authShown` (what the page last displayed from `/auth/status`, which can be stale), `signInPending` (polling during desktop interactive sign-in).
+- Actions, each citing its code: `signIn` (browser auth-code flow or desktop `POST /auth/interactive` + polling), `signOut` (`/auth/logout`), `tokenExpires` (any time, including mid-step and mid-send), `checkAuthStatus` (refreshes `authShown`, as `goToStep(4)` and the timer do).
+- The token provider in the job model: with `signedIn` the job proceeds; without it, `buggy` follows `acquire_token()` into a `waitingForDeviceCode` job state (which `noInteractiveAuthInJob` rejects), and `fixed` fails the job immediately.
+- Expected: `buggy` violates `step4NeedsSignIn` in about 5 steps (upload, next ×3 while signed out) and `noInteractiveAuthInJob` in about 6.
+
+**Dead-end checks (cheap net for unstated requirements).**
+
+- `canProgress`: an invariant computed from the actions' own guards: on every step, either a forward action is enabled and can succeed in the current state, or a fixing action is enabled (sign in, go back, edit). Written as a pure function of the state using the same guard definitions the actions use, so it can't drift from them. A signed-out step 4 with no way to sign in from that step fails it.
+- Witnesses (`quint run --witnesses`, supported by Quint 0.32.0; not yet tried here) for states that are allowed but suspicious, reported as counts: on a step whose main action cannot currently succeed; a job running with no page listening; a button enabled whose handler would return early. A non-zero count is reviewed: either it becomes a requirement and an invariant, or it is noted as acceptable in `requirements.md`.
+
+Then fix: gate step 4 (and "Send test email" / "Send emails") on sign-in, offering the sign-in control on step 4; make the web token provider silent-only (raise a "not signed in" error instead of the device-code fallback); add a Playwright regression for the step gate and invert the characterisation test.
+
 ### Step 3 — Restructure `app.js` around a reducer
 
 - Extract the workflow layer into a pure `reduce(state, event) → state` (no DOM, no fetch) with an explicit event list matching the Quint actions, and `render(state)` that sets panel visibility and button `disabled` state.
@@ -143,7 +185,7 @@ Then fix Stop: pass a stop check (e.g. a `should_stop` callable) from the job in
 
 ### Step 5 — Extend coverage
 
-Candidates, in order of past bug density: auth (sign-in polling, desktop interactive flow, token expiry during send), reload with an active send job (SSE reconnect), sheet change invalidating column selections, HTML/source toggle view state.
+Candidates, in order of past bug density: reload with an active send job (SSE reconnect), sheet change invalidating column selections, HTML/source toggle view state. (Auth moved to step 2c.)
 
 ## Out of scope
 
