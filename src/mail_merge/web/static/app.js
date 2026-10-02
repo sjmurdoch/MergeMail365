@@ -23,6 +23,11 @@ const state = {
 
     // Background job tracking
     currentJobId: null,
+    // Generation counters for test and dry-run jobs. Starting a job or
+    // resetting results bumps the counter; a job whose stamp no longer
+    // matches is stale and its completion is ignored (spec/wizard.qnt).
+    testGen: 0,
+    verifyGen: 0,
     sendResults: null,
 
     // Dirty flag for localStorage auto-save
@@ -43,6 +48,10 @@ const state = {
     resetTestAndVerify() {
         this.testPassed = false;
         this.verifyPassed = false;
+        this.testGen++;
+        this.verifyGen++;
+        $("btn-send-test").disabled = false;
+        $("btn-send-test").removeAttribute("aria-busy");
         $("btn-next-4").disabled = true;
         $("btn-next-5").disabled = true;
         $("test-log").innerHTML = "";
@@ -58,6 +67,8 @@ const state = {
         this.sendResults = null;
         this.testPassed = false;
         this.verifyPassed = false;
+        this.testGen++;
+        this.verifyGen++;
         this.sendStarted = false;
         this.currentJobId = null;
         this.previewIndex = 0;
@@ -1220,8 +1231,11 @@ async function sendTestEmail() {
     }
 
     state.testPassed = false;
+    const gen = ++state.testGen;
+    const isCurrent = () => gen === state.testGen;
     saveState();
 
+    $("btn-next-4").disabled = true;
     $("btn-send-test").disabled = true;
     $("btn-send-test").setAttribute("aria-busy", "true");
     hide("btn-retry-test");
@@ -1235,6 +1249,7 @@ async function sendTestEmail() {
     try {
         const resp = await apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } });
         const data = await resp.json();
+        if (!isCurrent()) return;
         if (!resp.ok) {
             showTestResult(false, data.error || "Failed to start job");
             return;
@@ -1251,9 +1266,9 @@ async function sendTestEmail() {
                 showTestResult(false, errMsg);
                 show("btn-retry-test");
             }
-        });
+        }, null, isCurrent);
     } catch (e) {
-        showTestResult(false, `Error: ${e.message}`);
+        if (isCurrent()) showTestResult(false, `Error: ${e.message}`);
     }
 }
 
@@ -1276,6 +1291,8 @@ function startVerify() {
     hide("verify-result");
     $("btn-next-5").disabled = true;
     state.verifyPassed = false;
+    const gen = ++state.verifyGen;
+    const isCurrent = () => gen === state.verifyGen;
     saveState();
 
     const form = buildJobFormData("dry_run");
@@ -1283,6 +1300,7 @@ function startVerify() {
     apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } })
         .then(r => r.json())
         .then(data => {
+            if (!isCurrent()) return;
             if (data.error) {
                 showVerifyResult(false, data.error);
                 return;
@@ -1308,9 +1326,9 @@ function startVerify() {
                 } else {
                     showVerifyResult(false, result.error || "Verification failed");
                 }
-            });
+            }, null, isCurrent);
         })
-        .catch(e => showVerifyResult(false, `Error: ${e.message}`));
+        .catch(e => { if (isCurrent()) showVerifyResult(false, `Error: ${e.message}`); });
 }
 
 function showVerifyResult(success, msg) {
@@ -1570,11 +1588,17 @@ function newMerge() {
 // ---------------------------------------------------------------------------
 // SSE streaming
 // ---------------------------------------------------------------------------
-function streamEvents(jobId, logPanelId, onComplete, onProgress) {
+function streamEvents(jobId, logPanelId, onComplete, onProgress, isCurrent = () => true) {
     const panel = $(logPanelId);
     const evtSource = new EventSource(`/api/job/${jobId}/events`);
 
     evtSource.onmessage = (e) => {
+        // A stale job (superseded or invalidated) gets no more log lines
+        // and its completion must not touch the current step's state.
+        if (!isCurrent()) {
+            evtSource.close();
+            return;
+        }
         const event = JSON.parse(e.data);
         if (event.type === "done") {
             evtSource.close();
@@ -1582,6 +1606,7 @@ function streamEvents(jobId, logPanelId, onComplete, onProgress) {
             apiFetch(`/api/job/${jobId}/status`)
                 .then(r => r.json())
                 .then(data => {
+                    if (!isCurrent()) return;
                     onComplete(data);
                     saveState();
                 });
@@ -1606,10 +1631,11 @@ function streamEvents(jobId, logPanelId, onComplete, onProgress) {
 
     evtSource.onerror = () => {
         evtSource.close();
+        if (!isCurrent()) return;
         apiFetch(`/api/job/${jobId}/status`)
             .then(r => r.json())
-            .then(data => onComplete(data))
-            .catch(() => onComplete({ status: "failed", error: "Connection lost" }));
+            .then(data => { if (isCurrent()) onComplete(data); })
+            .catch(() => { if (isCurrent()) onComplete({ status: "failed", error: "Connection lost" }); });
     };
 }
 
