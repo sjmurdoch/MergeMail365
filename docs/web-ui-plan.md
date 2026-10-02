@@ -548,6 +548,7 @@ Desktop mode applies all of the above unchanged. The pywebview window is just an
 - **Fixed 2s delay**: Not configurable, prevents rate-limit issues.
 - **Mandatory test email**: Must send and verify a test email before proceeding.
 - **Mandatory dry run**: Must complete a dry run before the Send step.
+- Both are enforced in the browser only, by design: they guard against mistakes in the wizard, not against a client that bypasses it, which would already hold the startup and CSRF tokens. `/api/start-job` does not check them.
 - **Confirmation dialog**: Step 5 requires explicit confirmation with recipient count.
 - **No auto-send**: The wizard requires deliberate progression through all steps.
 

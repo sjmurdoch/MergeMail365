@@ -1,6 +1,6 @@
 # Formal model of the web UI wizard (Quint)
 
-Status: steps 1 and 2 done (2026-10-02), except server-side enforcement of test/dry run before send; step 3 next.
+Status: steps 1 and 2 done (2026-10-02); step 3 next.
 
 ## Motivation
 
@@ -19,7 +19,7 @@ The first bug was spotted by reading the code while evaluating this idea; the mo
 5. **Retesting leaves Next enabled while `testPassed` is false** (`buttonsMatchFlags`). `sendTestEmail()` clears `testPassed` but not `btn-next-4`; if the retest fails the button stays enabled and does nothing.
 6. **Back on step 6 stays disabled after New merge** (`back6Usable`). `startSend()` disables `btn-back-6`; neither `prepareSend()` nor `newMerge()` re-enables it.
 
-Contributing factor: `/api/start-job` stores but does not check `test_passed` / `verify_passed`. The "mandatory test and dry run" safety limit is enforced only in the browser.
+Browser-only enforcement is intended: `/api/start-job` does not check that a test email and dry run passed, and that is a deliberate decision (2026-10-02), not a bug. The checks guard against mistakes made in the wizard, not against a client that bypasses it, which would already hold the startup and CSRF tokens. So the fixes below are all about the browser getting its own state right, which is what the model checks.
 
 Fixes (modelled by the `fixed` variant, where all invariants hold, and implemented in step 2):
 
@@ -78,11 +78,11 @@ Exit criteria: spec type-checks; the checker finds the stale-completion countere
 
 ### Step 2 — Confirm and fix real bugs
 
-Done except the server-side enforcement item, which changes the `/api/start-job` contract and needs a design decision (how the server identifies "the same content" and records a passed test without trusting `/api/state`).
+Done.
 
 - Reproduce each counterexample in the real UI with a Playwright (Python) regression test in `tests/test_web_e2e.py`, using a mocked Graph endpoint that delays the test job response.
 - Fix in `app.js`: version/generation stamp on job completions; ignore stale ones.
-- Add server-side enforcement in `/api/start-job`: `mode=send` requires a passed test and dry run for the same content hash in the session.
+- ~~Add server-side enforcement in `/api/start-job`~~: dropped. Enforcing the test email and dry run in the browser is sufficient (see "Bugs found").
 - Update the spec to the fixed design and keep both variants (`buggy` as a regression record) or just the fixed one.
 
 ### Step 3 — Restructure `app.js` around a reducer
