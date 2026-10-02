@@ -829,10 +829,14 @@ document.addEventListener('trix-file-accept', (e) => {
 // Clean pasted HTML before Trix's parser converts block-element margins
 // into literal <br> tags (which causes double spacing).  Simplify the
 // block structure so Trix can rebuild it cleanly.
+// The clipboard HTML is untrusted, and Trix only sanitises it after this
+// handler, so parse it in an inert document: an element of the live
+// document would load <img> and fire inline handlers such as onerror.
 document.addEventListener('trix-before-paste', (e) => {
     const paste = e.paste;
     if (!paste.html) return;
-    const div = document.createElement("div");
+    const doc = document.implementation.createHTMLDocument("");
+    const div = doc.createElement("div");
     div.innerHTML = paste.html;
     // Remove empty paragraphs/divs (margin-only spacers)
     for (const el of div.querySelectorAll("p, div")) {
@@ -933,8 +937,9 @@ function validatePlaceholders() {
     const el = $("placeholder-errors");
     if (bad.length > 0) {
         const unique = [...new Set(bad)];
+        const available = state.spreadsheetData.columns.map(escapeHtml).join(", ");
         el.innerHTML = unique.map(p =>
-            `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${state.spreadsheetData.columns.join(", ")}`
+            `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${available}`
         ).join("<br>");
         show(el);
     } else {

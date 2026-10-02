@@ -38,6 +38,55 @@ def sample_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return path
 
 
+XSS_HEADER = '<img src=x onerror="window._xssFired=1">'
+
+
+@pytest.fixture(scope="module")
+def xss_header_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Spreadsheet whose column header is an HTML injection payload."""
+    path = tmp_path_factory.mktemp("data") / "xss.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["email", XSS_HEADER])
+    ws.append(["alice@example.com", "x"])
+    wb.save(path)
+    return path
+
+
+# What real clipboard pastes produce in the email body, recorded from the
+# code before the paste handler was changed to parse in an inert document.
+PASTE_EXPECTED: dict[str, str] = {
+    "formatted": (
+        '<h1>Title</h1><p>Hi <strong>{{name}}</strong>, see '
+        '<a href="https://example.com/x?a=1&amp;b=2">the link</a>.</p>'
+        '<ul><li>One</li><li>Two</li></ul><p><em>Thanks</em> END</p>'
+    ),
+    "word": '<p>Line 1</p><p>Line 2 END</p>',
+    "image": (
+        '<p>Logo:</p><p><figure data-trix-attachment="{&quot;contentType&quot;:&quot;image'
+        '&quot;,&quot;url&quot;:&quot;https://example.com/logo.png&quot;}" '
+        'data-trix-content-type="image" class="attachment attachment--preview">'
+        '<img src="https://example.com/logo.png"><figcaption class="attachment__caption">'
+        '</figcaption></figure></p><p>END</p>'
+    ),
+    "plain_text": '<p>Plain {{name}}<br>Second line END</p>',
+}
+
+SPECIAL_COLUMNS = ["email", "First Name", "R&D budget", "O'Brien \"Q\"", "Größe", "Price <GBP>"]
+
+
+@pytest.fixture(scope="module")
+def special_columns_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Legitimate column names containing characters that HTML escaping touches."""
+    path = tmp_path_factory.mktemp("data") / "special.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(SPECIAL_COLUMNS)
+    ws.append(["alice@example.com", "Alice", "£5k & up", "Q1", "M", "<10"])
+    wb.save(path)
+    return path
+
+
 @pytest.fixture(scope="module")
 def active_sheet2_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Spreadsheet where the active sheet is not the first one."""
@@ -467,6 +516,51 @@ class TestComposeStep:
         assert "logo.png" in result
         assert "<p></p>" not in result
 
+    def _before_paste(self, page: Page, html: str) -> str:
+        return page.evaluate("""(html) => {
+            const event = new CustomEvent('trix-before-paste', {cancelable: true});
+            event.paste = { html: html };
+            document.dispatchEvent(event);
+            return event.paste.html;
+        }""", html)
+
+    def test_trix_paste_cleanup_exact_output(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        """Pin the exact cleaned HTML so changing how it's parsed can't alter it."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        cases = {
+            '<p>A<br></p><p></p><div> </div><p><b>B</b> <a href="https://e.com/">l</a></p>':
+                '<p>A</p><p><b>B</b> <a href="https://e.com/">l</a></p>',
+            '<div><p>Nested</p><div><br></div></div><ul><li>x</li></ul>':
+                '<div><p>Nested</p></div><ul><li>x</li></ul>',
+            '<p><img src="logo.png"></p><table><tr><td>c</td></tr></table>':
+                '<p><img src="logo.png"></p><table><tbody><tr><td>c</td></tr></tbody></table>',
+            '<meta charset="utf-8"><p style="margin:0">Hi {{name}}</p><br>':
+                '<meta charset="utf-8"><p style="margin:0">Hi {{name}}</p>',
+        }
+        for html, expected in cases.items():
+            assert self._before_paste(page, html) == expected, html
+
+    def test_trix_paste_does_not_run_pasted_handlers(
+        self, authenticated_page: Page, sample_xlsx: Path,
+    ):
+        """Event handlers in pasted HTML must not run while it is being cleaned."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        self._before_paste(
+            page,
+            '<p>Hi</p><img src="x" onerror="window._xssFired=1">'
+            '<svg><image href="x" onerror="window._xssFired=2"></image></svg>',
+        )
+        page.wait_for_timeout(500)
+        assert page.evaluate("() => window._xssFired === undefined")
+
     def _open_trix(self, page: Page, sample_xlsx: Path) -> None:
         _upload_and_go_to_compose(page, sample_xlsx)
         page.check("#html-toggle")
@@ -505,6 +599,51 @@ class TestComposeStep:
         )
         assert page.evaluate("() => window._pasteSeen") == "string"
         assert page.locator("#body-input").input_value() == "<p>Rewritten</p><p>Hi {{name}}</p>"
+
+    def _clipboard_paste(self, page: Page, sample_xlsx: Path, html: str | None, text: str) -> str:
+        """Paste via the real clipboard into Trix and return the resulting body HTML."""
+        page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+        self._open_trix(page, sample_xlsx)
+        page.evaluate("""async ([html, text]) => {
+            const items = {'text/plain': new Blob([text], {type: 'text/plain'})};
+            if (html !== null) items['text/html'] = new Blob([html], {type: 'text/html'});
+            await navigator.clipboard.write([new ClipboardItem(items)]);
+        }""", [html, text])
+        page.focus("trix-editor")
+        page.keyboard.press("ControlOrMeta+V")
+        page.wait_for_function(
+            "() => document.getElementById('body-input').value.includes('END')"
+        )
+        return page.locator("#body-input").input_value()
+
+    PASTE_CASES = {
+        "formatted": (
+            '<h1>Title</h1><p>Hi <strong>{{name}}</strong>, see '
+            '<a href="https://example.com/x?a=1&amp;b=2">the link</a>.</p>'
+            '<ul><li>One</li><li>Two</li></ul><p></p><p><em>Thanks</em> END</p>',
+            "Title Hi {{name}} END",
+        ),
+        "word": (
+            '<meta charset="utf-8"><p class=MsoNormal style="margin:0cm">Line 1<o:p></o:p></p>'
+            '<p class=MsoNormal style="margin:0cm"><o:p>&nbsp;</o:p></p>'
+            '<p class=MsoNormal style="margin:0cm">Line 2 END<o:p></o:p></p>',
+            "Line 1 Line 2 END",
+        ),
+        "image": (
+            '<p>Logo:</p><p><img src="https://example.com/logo.png" alt="logo"></p><p>END</p>',
+            "Logo: END",
+        ),
+        "plain_text": (None, "Plain {{name}}\nSecond line END"),
+    }
+
+    @pytest.mark.parametrize("case", list(PASTE_CASES))
+    def test_trix_clipboard_paste_result(
+        self, authenticated_page: Page, sample_xlsx: Path, case: str,
+    ):
+        """Pin what ends up in the email body for typical real pastes."""
+        html, text = self.PASTE_CASES[case]
+        body = self._clipboard_paste(authenticated_page, sample_xlsx, html, text)
+        assert body == PASTE_EXPECTED[case]
 
     def test_trix_toolbar_bold(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
@@ -670,6 +809,126 @@ class TestPlaceholderValidation:
         # Wait for debounced validation to run
         page.wait_for_selector("#placeholder-errors:not(.hidden)", timeout=3000)
         expect(page.locator("#placeholder-errors")).to_contain_text("nonexistent_column")
+
+    def test_error_lists_available_columns(self, authenticated_page: Page, sample_xlsx: Path):
+        """The error names the bad placeholder in bold and lists every column."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.fill("#subject-input", "Hi {{first}} {{last}}")
+        page.wait_for_selector("#placeholder-errors:not(.hidden)", timeout=3000)
+        errors = page.locator("#placeholder-errors")
+        expect(errors).to_have_text(
+            "No column named {{first}}. Available: name, email, company"
+            "No column named {{last}}. Available: name, email, company"
+        )
+        expect(errors.locator("strong")).to_have_text(["{{first}}", "{{last}}"])
+        expect(errors.locator("br")).to_have_count(1)
+
+    def test_special_column_names_shown_exactly(
+        self, authenticated_page: Page, special_columns_xlsx: Path
+    ):
+        """Column names with &, <, quotes and non-ASCII appear exactly as written."""
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(special_columns_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        expect(page.locator("#preview-table thead th")).to_have_text(SPECIAL_COLUMNS)
+        expect(page.locator("#preview-table tbody tr").first.locator("td")).to_have_text(
+            ["alice@example.com", "Alice", "£5k & up", "Q1", "M", "<10"])
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        # Dropdowns and chips
+        for col in SPECIAL_COLUMNS:
+            expect(page.locator("#email-column option", has_text=col)).to_have_count(1)
+        expect(page.locator("#chips .chip")).to_have_text(
+            [f"{{{{{col}}}}}" for col in SPECIAL_COLUMNS])
+        # Unknown-placeholder message
+        page.fill("#subject-input", "Hi {{nope}}")
+        page.wait_for_selector("#placeholder-errors:not(.hidden)", timeout=3000)
+        expect(page.locator("#placeholder-errors")).to_have_text(
+            "No column named {{nope}}. Available: " + ", ".join(SPECIAL_COLUMNS)
+        )
+        _assert_dom_valid(page)
+
+    def test_special_column_placeholders_still_resolve(
+        self, authenticated_page: Page, special_columns_xlsx: Path
+    ):
+        """A valid placeholder for a column with a space shows no error and renders."""
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(special_columns_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        page.select_option("#email-column", "email")
+        page.fill("#subject-input", "Hello {{First Name}}")
+        page.fill("#body-input", "Hi {{first name}}")
+        page.wait_for_timeout(800)  # past the validation debounce
+        expect(page.locator("#placeholder-errors")).to_have_class(re.compile("hidden"))
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        expect(page.locator("#preview-subject")).to_have_text("Hello Alice")
+
+    def test_html_in_column_header_is_not_executed(
+        self, authenticated_page: Page, xss_header_xlsx: Path
+    ):
+        """A spreadsheet header containing markup is shown as text, never run."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, xss_header_xlsx)
+        page.fill("#subject-input", "Hello {{nonexistent_column}}")
+        page.wait_for_selector("#placeholder-errors:not(.hidden)", timeout=3000)
+        errors = page.locator("#placeholder-errors")
+        expect(errors).to_contain_text(XSS_HEADER)
+        expect(errors.locator("img")).to_have_count(0)
+        # Give a broken image time to fire onerror, had one been created
+        page.wait_for_timeout(500)
+        assert page.evaluate("() => window._xssFired === undefined")
+
+
+class TestAttachmentsFromBrowser:
+    def test_browser_attachments_reach_send_merge_intact(
+        self, authenticated_page: Page, sample_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Files picked in the Attachments field keep their names and bytes.
+
+        Uses the app's own buildJobFormData(), so the multipart filenames are
+        exactly what a real browser sends.
+        """
+        import mail_merge.api
+        real_send_merge = mail_merge.api.send_merge
+        captured: list[tuple[str, bytes]] = []
+
+        def recording_send_merge(**kwargs):
+            captured.extend((Path(p).name, Path(p).read_bytes())
+                            for p in kwargs.get("attachment") or [])
+            return real_send_merge(**kwargs)
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", recording_send_merge)
+
+        files = [
+            ("Q3 report (final).pdf", "application/pdf", b"%PDF-1.4 data"),
+            ("Café menu – 2026.txt", "text/plain", "héllo".encode()),
+            ("a.txt", "text/plain", b"first"),
+        ]
+        page = authenticated_page
+        _setup_to_preview(page, sample_xlsx)
+        page.set_input_files("#attachment-input", [
+            {"name": n, "mimeType": m, "buffer": b} for n, m, b in files
+        ])
+        result = page.evaluate("""async () => {
+            const resp = await fetch("/api/start-job", {
+                method: "POST", body: buildJobFormData("dry_run"),
+                headers: {"X-CSRF-Token": CSRF_TOKEN},
+            });
+            const {job_id, error} = await resp.json();
+            if (!job_id) return {status: resp.status, error};
+            for (let i = 0; i < 100; i++) {
+                const s = await (await fetch(`/api/job/${job_id}/status`)).json();
+                if (s.status === "completed" || s.status === "failed") return s;
+                await new Promise(r => setTimeout(r, 100));
+            }
+            return {status: "timeout"};
+        }""")
+        assert result["status"] == "completed", result
+        assert captured == [(n, b) for n, _, b in files]
 
 
 class TestStepGating:
