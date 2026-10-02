@@ -1,6 +1,69 @@
 # Formal model of the web UI wizard (Quint)
 
-Status: steps 1 and 2 done (2026-10-02); steps 2b (coverage and server-side job model) and 2c (requirements, auth, dead ends) next.
+## Current status (2026-10-03)
+
+Steps 1 and 2 are done. Steps 2b (coverage inventory and server-side job model) and 2c (requirements list, auth model, dead-end checks) are next, in that order, then steps 3–5. Nothing is in progress and the working tree was clean at the end of the session.
+
+### Bugs fixed
+
+All six were found by the model, reproduced in the real UI by tests that failed before the fix, and fixed. Details under "Bugs found".
+
+| # | Bug | Fix commit | Regression tests |
+|---|---|---|---|
+| 1 | Test email finishing after Back + edit marks the edited content as tested | `a456535` | `test_late_test_email_does_not_pass_edited_content` |
+| 2 | Old dry run finishing during a newer one enables Next on step 5 | `a456535` | `test_late_dry_run_does_not_pass_edited_content` |
+| 5 | Re-sending a test leaves Next enabled while it runs | `a456535` | `test_resending_test_disables_next` |
+| 6 | Back on step 6 stays disabled after New merge | `f58faca` | `test_back_enabled_on_step6_after_new_merge` |
+| 3 | Reload after a test email or dry run jumps to the Send step | `b56e713` | `test_reload_during_test_email_stays_off_send_step`, `test_config_does_not_resume_test_or_dry_run` |
+| 4 | Reload after a finished job hangs on "Sending…" | `b56e713` | `test_reload_after_test_email_stays_off_send_step`, `test_reload_after_send_shows_results`, `test_events_end_for_finished_job_on_reconnect` |
+
+Playwright regressions are in `tests/test_web_e2e_workflow.py`; Flask ones in `tests/test_web.py` (`TestJobs`).
+
+### Bugs remaining
+
+| Bug | Found by | Status | Plan step |
+|---|---|---|---|
+| "Stop sending" does nothing: `job.stop_requested` is set but never read | Reading code while fixing | Confirmed by reading code; no test yet | 2b |
+| A signed-out user can go on to the Test step (and Send) | User report | Confirmed by reading code; no test yet | 2c |
+| A signed-out web job falls into the CLI device-code flow and blocks | Checking the report above | Confirmed by `test_test_email_when_signed_out_waits_in_device_flow` (characterisation test, asserts current behaviour; invert when fixed) | 2c |
+
+Possible link, unverified: the 0.4.1 changelog entry describes a Windows report that "sending a test email sometimes did nothing for several minutes until the user clicked Back". A test email waiting in the device-code flow (silent token acquisition failing, so the job blocks) would look like that. Worth checking against the stall logs when step 2c fixes the token provider.
+
+Decided, not a bug: the test email and dry run are enforced in the browser only (2026-10-02).
+
+### Next actions
+
+1. Step 2b: `spec/coverage.toml` + `tests/test_spec_coverage.py`; source-cite every action in `spec/wizard.qnt`; model the send loop and Stop; confirm `buggy` violates `stopHonoured`; fix Stop.
+2. Step 2c: `spec/requirements.md`; model auth and the token provider; `step4NeedsSignIn`, `noInteractiveAuthInJob`, `canProgress`; witnesses; fix the sign-in gate and the token provider, invert the characterisation test.
+3. Consider splitting the job model into `spec/jobs.qnt` once 2b makes `wizard.qnt` large.
+
+### Resuming: how to run the model
+
+Quint is not installed in the repo yet (a pinned `spec/package.json` is part of step 4). Use Quint 0.32.0; 0.33.0 (2026-09-28) is out of the 7-day cooldown from 2026-10-05, so check its changelog before bumping.
+
+```sh
+# Type check and scenario tests (no Java needed; the TypeScript backend avoids downloading the Rust evaluator)
+npx -y @informalsystems/quint@0.32.0 typecheck spec/wizard.qnt
+npx -y @informalsystems/quint@0.32.0 test spec/wizard.qnt --main=buggy --max-samples=1 --backend=typescript
+npx -y @informalsystems/quint@0.32.0 test spec/wizard.qnt --main=fixed --max-samples=1 --backend=typescript
+
+# Bounded model checking (Apalache, needs Java); each variant takes about 4 minutes.
+# check.sh takes a single executable, so install Quint into a directory first.
+npm install --prefix "$TMPDIR/quint" @informalsystems/quint@0.32.0
+JAVA_HOME=/opt/homebrew/opt/openjdk PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
+  spec/check.sh --quint "$TMPDIR/quint/node_modules/.bin/quint" buggy
+```
+
+Expected results: `buggy` violates `noUntestedSend`, `next4Honest`, `buttonsMatchFlags`, `sendScreenHonest`, `sendScreenNotStuck` and holds the rest at 16 steps; `fixed` holds all eight; all eight scenario tests pass in both variants.
+
+Running under the Claude Code sandbox needs these workarounds:
+
+- npm's default cache had root-owned files and wasn't writable: set `npm_config_cache` to a directory under `$TMPDIR`.
+- Set `QUINT_HOME` under `$TMPDIR`. Quint's own Apalache download produced an empty directory; download `https://github.com/apalache-mc/apalache/releases/download/v0.56.1/apalache.tgz` with curl and unpack it into `$QUINT_HOME/apalache-dist-0.56.1/`.
+- The Apalache launcher's `mktemp -d -t` uses the macOS per-user temp folder, which the sandbox blocks: edit line 56 of `apalache/bin/apalache-mc` to `mktemp -d "${TMPDIR}/SANYXXXXXXXXXX"`.
+- Apalache listens on local port 8822, so `quint verify` must run outside the sandbox (or with `sandbox.network.allowLocalBinding: true`).
+- `uv run` needs to run outside the sandbox (its cache in `~/.cache/uv` isn't writable), as do the Playwright tests.
+- `/usr/bin/java` is Apple's stub and comes first on the sandbox's `PATH`; use Homebrew's OpenJDK as above.
 
 ## Motivation
 
