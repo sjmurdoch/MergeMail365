@@ -1,6 +1,6 @@
 # Formal model of the web UI wizard (Quint)
 
-Status: step 1 done (2026-10-02); step 2 next.
+Status: steps 1 and 2 done (2026-10-02), except server-side enforcement of test/dry run before send; step 3 next.
 
 ## Motivation
 
@@ -8,9 +8,9 @@ Many past web/desktop UI bugs were reachable states nobody tested: stale test/ve
 
 A model checked in isolation only checks our intentions. The plan therefore ends with conformance testing between the model and the real code, and moves `app.js` toward a shape that maps one-to-one onto the model.
 
-## Bugs found (model-level; not yet reproduced in the browser)
+## Bugs found
 
-The first bug was spotted by reading the code while evaluating this idea; the model checker then reproduced it and found the others. Each has a scenario test in `spec/wizard.qnt` replaying the counterexample. All are confirmed against the model only, and step 2 must reproduce them in the real UI before fixing.
+The first bug was spotted by reading the code while evaluating this idea; the model checker then reproduced it and found the others. Each has a scenario test in `spec/wizard.qnt` replaying the counterexample, and all six were reproduced in the real UI by `tests/test_web_e2e_workflow.py` (every test failed before the fixes) and fixed in step 2.
 
 1. **Stale test completion marks edited content as tested** (`next4Honest`, `noUntestedSend`). On step 4, click "Send test email". While it runs, click Back to step 3, then Back to step 2. `confirmGoBack()` only prompts and resets when a flag is already `true`, so nothing invalidates the in-flight job. When it finishes, the `streamEvents` callback in `sendTestEmail()` sets `state.testPassed = true` and enables `btn-next-4` unconditionally. Edit the body, go forward: step 4 shows as passed, and the edited content can be dry-run and sent without ever being test-sent. Counterexample (16 steps): `upload next1 next2 next3 sendTestEmail back4 back3 edit complete next2 next3 next4 complete next5 typeSend startSend`.
 2. **Stale dry-run completion** (`next5Honest`). Leave step 5 while dry run A is in flight, go back, edit, re-test, return to step 5 (starting dry run B). If A completes first it sets `verifyPassed = true` and enables `btn-next-5`, so Send is reachable without a dry run of the current content. Needs more than 16 steps, so only the scenario test covers it.
@@ -21,12 +21,14 @@ The first bug was spotted by reading the code while evaluating this idea; the mo
 
 Contributing factor: `/api/start-job` stores but does not check `test_passed` / `verify_passed`. The "mandatory test and dry run" safety limit is enforced only in the browser.
 
-Fixes modelled by the `fixed` variant (all invariants hold):
+Fixes (modelled by the `fixed` variant, where all invariants hold, and implemented in step 2):
 
-- Per-kind generation counters (`testGen`, `verifyGen`) bumped by `resetTestAndVerify()`, `newMerge()` and when starting a job; completion callbacks are ignored when their generation is stale. `resetTestAndVerify()` also re-enables `btn-send-test`.
+- Per-kind generation counters (`state.testGen`, `state.verifyGen`) bumped by `resetTestAndVerify()`, `resetAll()` and when starting a job; `streamEvents()` takes an `isCurrent` guard, so a stale job's log lines and completion are ignored. `resetTestAndVerify()` also re-enables `btn-send-test`.
 - `sendTestEmail()` disables `btn-next-4`.
 - `prepareSend()` re-enables `btn-back-6`.
-- `/api/config` only reports send-mode jobs as active; a finished send is reported with its results rather than reconnected to the drained stream.
+- `Job` records its `mode`; `/api/config` only reports send jobs as active. The SSE stream also ends when the job has finished and its queue is empty, so reconnecting to a finished send (or one whose sentinel an old stream took) shows the results.
+
+Found outside the model while fixing: **"Stop sending" does nothing.** `/api/job/<id>/stop` sets `job.stop_requested`, but neither `send_merge()` nor `sender.py` reads it, so the send runs to completion. Not fixed yet.
 
 ## Step 1 results
 
@@ -75,6 +77,8 @@ Invariants (the UI projection is what users see, so assert on it):
 Exit criteria: spec type-checks; the checker finds the stale-completion counterexample; a `fixed` variant passes all invariants under `quint verify`. Done — see "Step 1 results".
 
 ### Step 2 — Confirm and fix real bugs
+
+Done except the server-side enforcement item, which changes the `/api/start-job` contract and needs a design decision (how the server identifies "the same content" and records a passed test without trusting `/api/state`).
 
 - Reproduce each counterexample in the real UI with a Playwright (Python) regression test in `tests/test_web_e2e.py`, using a mocked Graph endpoint that delays the test job response.
 - Fix in `app.js`: version/generation stamp on job completions; ignore stale ones.

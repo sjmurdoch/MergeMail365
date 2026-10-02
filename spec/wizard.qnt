@@ -272,8 +272,8 @@ module wizard {
         if (sj.done) {
           // Bug: the job's event queue was drained by the previous page,
           // so the new SSE stream only gets keepalives and never "done".
-          // FIXED: the server reports finished jobs and the page shows the
-          // results directly.
+          // FIXED: the server ends the stream of a finished job with an
+          // empty queue, so the page fetches and shows the results.
           if (FIXED) { ...reconnected, doneNav: true } else reconnected
         } else {
           // Reattach the send-step callback to whatever job this is.
