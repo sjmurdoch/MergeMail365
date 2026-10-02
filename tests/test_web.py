@@ -1,5 +1,6 @@
 """Tests for the web interface."""
 
+import logging
 import os
 import threading
 import time
@@ -1087,6 +1088,64 @@ class TestJobs:
             t.join(timeout=10)
             assert not t.is_alive(), "event stream did not end"
         assert all(b.rstrip().endswith('data: {"type": "done"}') for b in bodies)
+
+    @patch("mail_merge.auth._save_cache")
+    @patch("mail_merge.auth._load_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
+    def test_test_email_when_signed_out_waits_in_device_flow(
+        self, mock_app_cls, mock_load_cache, mock_save_cache, web_client, sample_xlsx_web, caplog,
+    ):
+        """Characterises current behaviour (a known bug, see docs/quint-model-plan.md).
+
+        The wizard lets a signed-out user reach step 4. The job's token
+        provider calls auth.acquire_token(), which falls back to the CLI's
+        device-code flow when the cache has no account: the device-code
+        prompt is posted to the test log and the job thread blocks until the
+        code is used or expires. Invert this test when the behaviour is fixed.
+        """
+        # setup_logging() sets the root logger to INFO in the real app.
+        caplog.set_level(logging.INFO, logger="mail_merge")
+        mock_load_cache.return_value = MagicMock()
+        mock_app = _mock_msal_app()
+        mock_app.get_accounts.return_value = []
+        prompt = ("To sign in, use a web browser to open the page "
+                  "https://microsoft.com/devicelogin and enter the code ABCD1234")
+        mock_app.initiate_device_flow.return_value = {"user_code": "ABCD1234", "message": prompt}
+        device_flow_waiting = threading.Event()
+        give_up = threading.Event()
+
+        def wait_for_device_code(flow, **kwargs):
+            device_flow_waiting.set()
+            give_up.wait(10)
+            return {"error": "expired_token", "error_description": "Device code expired"}
+
+        mock_app.acquire_token_by_device_flow.side_effect = wait_for_device_code
+        mock_app_cls.return_value = mock_app
+
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        resp = web_client.post(
+            "/api/start-job",
+            data={"mode": "test_email", "test_email": "me@example.com",
+                  "email_column": "email", "subject": "Hello {{name}}", "body": "Body."},
+            headers={"X-CSRF-Token": csrf},
+        )
+        try:
+            assert resp.status_code == 200, resp.get_json()
+            job_id = resp.get_json()["job_id"]
+            assert device_flow_waiting.wait(5), "device-code flow was not started"
+            time.sleep(0.5)
+            assert web_client.get(f"/api/job/{job_id}/status").get_json()["status"] == "running"
+            from mail_merge.web.app import _jobs
+            logged = [e["data"]["message"] for e in list(_jobs[job_id].events.queue)
+                      if e and e.get("type") == "log"]
+            assert prompt in logged
+        finally:
+            give_up.set()
+        status = wait_for_job(web_client, job_id)
+        assert status["status"] == "failed"
+        assert "Device code expired" in status["error"]
 
     def test_send_enforces_fixed_delay(self, web_client, sample_xlsx_web):
         """The web UI always uses delay=2.0 regardless of what the client sends."""
