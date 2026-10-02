@@ -12,3 +12,6 @@ projects/
 ~$*
 *.pfx
 *.p12
+
+# Apalache model checker output
+_apalache-out/
