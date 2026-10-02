@@ -1,6 +1,6 @@
 # Formal model of the web UI wizard (Quint)
 
-Status: steps 1 and 2 done (2026-10-02); step 3 next.
+Status: steps 1 and 2 done (2026-10-02); step 2b (coverage and server-side job model) next.
 
 ## Motivation
 
@@ -29,6 +29,16 @@ Fixes (modelled by the `fixed` variant, where all invariants hold, and implement
 - `Job` records its `mode`; `/api/config` only reports send jobs as active. The SSE stream also ends when the job has finished and its queue is empty, so reconnecting to a finished send (or one whose sentinel an old stream took) shows the results.
 
 Found outside the model while fixing: **"Stop sending" does nothing.** `/api/job/<id>/stop` sets `job.stop_requested`, but neither `send_merge()` nor `sender.py` reads it, so the send runs to completion. Not fixed yet.
+
+## Why the model missed "Stop sending", and how the plan closes the gap
+
+The checker can only find bugs in behaviour the model describes. Stop was missed for three separate reasons, each of which would hide other bugs too:
+
+1. **Missing action.** The model has no Stop action. Nothing checked that every control in the UI has a counterpart in the model, so the gap was invisible. Similar risk: any button, event handler or route added without a model action (Prev/Next on the preview, send mode toggle, sheet change, sign-in/out, Test connection).
+2. **Server side too abstract.** A send is one opaque job that completes nondeterministically. With no count of emails sent and no stop flag, "stop has no effect" and "stop works" are the same behaviour in the model. Similar risk: anything inside `send_merge()` or the job thread that the UI relies on (progress reporting, partial failure, results after stop, retry and throttling as seen by the UI).
+3. **Modelled from intent, not code.** Even with a Stop action, the natural way to write it ("stop sets a flag, the job ends as stopped") encodes the intended behaviour, and every check passes. The bug only appears if the action's guards and effects are copied from what the code does: the send loop's guard never reads `stop_requested`. Similar risk: any action written from documentation or memory rather than the handler.
+
+The changes below address these in turn: step 2b makes the model complete and code-faithful, and step 4 checks it against the real code, which catches intent-vs-code mistakes that careful modelling misses.
 
 ## Step 1 results
 
@@ -85,6 +95,36 @@ Done.
 - ~~Add server-side enforcement in `/api/start-job`~~: dropped. Enforcing the test email and dry run in the browser is sufficient (see "Bugs found").
 - Update the spec to the fixed design and keep both variants (`buggy` as a regression record) or just the fixed one.
 
+### Step 2b — Coverage inventory and server-side job model
+
+Goal: every user-reachable control and server route is either modelled or deliberately excluded, and the server's job lifecycle is modelled at the granularity the UI depends on.
+
+**Coverage inventory (reason 1).**
+
+- Add `spec/coverage.toml` listing every entry point: each `onclick` in `templates/index.html`, each `addEventListener` and timer (`setInterval`/`setTimeout`) in `app.js`, each Flask route in `web/app.py`, plus page reload and SSE/EventSource events. Each entry maps to a model action name, or to `out_of_scope = "<reason>"`.
+- Add `tests/test_spec_coverage.py` (fast, no browser): extract the entry points from those files with regular expressions, and fail if any entry point is missing from `coverage.toml`, or if a listed model action doesn't exist in `spec/wizard.qnt`. A new button or route then fails CI until someone decides how it is modelled.
+- First pass will put Stop, preview Prev/Next, send mode toggle, sheet change, sign-in/out and the session timer into the inventory, each either modelled or explicitly excluded.
+
+**Code-faithful actions (reason 3).**
+
+- Each action in `wizard.qnt` gets a comment naming the function(s) it models (`// app.js: stopSend(); web/app.py: api_job_stop`), and its guards and updates are transcribed from that code, including what the code fails to do. The `buggy` variant is the faithful transcription; intended behaviour goes only in `fixed`.
+- Review rule: when a handler changes, the action citing it must be re-checked against it in the same commit. `CLAUDE.md` already says to update the model when wizard behaviour changes; extend that to "update the action that cites the function".
+
+**Server-side job model (reason 2).**
+
+- Model a send job as a loop over recipients rather than one completion: `sent: int`, `total: int` (small constant, e.g. 3), `stopRequested: bool`, `status` (`Running | Completed | Failed | Stopped`). One action sends the next email; its guard is transcribed from the `send_all` / `send_bcc_blast` loop (today: `sent < total`, no stop check). A separate action finishes the job.
+- Add the Stop action: `stopSend` (UI, enabled while sending) → `api_job_stop` sets `stopRequested`.
+- Ghost field `sentAfterStop: int`, incremented when an email is sent while `stopRequested` is true.
+- Safety invariants: `stopHonoured` (`sentAfterStop <= 1`, allowing the email already in flight); `stoppedReported` (a job with `stopRequested` that finishes has status `Stopped` and the UI shows partial results); `progressMonotone` (the progress bar's `current` never exceeds `total` and never decreases).
+- Liveness, as a temporal property via `quint verify --temporal` (supported by Quint 0.32.0; not yet tried here): `stopRequested` eventually leads to a finished job, under weak fairness of the job's actions.
+- Expected result: `buggy` violates `stopHonoured` in about 10 steps (start send, stop, send two more). That counterexample is the acceptance test for this step.
+
+**Vacuity checks.**
+
+- For each action, a witness (`quint run --witnesses`) or a small `quint test` that reaches it, so an action whose guard can never be true (a modelling slip that silently hides behaviour) is caught. `stopSend` must be reachable in both variants.
+
+Then fix Stop: pass a stop check (e.g. a `should_stop` callable) from the job into `send_merge()` and the sender loops, set `JobStatus.STOPPED`, and add a Flask test (start a multi-recipient send with a gated `send_one`, stop, assert fewer than all were sent and status is `stopped`) plus a scenario test in the spec.
+
 ### Step 3 — Restructure `app.js` around a reducer
 
 - Extract the workflow layer into a pure `reduce(state, event) → state` (no DOM, no fetch) with an explicit event list matching the Quint actions, and `render(state)` that sets panel visibility and button `disabled` state.
@@ -97,7 +137,9 @@ Done.
 - `quint run --out-itf` generates traces (ITF JSON) from the spec.
 - Fast tier: a Node test harness replays traces against `reduce()` and compares abstract state after each step. Runs in CI on every push.
 - Slow tier: a Python Playwright driver replays a small number of traces against the real app (mocked Graph/MSAL, as in `test_web_e2e.py`), reading `window.state` and the DOM button/panel state after each action and comparing with the trace.
-- Add `spec/package.json` + lockfile pinning Quint; CI job runs `quint typecheck`, `quint test`, the simulator with invariants, and conformance.
+- Server tier (reason 3): replay traces that include job actions (send one email, stop, finish) against the Flask app with the test client and a gated `send_one`, comparing job status, sent count and `/api/config` / `/api/job/<id>/status` responses with the trace. This catches a model action that encodes intent rather than code: the trace says the job stops, the real server keeps sending, and the replay fails even if the model was wrong.
+- Every trace action needs a driver step. A trace action with no driver fails the run, so the coverage inventory and conformance cannot drift apart.
+- Add `spec/package.json` + lockfile pinning Quint; CI job runs `quint typecheck`, `quint test`, the simulator with invariants, the coverage test and conformance.
 
 ### Step 5 — Extend coverage
 
@@ -105,10 +147,11 @@ Candidates, in order of past bug density: auth (sign-in polling, desktop interac
 
 ## Out of scope
 
-Trix and paste sanitisation, CSS/Pico layout, template rendering, SSE framing, Graph retry logic. These are either covered by existing tests or are not state-machine problems.
+Trix and paste sanitisation, CSS/Pico layout, template rendering, SSE framing, Graph retry logic. These are either covered by existing tests or are not state-machine problems. The send loop is no longer out of scope: its control flow (next email, stop, finish, status) is modelled in step 2b, but HTTP details inside `send_one` are not. Anything excluded must be listed in `spec/coverage.toml` with a reason.
 
 ## Risks
 
-- Model drift: mitigated only by step 4. Without it, treat the spec as design documentation.
-- Second language to maintain: keep the spec small (target 200–300 lines) and limited to the workflow layer.
+- Model drift: mitigated by the coverage test (step 2b) for missing actions, and by conformance (step 4) for actions that don't match the code. Without step 4, treat the spec as design documentation.
+- Intent leaking into `buggy`: an action written from what the code should do passes every check. Mitigated by the source-citation rule in step 2b and by server-tier conformance.
+- Second language to maintain: keep the spec small and limited to the workflow layer and job lifecycle. Step 2b will take it past the original 200–300 line target; consider splitting the job model into its own module (`spec/jobs.qnt`) imported by `wizard.qnt`.
 - Apalache requires Java; if unavailable in CI, rely on simulation and conformance.
