@@ -254,3 +254,21 @@ class TestButtonState:
         page.click("#btn-send-test")
         gate.wait_started(2)
         expect(page.locator("#btn-next-4")).to_be_disabled()
+
+    def test_back_enabled_on_step6_after_new_merge(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
+    ):
+        """Model: back6AfterNewMergeTest / back6Usable."""
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        _send_all(page)
+        page.click("#btn-new-merge")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        expect(page.locator("#btn-back-6")).to_be_enabled()

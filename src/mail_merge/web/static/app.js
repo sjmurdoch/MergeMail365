@@ -1373,6 +1373,8 @@ function prepareSend() {
     hide("send-done-nav");
     $("send-confirm-input").value = "";
     $("btn-do-send").disabled = true;
+    // startSend() disables Back; re-enable it for the next merge.
+    $("btn-back-6").disabled = false;
 }
 
 $("send-confirm-input").addEventListener("input", () => {
