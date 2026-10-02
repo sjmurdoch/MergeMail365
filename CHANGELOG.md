@@ -16,6 +16,12 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 - Web UI: attaching two files with the same name no longer sends the second file twice. Both are now attached with their own contents.
 - Web UI: column names containing `<`, such as `Price <GBP>`, are now shown in full in the "No column named …" message on the Compose step. Previously part of the name was missing.
+- Web UI: a test email that was still sending when the user went back could later mark the step as passed, even if the message had been edited in the meantime. The edited message could then be sent to everyone without ever being test-sent. Results from a test email or dry run that the user has since gone back from are now ignored.
+- Web UI: likewise, an earlier dry run that finished while a newer one was running could enable Next on the Verify step before the dry run of the current message had finished.
+- Web UI: after sending a test email again, Next on the Test step stayed enabled while the new test was running, and did nothing if clicked. It is now disabled until the test passes.
+- Web UI: after a completed send and "New merge", the Back button on the Send step stayed disabled, so the user couldn't go back from it before sending.
+- Web UI: reloading the page after sending a test email or running a dry run jumped to the Send step and showed "Sending…" as if a real send were under way. Reloading now only returns to the Send step when a real send was started.
+- Web UI: reloading the page after a job had finished, including a real send, could leave it stuck on "Sending…" with no way to continue. A finished send now shows its results after a reload.
 
 ### Changed
 
