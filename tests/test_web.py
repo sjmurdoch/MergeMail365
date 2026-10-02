@@ -1,6 +1,7 @@
 """Tests for the web interface."""
 
 import os
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, create_autospec, patch
@@ -1042,6 +1043,50 @@ class TestJobs:
         assert status["status"] == "completed"
         assert status["summary"]["sent"] == 1
         assert status["summary"]["failed"] == 1
+
+    def _start(self, web_client, csrf, mode, **extra):
+        resp = web_client.post(
+            "/api/start-job",
+            data={"mode": mode, "email_column": "email",
+                  "subject": "Hello {{name}}", "body": "Body.", **extra},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, resp.get_json()
+        job_id = resp.get_json()["job_id"]
+        wait_for_job(web_client, job_id)
+        return job_id
+
+    def test_config_does_not_resume_test_or_dry_run(self, web_client, sample_xlsx_web):
+        """Reloading after a dry run must not jump to the Send step."""
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        self._start(web_client, csrf, "dry_run")
+        assert web_client.get("/api/config").get_json()["active_job_id"] is None
+
+    def test_config_resumes_send(self, web_client, sample_xlsx_web, monkeypatch):
+        import mail_merge.api
+        monkeypatch.setattr(mail_merge.api, "send_merge", lambda **kwargs: [])
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        job_id = self._start(web_client, csrf, "send")
+        assert web_client.get("/api/config").get_json()["active_job_id"] == job_id
+
+    def test_events_end_for_finished_job_on_reconnect(self, web_client, sample_xlsx_web):
+        """A second stream (after reload) ends even though the first took the sentinel."""
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        job_id = self._start(web_client, csrf, "dry_run")
+        bodies: list[str] = []
+
+        def read_stream() -> None:
+            resp = web_client.get(f"/api/job/{job_id}/events")
+            bodies.append(resp.get_data(as_text=True))
+
+        for _ in range(2):
+            t = threading.Thread(target=read_stream, daemon=True)
+            t.start()
+            t.join(timeout=10)
+            assert not t.is_alive(), "event stream did not end"
+        assert all(b.rstrip().endswith('data: {"type": "done"}') for b in bodies)
 
     def test_send_enforces_fixed_delay(self, web_client, sample_xlsx_web):
         """The web UI always uses delay=2.0 regardless of what the client sends."""

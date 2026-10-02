@@ -272,3 +272,45 @@ class TestButtonState:
         page.click("#btn-next-5")
         page.wait_for_selector("#step-6.active", timeout=5000)
         expect(page.locator("#btn-back-6")).to_be_enabled()
+
+
+class TestReload:
+    def test_reload_during_test_email_stays_off_send_step(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
+    ):
+        """Model: reloadDuringTestTest / sendScreenHonest."""
+        page = wizard
+        gate.hold = {"test"}
+        _to_step4(page, workflow_xlsx)
+        page.click("#btn-send-test")
+        gate.wait_started(1)
+        page.reload()
+        page.wait_for_selector("text=Data")
+        page.wait_for_timeout(500)
+        expect(page.locator("#step-1")).to_have_class(ACTIVE)
+        expect(page.locator("#step-6")).not_to_have_class(ACTIVE)
+
+    def test_reload_after_test_email_stays_off_send_step(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
+    ):
+        """Model: reloadAfterTestTest / sendScreenNotStuck."""
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        page.reload()
+        page.wait_for_selector("text=Data")
+        page.wait_for_timeout(500)
+        expect(page.locator("#step-1")).to_have_class(ACTIVE)
+
+    def test_reload_after_send_shows_results(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
+    ):
+        """Model: reloadAfterSendTest / sendScreenNotStuck."""
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        _send_all(page)
+        page.reload()
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=5000)

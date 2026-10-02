@@ -74,9 +74,13 @@ class JobStatus(enum.Enum):
     STOPPED = "stopped"
 
 
+FINISHED_STATUSES = (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.STOPPED)
+
+
 @dataclass
 class Job:
     id: str
+    mode: str = ""  # "dry_run", "test_email" or "send"
     status: JobStatus = JobStatus.PENDING
     events: queue.Queue[dict[str, Any] | None] = field(default_factory=queue.Queue)
     results: list[SendResult] | None = None
@@ -527,9 +531,12 @@ def create_app(
     @app.route("/api/config")
     def api_config() -> Response:
         # Check if there is an active job still running for this session
+        # Only a send is resumed after reload; test emails and dry runs are
+        # re-run by the user (see spec/wizard.qnt, sendScreenHonest).
         active_job_id = None
         job_id = session.get("job_id")
-        if job_id and job_id in _jobs:
+        active_job = _jobs.get(job_id) if job_id else None
+        if active_job and active_job.mode == "send":
             active_job_id = job_id
 
         fixed_cid = app.config["FIXED_CLIENT_ID"]
@@ -889,11 +896,11 @@ def create_app(
 
         # Evict completed/failed jobs before creating a new one
         for jid in list(_jobs):
-            if _jobs[jid].status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.STOPPED):
+            if _jobs[jid].status in FINISHED_STATUSES:
                 del _jobs[jid]
 
         # Create and start job
-        job = Job(id=str(uuid.uuid4()))
+        job = Job(id=str(uuid.uuid4()), mode=mode)
         _jobs[job.id] = job
 
         def _run_job() -> None:
@@ -940,12 +947,24 @@ def create_app(
             return jsonify({"error": "Job not found"}), 404  # type: ignore[return-value]
 
         def generate() -> Any:
+            idle = 0
             while True:
                 try:
-                    event = job.events.get(timeout=15)
+                    event = job.events.get(timeout=1)
                 except queue.Empty:
-                    yield ": keepalive\n\n"
+                    # A stream from a page that has since been reloaded may
+                    # already have taken the end-of-job sentinel, so a
+                    # finished job with nothing queued ends the stream here
+                    # (spec/wizard.qnt, sendScreenNotStuck).
+                    if job.status in FINISHED_STATUSES:
+                        yield "data: {\"type\": \"done\"}\n\n"
+                        break
+                    idle += 1
+                    if idle >= 15:
+                        idle = 0
+                        yield ": keepalive\n\n"
                     continue
+                idle = 0
                 if event is None:
                     yield "data: {\"type\": \"done\"}\n\n"
                     break
