@@ -213,6 +213,22 @@ def _validate_html_body(body: str) -> list[str]:
     return warnings
 
 
+def _attachment_basename(filename: str) -> str | None:
+    """Return the final path component of an uploaded attachment's filename.
+
+    The multipart filename is client-controlled and Werkzeug passes it
+    through unchanged, so it may contain ``../``, an absolute path, or
+    Windows separators.  Strip everything up to the last ``/`` or ``\\``,
+    which keeps the name as the user sees it (spaces, punctuation,
+    non-ASCII) unlike ``secure_filename``.  Returns ``None`` when nothing
+    usable is left.
+    """
+    name = re.split(r"[/\\]", filename)[-1].strip()
+    if name in ("", ".", "..") or "\x00" in name:
+        return None
+    return name
+
+
 def _partition_emails(
     recipients: list[dict[str, str]], email_column: str,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
@@ -820,7 +836,13 @@ def create_app(
             kwargs["bcc_blast_to"] = data.get("bcc_blast_to", "")
 
         # Handle attachments
-        attachments = request.files.getlist("attachments")
+        attachments = [a for a in request.files.getlist("attachments") if a.filename]
+        att_names: list[str] = []
+        for att in attachments:
+            name = _attachment_basename(att.filename or "")
+            if name is None:
+                return jsonify({"error": f"Invalid attachment filename: {att.filename!r}"}), 400  # type: ignore[return-value]
+            att_names.append(name)
         if attachments:
             tmp_dir = session.get("spreadsheet_tmp_dir")
             if not tmp_dir:
@@ -828,14 +850,20 @@ def create_app(
                 os.chmod(tmp_dir, 0o700)
                 _register_temp_dir(tmp_dir)
                 session["spreadsheet_tmp_dir"] = tmp_dir
+            # Each file gets its own subdirectory so the original name (which
+            # becomes the attachment name in the email) can be kept, and two
+            # attachments with the same name don't overwrite each other.
             att_paths: list[str] = []
-            for att in attachments:
-                if att.filename:
-                    att_path = os.path.join(tmp_dir, att.filename)
-                    att.save(att_path)
-                    att_paths.append(att_path)
-            if att_paths:
-                kwargs["attachment"] = att_paths
+            for att, name in zip(attachments, att_names):
+                att_dir = tempfile.mkdtemp(dir=tmp_dir)
+                att_path = os.path.join(att_dir, name)
+                # On Windows a drive-relative name ("C:x.txt") makes join
+                # discard att_dir, so check where the path actually lands.
+                if os.path.dirname(os.path.abspath(att_path)) != os.path.abspath(att_dir):
+                    return jsonify({"error": f"Invalid attachment filename: {att.filename!r}"}), 400  # type: ignore[return-value]
+                att.save(att_path)
+                att_paths.append(att_path)
+            kwargs["attachment"] = att_paths
 
         # Mode-specific config
         if mode == "dry_run":

@@ -1139,6 +1139,220 @@ class TestOptionsPassthrough:
         assert resp.status_code == 200
 
 
+# ---- Attachment saving ----
+
+class TestAttachmentSaving:
+    """Uploaded attachments keep their names and contents, and stay in the temp dir."""
+
+    def _start_with_attachments(self, web_client, xlsx_path, files, monkeypatch):
+        import io
+        captured: dict = {}
+
+        def fake_send_merge(**kwargs):
+            # Read the files while the request's temp dir still exists
+            captured["files"] = [
+                (Path(p).name, Path(p).read_bytes()) for p in kwargs.get("attachment", [])
+            ]
+            captured["paths"] = list(kwargs.get("attachment", []))
+            return []
+
+        monkeypatch.setattr("mail_merge.api.send_merge", fake_send_merge)
+        csrf = get_csrf(web_client)
+        with open(xlsx_path, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        resp = web_client.post(
+            "/api/start-job",
+            data={
+                "mode": "dry_run",
+                "email_column": "email",
+                "subject": "Test",
+                "body": "Body.",
+                "attachments": [(io.BytesIO(data), name) for name, data in files],
+            },
+            headers={"X-CSRF-Token": csrf},
+            content_type="multipart/form-data",
+        )
+        with web_client.session_transaction() as sess:
+            tmp_dir = sess.get("spreadsheet_tmp_dir")
+        return resp, captured, tmp_dir
+
+    def test_original_filenames_preserved(self, web_client, sample_xlsx_web, monkeypatch):
+        """Names with spaces, punctuation and non-ASCII reach send_merge unchanged."""
+        files = [
+            ("Q3 report (final).pdf", b"pdf data"),
+            ("Café menu – 2026.docx", b"docx data"),
+            ("notes.txt", b"plain text"),
+        ]
+        resp, captured, _ = self._start_with_attachments(
+            web_client, sample_xlsx_web, files, monkeypatch)
+        assert resp.status_code == 200
+        status = wait_for_job(web_client, resp.get_json()["job_id"])
+        assert status["status"] == "completed"
+        assert captured["files"] == files
+
+    def test_same_name_twice_keeps_both(self, web_client, sample_xlsx_web, monkeypatch):
+        """Two attachments with the same name are both sent, with their own contents."""
+        files = [("a.txt", b"first"), ("a.txt", b"second")]
+        resp, captured, _ = self._start_with_attachments(
+            web_client, sample_xlsx_web, files, monkeypatch)
+        assert resp.status_code == 200
+        wait_for_job(web_client, resp.get_json()["job_id"])
+        assert captured["files"] == files
+
+    @pytest.mark.parametrize("evil_name", [
+        "../escaped.txt",
+        "../../escaped.txt",
+        "sub/../../escaped.txt",
+        "..\\escaped.txt",
+        "C:\\Users\\victim\\escaped.txt",
+        "{abs}",
+    ])
+    def test_traversal_filename_stays_in_temp_dir(
+        self, web_client, sample_xlsx_web, monkeypatch, tmp_path, evil_name
+    ):
+        """A filename with path components can't write outside the temp dir."""
+        abs_target = tmp_path / "outside" / "escaped.txt"
+        abs_target.parent.mkdir()
+        evil_name = evil_name.format(abs=abs_target)
+        resp, captured, tmp_dir = self._start_with_attachments(
+            web_client, sample_xlsx_web, [(evil_name, b"payload")], monkeypatch)
+        assert resp.status_code == 200
+        wait_for_job(web_client, resp.get_json()["job_id"])
+        root = Path(tmp_dir).resolve()
+        for p in captured["paths"]:
+            assert Path(p).resolve().is_relative_to(root), p
+        assert captured["files"] == [("escaped.txt", b"payload")]
+        assert not (root.parent / "escaped.txt").exists()
+        assert not (root.parent.parent / "escaped.txt").exists()
+        assert not abs_target.exists()
+
+    def test_drive_relative_filename_stays_in_temp_dir(
+        self, web_client, sample_xlsx_web, monkeypatch
+    ):
+        """'C:x.txt' is a drive-relative path on Windows; it must not escape."""
+        resp, captured, tmp_dir = self._start_with_attachments(
+            web_client, sample_xlsx_web, [("C:escaped.txt", b"payload")], monkeypatch)
+        if resp.status_code == 400:  # Windows: rejected
+            return
+        assert resp.status_code == 200
+        wait_for_job(web_client, resp.get_json()["job_id"])
+        root = Path(tmp_dir).resolve()
+        assert [Path(p).resolve().is_relative_to(root) for p in captured["paths"]] == [True]
+
+    @pytest.mark.parametrize("bad_name", ["..", ".", "/", "../"])
+    def test_filename_with_no_usable_name_is_rejected(
+        self, web_client, sample_xlsx_web, monkeypatch, bad_name
+    ):
+        resp, _, _ = self._start_with_attachments(
+            web_client, sample_xlsx_web, [(bad_name, b"x")], monkeypatch)
+        assert resp.status_code == 400
+        assert "attachment" in resp.get_json()["error"].lower()
+
+
+class TestAttachmentDelivery:
+    """Attachments uploaded through the web UI arrive in the Graph request intact.
+
+    These run the real send_merge() against a mocked Graph endpoint, so they
+    cover the whole path: multipart upload -> temp file -> base64 attachment.
+    """
+
+    FILES = [
+        ("Q3 report (final).pdf", b"%PDF-1.4 fake pdf bytes \x00\xff"),
+        ("Café menu – 2026.txt", "héllo wörld".encode()),
+        ("report.v2.FINAL.docx", b"PK\x03\x04 docx"),
+        (".profile", b"hidden-file content"),
+        ("no_extension", b"\x01\x02\x03"),
+    ]
+
+    @staticmethod
+    def _expected(files):
+        import base64
+        import mimetypes
+        return [
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": name,
+                "contentType": mimetypes.guess_type(name)[0] or "application/octet-stream",
+                "contentBytes": base64.b64encode(data).decode("ascii"),
+            }
+            for name, data in files
+        ]
+
+    def _start(self, web_client, xlsx_path, extra, files):
+        import io
+        csrf = get_csrf(web_client)
+        with open(xlsx_path, "rb") as f:
+            web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "test.xlsx")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        data = {
+            "email_column": "email",
+            "subject": "Hello {{name}}",
+            "body": "Body for {{name}}.",
+            **extra,
+            "attachments": [(io.BytesIO(d), n) for n, d in files],
+        }
+        resp = web_client.post(
+            "/api/start-job", data=data,
+            headers={"X-CSRF-Token": csrf},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200, resp.get_json()
+        status = wait_for_job(web_client, resp.get_json()["job_id"], timeout_sec=30)
+        assert status["status"] == "completed", status
+        return status
+
+    @staticmethod
+    def _sent_messages():
+        import json
+        return [json.loads(c.request.body)["message"] for c in responses.calls]
+
+    @responses.activate
+    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    def test_test_email_carries_attachments(self, mock_auth, web_client, sample_xlsx_web):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        self._start(web_client, sample_xlsx_web,
+                    {"mode": "test_email", "test_email": "me@example.com"}, self.FILES)
+        [msg] = self._sent_messages()
+        assert msg["attachments"] == self._expected(self.FILES)
+
+    @responses.activate
+    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    def test_send_attaches_files_to_every_message(self, mock_auth, web_client, sample_xlsx_web):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        files = self.FILES[:2]
+        self._start(web_client, sample_xlsx_web, {"mode": "send"}, files)
+        msgs = self._sent_messages()
+        assert [m["toRecipients"][0]["emailAddress"]["address"] for m in msgs] == [
+            "alice@example.com", "bob@example.com"]
+        for m in msgs:
+            assert m["attachments"] == self._expected(files)
+
+    @responses.activate
+    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    def test_empty_file_field_means_no_attachments(self, mock_auth, web_client, sample_xlsx_web):
+        """An empty file input (filename "") is ignored, as before."""
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        self._start(web_client, sample_xlsx_web,
+                    {"mode": "test_email", "test_email": "me@example.com"}, [("", b"")])
+        [msg] = self._sent_messages()
+        assert "attachments" not in msg
+
+    def test_dry_run_with_attachments_completes(self, web_client, sample_xlsx_web):
+        status = self._start(web_client, sample_xlsx_web, {"mode": "dry_run"}, self.FILES)
+        assert status["summary"]["total"] == 2
+
+
 
 # ---- Report summarize ----
 
