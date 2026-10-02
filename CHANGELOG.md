@@ -8,6 +8,14 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 - Desktop app (macOS/Windows, and `mergemail365-web --desktop`): the app now requires the per-launch access token and CSRF token, as browser mode does. Since 0.1.0 the desktop app had skipped both, on the mistaken belief that it opened no network port; in fact it was served on a random `127.0.0.1` port that any program on the machine could use to act as the signed-in user, including sending email.
 - Web UI (both modes): requests whose `Host` header isn't `localhost`, `127.0.0.1`, `::1` or the `--host` value are refused, which blocks DNS-rebinding attacks from web pages. The check is skipped when binding to all interfaces (`--host 0.0.0.0`).
+- Web UI: a spreadsheet whose column headers contained HTML could run script in the app when the Compose step reported an unknown placeholder, letting whoever made the spreadsheet send email from the user's account. Column names are now always shown as plain text.
+- Web UI: pasting into the HTML editor could run script hidden in the copied content (for example, text copied from a malicious web page) before the editor cleaned it up. Pasted HTML is now processed without running anything in it.
+- Web UI: an attachment's filename could contain `../` or an absolute path, causing the file to be written outside the app's temporary folder, for example over a startup script. Only the final part of the filename is now used, and names that are left empty, such as `..`, are rejected.
+
+### Fixed
+
+- Web UI: attaching two files with the same name no longer sends the second file twice. Both are now attached with their own contents.
+- Web UI: column names containing `<`, such as `Price <GBP>`, are now shown in full in the "No column named …" message on the Compose step. Previously part of the name was missing.
 
 ### Changed
 
