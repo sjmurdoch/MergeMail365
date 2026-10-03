@@ -634,6 +634,7 @@ module wizard {
     reload, serverRestart,
   }
 
+
   // ---------------------------------------------------------------------
   // Invariants
   // ---------------------------------------------------------------------
@@ -971,4 +972,43 @@ module partial {
 
 module fixed {
   import wizard(ROUND = 2).*
+}
+
+// Trace generation for the conformance tests (tests/test_conformance.py),
+// not for checking. The same actions as `step` in `fixed`, but an action
+// that undoes progress (going back, editing, re-uploading, a reload, sign-out,
+// a token running out, a server restart, a request or job failing) is only taken after GAP steps that
+// didn't (Back moves don't count), so random traces climb to the send step and fall back from every
+// depth. Uniform choice among the enabled actions of `step` almost never
+// gets past step 3.
+module conformance {
+  import wizard(ROUND = 2).*
+
+  var quiet: int  // steps since the last action that undid progress
+  pure val GAP = 8
+
+  action cInit = all { init, quiet' = 0 }
+  action fwd(a: bool): bool = all { a, quiet' = quiet + 1 }
+  action undo(a: bool): bool = all { quiet >= GAP, a, quiet' = 0 }
+  // Back moves don't reset the count, so they can follow one another (a job
+  // finishing between two Backs is a case worth replaying).
+  action backUp(a: bool): bool = all { quiet >= GAP, a, quiet' = quiet }
+
+  action cStep = any {
+    // The first upload moves forward; a later one starts the merge again.
+    if (s.dataLoaded) undo(upload) else fwd(upload),
+    fwd(next1), nondet bcc = Bool.oneOf() undo(edit(bcc)), backUp(back2), fwd(next2),
+    nondet ok = Bool.oneOf() if (ok) fwd(previewResponse(true)) else undo(previewResponse(false)),
+    backUp(back3), fwd(next3),
+    fwd(sendTestEmail), nondet a = Bool.oneOf() backUp(back4(a)), fwd(next4),
+    nondet a = Bool.oneOf() backUp(back5(a)), fwd(next5),
+    fwd(typeSend), fwd(startSend), fwd(startSendResponse),
+    nondet a = Bool.oneOf() backUp(back6(a)), fwd(stopSend), fwd(newMerge),
+    nondet ok = Bool.oneOf() if (ok) fwd(completeJob(true)) else undo(completeJob(false)),
+    fwd(completeOrphan),
+    fwd(sendNext), nondet failed = Bool.oneOf() if (failed) undo(finishSend(true)) else fwd(finishSend(false)),
+    undo(sendWithoutToken),
+    nondet desktop = Bool.oneOf() fwd(signIn(desktop)),
+    undo(signOut), undo(tokenExpires), undo(reload), undo(serverRestart),
+  }
 }

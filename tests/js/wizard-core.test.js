@@ -321,6 +321,9 @@ test("an edit moves the content version on; an upload also replaces the data", (
     const uploaded = C.reduce(edited, Object.assign({ data }, C.ACTIONS.upload)).state;
     assert.equal(uploaded.spreadsheetData, data);
     assert.equal(uploaded.contentVersion, edited.contentVersion + 1);
+    // A new upload replaces the fetched recipient list (found by conformance).
+    const previewed = Object.assign({}, edited, { recipientsVersion: edited.contentVersion });
+    assert.equal(C.reduce(previewed, Object.assign({ data }, C.ACTIONS.upload)).state.recipientsVersion, null);
 });
 
 // --- reduce(): test email and dry run ---

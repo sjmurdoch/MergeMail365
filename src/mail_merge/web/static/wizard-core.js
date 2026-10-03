@@ -275,10 +275,12 @@
         };
     }
 
-    /** A spreadsheet was uploaded or another sheet chosen. */
+    /** A spreadsheet was uploaded or another sheet chosen. The recipient
+     *  list is now the new sheet's rows, not one fetched for any content. */
     function spreadsheetLoaded(s0, event) {
         const s = contentChanged(s0).state;
         s.spreadsheetData = event.data;
+        s.recipientsVersion = null;
         return { state: s, effects: [] };
     }
 
