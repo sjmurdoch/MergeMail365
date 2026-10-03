@@ -226,8 +226,12 @@ Model checking (Apalache, 16 steps), `partial`, per invariant:
 | `noConcurrentSends` | holds at 16 | needs bug 11 and then a full second test and dry run |
 | `failedSendReported` | violated | `init upload next1 next2 previewResponse next3 signIn sendTestEmail complete next4 complete next5 typeSend startSend sendNext finishSend startSendResponse` |
 | `progressHonest` | holds at 16 | needs two sends; scenario test only |
+| `newMergeClears` | holds at 16 | needs a full send before New merge; scenario test only |
+| `stopHonoured` | violated | `init upload next1 next2 previewResponse next3 signIn sendTestEmail complete next4 complete next5 typeSend startSend stopSend` |
+| `canProgress` (now with step 5) | holds | (the code already met it) |
+| `sendScreenNotStuck` (now allowing a pending response) | holds | (the code already met it) |
 
-The remaining `partial` checks and `spec/check.sh --all fixed` were still running when this was written. All 23 scenario tests pass in all three variants, and 5,000 random traces of 30 steps found no violation in `fixed`.
+`fixed`: `allInvariants` (all 21) holds at 16 steps (58 min). All 23 scenario tests pass in all three variants, and 5,000 random traces of 30 steps found no violation in `fixed`.
 
 ## Tooling
 
