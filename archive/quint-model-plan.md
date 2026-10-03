@@ -449,7 +449,7 @@ Revised 2026-10-03 for the richer model. Conformance runs against `fixed` only.
 
 Done for the two interrupted-send candidates; the others moved to `TODO.md` when the plan was closed.
 
-- ~~Persisting send results so a restart mid-send can report what went out (R15)~~: done (bug 17). A running send logs its results to disk; the next start reports a send it didn't finish until dismissed. The model keeps the log across `serverRestart` (`sendLog`), and the conformance tiers replay restarts against it. The CLI resume bug after an interrupted run is fixed without modelling the CLI (bug 16): the output CSV is now written as the send goes.
+- ~~Persisting send results so a restart mid-send can report what went out (R15)~~: done (bug 17). A running send logs its results to disk; the next start reports a send it didn't finish until dismissed. The model keeps the log across `serverRestart` (`sendLog`), and the conformance tiers replay restarts against it. The CLI resume bug after an interrupted run is fixed without modelling the CLI (bug 16): the output CSV is now written as the send goes. After bug 17, `spec/check.sh --all fixed` holds with 24 invariants (Apalache, 16 steps, about 1 h 43 min on 4 cores).
 - Moved to `TODO.md`: out-of-order `/auth/status` answers (R16, handled in the code, not modelled), a second tab, session expiry and a lost session cookie, and the sheet-change and HTML/source view state.
 
 ## Out of scope
