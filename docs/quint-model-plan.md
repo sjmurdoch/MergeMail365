@@ -59,7 +59,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
 
 `spec/check.sh --all fixed` checks `allInvariants` in one run, which takes about as long as a single invariant; use it to confirm `fixed`, and the per-invariant run for `buggy`, where each violation needs its own trace.
 
-Expected results: `fixed` holds every invariant; `buggy` violates `next4Honest` and the invariants its scenario tests replay (see "Steps 2b and 2c results"). All 15 scenario tests pass in both variants.
+Expected results: `fixed` holds every invariant; `buggy` violates ten of the 14 at 16 steps (see the table under "Steps 2b and 2c results"). All 15 scenario tests pass in both variants.
 
 Running in a Claude Code cloud container (Linux, 4 cores, Java 21 and Node 22 preinstalled) needed:
 
@@ -160,7 +160,30 @@ Deviations from the plan:
 - The Stop liveness property (`--temporal`) was not tried; `stoppedReported` and the scenario tests cover the stop path, and `sendScreenNotStuck` covers the page.
 - The plan's `canProgress` counted "go back" as a fixing action, which would make it hold trivially wherever Back is enabled. It now requires that steps 4 and 6 can be finished from the step itself; a failed dry run on step 5 is fixed upstream by design.
 
-Model checking (Apalache, 16 steps, on a 4-core cloud container; much slower than the earlier Mac runs, about 5 to 8 minutes per invariant): `buggy` violates `next4Honest` in 12 steps (`init signIn upload next1 next2 next3 sendTestEmail back4 back3 edit next2 complete next3`). `noUntestedSend` now holds in `buggy` at 16 steps, because starting signed out costs a `signIn` step and its counterexample needs 17. The remaining `buggy` invariants and `--all fixed` were still running when this was written.
+Model checking (Apalache, 16 steps, on a 4-core cloud container; about 3 to 8 minutes per invariant, and `--all` about 30 to 40 minutes):
+
+- Step 2b model, `fixed`: `allInvariants` holds (29 min).
+- Step 2c model, `fixed`: `allInvariants` holds (40 min).
+- Step 2c model, `buggy`, per invariant:
+
+| Invariant | Result | Shortest trace found |
+|---|---|---|
+| `noUntestedSend` | holds at 16, violated at 17 | `init upload signIn next1 next2 next3 sendTestEmail back4 back3 edit next2 next3 complete next4 complete next5 typeSend startSend` |
+| `next4Honest` | violated | `init signIn upload next1 next2 next3 sendTestEmail back4 back3 edit next2 complete next3` |
+| `next5Honest` | holds at 16 | scenario test only |
+| `buttonsMatchFlags` | violated | `init upload signIn next1 next2 next3 sendTestEmail complete sendTestEmail` |
+| `back6Usable` | holds at 16 | scenario test only |
+| `sendScreenHonest` | violated | `init upload next1 next2 next3 sendTestEmail reload` |
+| `sendScreenNotStuck` | violated | `init upload next1 next2 next3 sendTestEmail complete reload` |
+| `stepNeedsData` | holds | (no bug) |
+| `stopHonoured` | violated | `init upload signIn next1 next2 next3 sendTestEmail complete next4 complete next5 typeSend startSend stopSend sendNext` |
+| `stoppedReported` | holds at 16 | scenario test only (needs a stop and three more emails) |
+| `testNeedsSignIn` | violated | `init upload next1 next2 next3` |
+| `sendNeedsSignIn` | violated | `init signIn upload next1 next2 next3 sendTestEmail back4 complete tokenExpires next3 next4 complete next5` |
+| `noInteractiveAuthInJob` | violated | `init upload next1 next2 next3 sendTestEmail complete` |
+| `canProgress` | violated | `init upload next1 next2 next3` |
+
+`noUntestedSend` needed 16 steps before; starting signed out costs a `signIn` step, so its counterexample now needs 17.
 
 Found while modelling, not fixed: a send that fails part-way keeps no results (R9).
 
