@@ -4,8 +4,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const C = require("../../src/mail_merge/web/static/wizard-core.js");
 
-const signedIn = { signedIn: true };
-const signedOut = { signedIn: false };
+function signed(s, signedIn) {
+    return Object.assign({}, s, { signedIn });
+}
 
 test("initialState is a fresh object each time", () => {
     const a = C.initialState();
@@ -25,10 +26,10 @@ test("Next on steps 4 and 5 follows the flags (model: buttonsMatchFlags)", () =>
 
 test("Send test email needs sign-in and no test running (model: sendTestEnabled)", () => {
     const s = C.initialState();
-    assert.equal(C.sendTestEnabled(s, signedIn), true);
-    assert.equal(C.sendTestEnabled(s, signedOut), false);
+    assert.equal(C.sendTestEnabled(signed(s, true)), true);
+    assert.equal(C.sendTestEnabled(signed(s, false)), false);
     s.testRunning = true;
-    assert.equal(C.sendTestEnabled(s, signedIn), false);
+    assert.equal(C.sendTestEnabled(signed(s, true)), false);
 });
 
 test("Retry shows after a failed test, not while one runs", () => {
@@ -44,24 +45,24 @@ test("sign-in is offered on step 4, and on step 6 before sending (model: signInO
     const s = C.initialState();
     for (const step of [1, 2, 3, 5]) {
         s.currentStep = step;
-        assert.equal(C.signInOffered(s, signedOut), false, `step ${step}`);
+        assert.equal(C.signInOffered(signed(s, false)), false, `step ${step}`);
     }
     s.currentStep = 4;
-    assert.equal(C.signInOffered(s, signedOut), true);
-    assert.equal(C.signInOffered(s, signedIn), false);
+    assert.equal(C.signInOffered(signed(s, false)), true);
+    assert.equal(C.signInOffered(signed(s, true)), false);
     s.currentStep = 6;
-    assert.equal(C.signInOffered(s, signedOut), true);
+    assert.equal(C.signInOffered(signed(s, false)), true);
     s.sendStarted = true;
-    assert.equal(C.signInOffered(s, signedOut), false);
+    assert.equal(C.signInOffered(signed(s, false)), false);
 });
 
 test("Send emails needs sign-in, SEND typed and no send started (model: doSendEnabled)", () => {
     const s = C.initialState();
-    assert.equal(C.doSendEnabled(s, signedIn, true), true);
-    assert.equal(C.doSendEnabled(s, signedOut, true), false);
-    assert.equal(C.doSendEnabled(s, signedIn, false), false);
+    assert.equal(C.doSendEnabled(signed(s, true), true), true);
+    assert.equal(C.doSendEnabled(signed(s, false), true), false);
+    assert.equal(C.doSendEnabled(signed(s, true), false), false);
     s.sendStarted = true;
-    assert.equal(C.doSendEnabled(s, signedIn, true), false);
+    assert.equal(C.doSendEnabled(signed(s, true), true), false);
 });
 
 test("Back on step 6 works until the send starts (model: back6Usable)", () => {
@@ -246,4 +247,33 @@ test("reduce returns a new state and rejects unknown events", () => {
     assert.notEqual(r.state, s);
     assert.equal(s.currentStep, 1);
     assert.throws(() => C.reduce(s, { type: "nope" }), /Unknown event/);
+});
+
+// --- reduce(): sign-in status ---
+
+test("an /auth/status answer updates the sign-in state and asks to show it", () => {
+    let s = C.initialState();
+    const { patch, id } = C.startRequest(s, "auth");
+    s = Object.assign(s, patch);
+    const status = { authenticated: true, email: "me@example.com" };
+    const r = C.reduce(s, { type: "authStatus", id, status });
+    assert.equal(r.state.signedIn, true);
+    assert.deepEqual(r.effects, [{ type: "showAuth", status }]);
+    assert.equal(C.isCurrent(r.state, id), false);
+});
+
+test("an older /auth/status answer arriving last is dropped (R16)", () => {
+    let s = C.initialState();
+    const older = C.startRequest(s, "auth");
+    s = Object.assign(s, older.patch);
+    const newer = C.startRequest(s, "auth");
+    s = Object.assign(s, newer.patch);
+    s = C.reduce(s, { type: "authStatus", id: newer.id, status: { authenticated: false } }).state;
+    const late = C.reduce(s, { type: "authStatus", id: older.id, status: { authenticated: true } });
+    assert.equal(late.state.signedIn, false);
+    assert.deepEqual(late.effects, []);
+});
+
+test("New merge keeps the sign-in state", () => {
+    assert.equal(C.newMergeState(signed(C.initialState(), true)).signedIn, true);
 });

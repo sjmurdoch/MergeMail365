@@ -45,6 +45,10 @@
             sendStarted: false,
             sendOutcome: null,
 
+            // What the page last learnt from /auth/status (the model's
+            // authShown): the token cache may have changed since.
+            signedIn: false,
+
             // Background job tracking
             currentJobId: null,
             sendResults: null,
@@ -77,11 +81,12 @@
     }
 
     /** The state after "New merge". Counters keep counting, so nothing from
-     *  the previous merge can match the new one. */
+     *  the previous merge can match the new one; sign-in is unaffected. */
     function newMergeState(s) {
         return Object.assign(initialState(), {
             contentVersion: s.contentVersion + 1,
             nextRequestId: s.nextRequestId,
+            signedIn: s.signedIn,
         });
     }
 
@@ -211,7 +216,18 @@
         };
     }
 
-    const REDUCERS = { goTo, back, previewResponse };
+    /** An /auth/status answer for request `id`. A newer check supersedes an
+     *  older one, so answers arriving out of order can't leave a stale
+     *  display (spec/requirements.md, R16). `status` is the response body. */
+    function authStatus(s0, event) {
+        if (!isCurrent(s0, event.id)) return { state: Object.assign({}, s0), effects: [] };
+        const s = Object.assign({}, s0, finishRequest(s0, event.id), {
+            signedIn: Boolean(event.status.authenticated),
+        });
+        return { state: s, effects: [{ type: "showAuth", status: event.status }] };
+    }
+
+    const REDUCERS = { goTo, back, previewResponse, authStatus };
 
     function reduce(s, event) {
         const reducer = REDUCERS[event.type];
@@ -234,12 +250,12 @@
         back6: { type: "back", to: 4 },
     };
 
-    // --- Selectors. `auth` is { signedIn }, what the page last fetched from
+    // --- Selectors. s.signedIn is what the page last fetched from
     // /auth/status (the model's authShown). ---
 
     /** "Send test email" can be clicked (model: sendTestEnabled). */
-    function sendTestEnabled(s, auth) {
-        return auth.signedIn && !s.testRunning;
+    function sendTestEnabled(s) {
+        return s.signedIn && !s.testRunning;
     }
 
     /** "Retry" is shown after a failed test email. */
@@ -256,14 +272,14 @@
     }
 
     /** The sign-in callout on steps 4 and 6 (model: signInOffered, beyond step 1). */
-    function signInOffered(s, auth) {
-        return !auth.signedIn && (s.currentStep === 4 || (s.currentStep === 6 && !s.sendStarted));
+    function signInOffered(s) {
+        return !s.signedIn && (s.currentStep === 4 || (s.currentStep === 6 && !s.sendStarted));
     }
 
     /** "Send emails" can be clicked; `confirmed` is whether SEND was typed
      *  (model: doSendEnabled). */
-    function doSendEnabled(s, auth, confirmed) {
-        return auth.signedIn && confirmed && !s.sendStarted;
+    function doSendEnabled(s, confirmed) {
+        return s.signedIn && confirmed && !s.sendStarted;
     }
 
     /** Back on step 6 works until the send starts (model: back6Usable). */

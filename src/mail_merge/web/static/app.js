@@ -52,7 +52,9 @@ Object.defineProperty(window, "spreadsheetData", {
 
 // Auth state — grouped separately (not part of wizard flow)
 const _auth = {
-    isSignedIn: false,
+    // Stored in state.signedIn so the reducer and selectors see it.
+    get isSignedIn() { return state.signedIn; },
+    set isSignedIn(v) { state.signedIn = v; },
     desktopMode: false,
     signInPoll: null,     // interval ID for polling during sign-in
     tokenExpiresAt: null,
@@ -119,14 +121,13 @@ function renderResult(id, result) {
 // in spec/wizard.qnt). Call it after any change to state or _auth.
 function render() {
     const C = WizardCore;
-    const auth = { signedIn: _auth.isSignedIn };
 
     // Step 4
-    $("btn-send-test").disabled = !C.sendTestEnabled(state, auth);
+    $("btn-send-test").disabled = !C.sendTestEnabled(state);
     if (state.testRunning) $("btn-send-test").setAttribute("aria-busy", "true");
     else $("btn-send-test").removeAttribute("aria-busy");
     toggle("btn-retry-test", C.retryVisible(state));
-    $("btn-retry-test").disabled = !C.sendTestEnabled(state, auth);
+    $("btn-retry-test").disabled = !C.sendTestEnabled(state);
     $("btn-next-4").disabled = !C.nextEnabled(state, 4);
     renderResult("test-result", state.testResult);
 
@@ -136,7 +137,7 @@ function render() {
 
     // The test email and the send go out from the signed-in account, so
     // steps 4 and 6 offer sign-in while the page shows signed out.
-    const offered = C.signInOffered(state, auth);
+    const offered = C.signInOffered(state);
     toggle("signin-callout-4", offered && state.currentStep === 4);
     toggle("signin-callout-6", offered && state.currentStep === 6);
     // In browser mode, signing in leaves the page and comes back to step 1.
@@ -153,7 +154,7 @@ function render() {
     toggle("send-nav", panel !== "done");
     toggle("send-done-nav", panel === "done");
     $("btn-back-6").disabled = !C.back6Enabled(state);
-    $("btn-do-send").disabled = !C.doSendEnabled(state, auth, sendConfirmed());
+    $("btn-do-send").disabled = !C.doSendEnabled(state, sendConfirmed());
 }
 
 function updateStepUI(n) {
@@ -241,6 +242,9 @@ async function runEffect(effect) {
             break;
         case "clearLogs":
             clearTestAndVerifyLogs();
+            break;
+        case "showAuth":
+            showAuth(effect.status);
             break;
         default:
             throw new Error(`Unknown effect: ${effect.type}`);
@@ -480,27 +484,30 @@ async function loadConfig() {
 
 // Check auth status
 async function checkAuthStatus() {
+    const id = beginRequest("auth");
     try {
         const resp = await apiFetch("/auth/status");
-        const data = await resp.json();
-        const el = $("auth-display");
-        if (data.authenticated) {
-            _auth.isSignedIn = true;
-            el.innerHTML = `<span class="dot green"></span> Signed in as <span class="email">${escapeHtml(data.email)}</span>`;
-            if ($("test-email-input") && !$("test-email-input").value) {
-                $("test-email-input").value = data.email;
-            }
-            if (data.token_expires_at) {
-                _auth.tokenExpiresAt = new Date(data.token_expires_at);
-            }
-        } else {
-            _auth.isSignedIn = false;
-            el.innerHTML = '<span class="dot gray"></span> Not signed in';
-            _auth.tokenExpiresAt = null;
+        const status = await resp.json();
+        await dispatch({ type: "authStatus", id, status });
+    } catch (_e) {
+        finishRequest(id);
+    }
+}
+
+// Shows a current /auth/status answer (the "showAuth" effect).
+function showAuth(status) {
+    const el = $("auth-display");
+    if (status.authenticated) {
+        el.innerHTML = `<span class="dot green"></span> Signed in as <span class="email">${escapeHtml(status.email)}</span>`;
+        if ($("test-email-input") && !$("test-email-input").value) {
+            $("test-email-input").value = status.email;
         }
-        updateSignInButton();
-        render();
-    } catch (_e) { /* ignore */ }
+        _auth.tokenExpiresAt = status.token_expires_at ? new Date(status.token_expires_at) : null;
+    } else {
+        el.innerHTML = '<span class="dot gray"></span> Not signed in';
+        _auth.tokenExpiresAt = null;
+    }
+    updateSignInButton();
 }
 
 function sendConfirmed() {

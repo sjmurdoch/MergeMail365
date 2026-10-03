@@ -28,7 +28,7 @@ must include the success conditions that are under the app's control.
 | R13 | A running send is always on screen, even after a reload before the start-job response arrived, and only one send runs at a time. | `runningSendVisible`, `noConcurrentSends` | Fixed (bug 11). The server also refuses a second send while one runs (for example from a second tab, which the model doesn't cover) |
 | R14 | New merge clears every input the previous merge filled in. | `newMergeClears` | Fixed (bug 15). The model tracks `#bcc-blast-to`, the only field `newMerge()` missed |
 | R15 | A server restart mid-send records which emails went out. | `restartLostSend` (witness) | **Not met.** Job results live in memory; quitting or crashing the app mid-send loses them. Fixing it needs a send log on disk |
-| R16 | The sign-in display follows the latest `/auth/status` answer. | None | Unchecked: `checkAuthStatus()` requests can finish out of order, which the model doesn't split. A stale display is harmless since bug 9's fix: a job without a token fails at once and the page then refreshes the display |
+| R16 | The sign-in display follows the latest `/auth/status` answer. | None | Holds by construction since step 3.4: each check is a request (`WizardCore.startRequest(state, "auth")`) and a newer one supersedes it, so an older answer arriving last is dropped (Node test `an older /auth/status answer arriving last is dropped`). The model still treats a check as atomic |
 
 ## R2: why step 4 is not gated
 
