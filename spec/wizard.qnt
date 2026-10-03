@@ -145,6 +145,17 @@ module wizard {
   pure def doSendEnabled(st: State): bool =
     st.btnDoSend and (not(FIXED) or st.authShown)
 
+  // A test email or dry run whose completion the page still applies: in the
+  // code, its request is still in state.requests (wizard-core.js isCurrent).
+  // The generation counters here are that request id: bumping one drops the
+  // request.
+  pure def isCurrentJob(st: State, p: Job): bool =
+    p.gen == (if (p.kind == Test) st.testGen else st.verifyGen)
+
+  // wizard-core.js state.testRunning: a current test email is pending.
+  pure def testRunning(st: State): bool =
+    st.pending.exists(p => p.kind == Test and p.handler == Test and isCurrentJob(st, p))
+
   // ---------------------------------------------------------------------
   // Helpers mirroring app.js functions
   // ---------------------------------------------------------------------
@@ -643,6 +654,17 @@ module wizard {
     (s.step == 4 implies s.btnNext4 == s.testPassed)
     and (s.step == 5 implies s.btnNext5 == s.verifyPassed)
 
+  /// FIXED2: the buttons are functions of the workflow state, as
+  /// wizard-core.js computes them (nextEnabled, sendTestEnabled,
+  /// back6Enabled), so the separate btn* fields add nothing. They stay in the
+  /// model as the record of bugs 5, 6 and 14 in `buggy` and `partial`.
+  val buttonsDerived = FIXED2 implies and {
+    s.btnNext4 == s.testPassed,
+    s.btnNext5 == s.verifyPassed,
+    s.btnSendTest == not(testRunning(s)),
+    s.step == 6 implies s.btnBack6 == not(s.sendStarted),
+  }
+
   /// Before sending, the user can always go back from step 6.
   val back6Usable = (s.step == 6 and not(s.sendStarted)) implies s.btnBack6
 
@@ -724,7 +746,7 @@ module wizard {
     stopHonoured, stoppedReported,
     testNeedsSignIn, sendNeedsSignIn, noInteractiveAuthInJob, canProgress,
     noStepJump, previewHonest, runningSendVisible, noConcurrentSends,
-    failedSendReported, progressHonest, newMergeClears,
+    failedSendReported, progressHonest, newMergeClears, buttonsDerived,
   }
 
   // ---------------------------------------------------------------------

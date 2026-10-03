@@ -25,6 +25,24 @@
 # Actions that no user entry point triggers: the server finishing work.
 actions = ["completeJob", "completeOrphan", "sendNext", "finishSend", "sendWithoutToken", "tokenExpires", "previewResponse", "startSendResponse", "serverRestart"]
 
+[implementation]
+# How each action in `step` is carried out in the code. Page actions are
+# WizardCore events (WizardCore.ACTIONS in web/static/wizard-core.js); the
+# server's are JobStore methods (web/jobs.py); the rest have no code of
+# their own. tests/test_spec_coverage.py checks that every action is in
+# exactly one place here or in WizardCore.ACTIONS, and that the methods exist.
+server = { sendNext = "record_sent", finishSend = "run", sendWithoutToken = "run", completeOrphan = "run", completeJob = "run", startSend = "create", sendTestEmail = "create", next4 = "create", stopSend = "request_stop", reload = "active_job_id" }
+# Typing SEND changes no state: render() reads the input (doSendEnabled).
+render = ["typeSend"]
+# The world, not the code: a token running out, the process restarting.
+environment = ["tokenExpires", "serverRestart"]
+
+[abstraction]
+# Non-ghost State fields in spec/wizard.qnt that neither WizardCore.abstractPage
+# nor JobStore.abstract returns, and why. tests/test_spec_coverage.py checks
+# that every other field is returned by one of them.
+not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists the current requests.", verifyGen = "Replaced by request ids: abstractPage's pending lists the current requests.", previewGen = "Replaced by request ids: abstractPage's previewReq.", progressJob = "DOM text (#send-progress-text) the reducer does not hold.", bccToMerge = "DOM field (#bcc-blast-to) the reducer does not hold.", signedIn = "The MSAL token cache; conformance drives a fake cache.", btnNext2 = "DOM: loadPreview() disables #btn-next-2 until its response arrives, stale or not, while the reducer forgets stale requests." }
+
 [entries]
 # --- templates/index.html inline handlers ---
 "html:goToStep(2)" = { actions = ["next1"] }

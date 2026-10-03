@@ -439,3 +439,29 @@ test("every event is reachable from a model action or is a shell-only step", () 
         assert.ok(fromActions.has(e) || shellOnly.has(e), e);
     }
 });
+
+// --- abstractPage ---
+
+test("abstractPage maps a fresh page onto the model's init_state", () => {
+    assert.deepEqual(C.abstractPage(C.initialState()), {
+        step: 1, dataLoaded: false, version: 0,
+        testPassed: false, verifyPassed: false, sendStarted: false, recipientsVersion: -1,
+        verifyShown: false, resultsShown: false,
+        btnSendTest: true, btnNext4: false, btnNext5: false,
+        btnDoSend: false, btnBack6: true, doneNav: false,
+        pending: [], previewReq: [], sendReq: 0, stopQueued: false, authShown: false,
+    });
+});
+
+test("abstractPage reports current requests as the model's pending sets", () => {
+    const t = startTest(at(4));
+    const a = C.abstractPage(t.state);
+    assert.deepEqual(a.pending, [{ kind: "Test", version: t.state.contentVersion }]);
+    assert.equal(a.btnSendTest, false);
+    const sending = C.reduce(C.reduce(at(6), C.ACTIONS.startSend).state, C.ACTIONS.stopSend).state;
+    const b = C.abstractPage(sending, true);
+    assert.equal(b.sendReq, 1);
+    assert.equal(b.stopQueued, true);
+    assert.equal(b.btnDoSend, false);
+    assert.equal(b.btnBack6, false);
+});

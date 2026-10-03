@@ -467,6 +467,50 @@
         return s.sendOutcome === null ? "progress" : "done";
     }
 
+    // --- Abstraction. ---
+
+    const KIND = { test: "Test", verify: "Verify", send: "Send" };
+
+    /** The page's part of the spec/wizard.qnt State, from this state, for
+     *  conformance testing (docs/quint-model-plan.md, step 4). `confirmed` is
+     *  whether SEND was typed (the model's btnDoSend lives in the DOM).
+     *
+     *  Mapping notes: `version` is contentVersion, which also moves on at New
+     *  merge, so versions compare by equality (which content a check was made
+     *  for), not by value. The model's testGen, verifyGen and previewGen
+     *  become `pending`, `previewReq` and `sendReq`: the requests whose
+     *  answers would still be applied (the model's isCurrentJob). The model's
+     *  job ids are server-side creation order and are not known here. Not
+     *  covered: progressJob and bccToMerge (DOM text the reducer doesn't
+     *  hold) and the ghost fields. */
+    function abstractPage(s, confirmed = false) {
+        const requests = Object.values(s.requests);
+        const ofKind = (kind) => requests.filter(r => r.kind === kind);
+        return {
+            step: s.currentStep,
+            dataLoaded: s.spreadsheetData !== null,
+            version: s.contentVersion,
+            testPassed: s.testPassed,
+            verifyPassed: s.verifyPassed,
+            sendStarted: s.sendStarted,
+            recipientsVersion: s.recipientsVersion === null ? -1 : s.recipientsVersion,
+            verifyShown: s.verifyResult !== null,
+            resultsShown: s.sendOutcome === "results",
+            btnSendTest: !s.testRunning,
+            btnNext4: nextEnabled(s, 4),
+            btnNext5: nextEnabled(s, 5),
+            btnDoSend: confirmed && !s.sendStarted,
+            btnBack6: back6Enabled(s),
+            doneNav: sendPanel(s) === "done",
+            pending: ofKind("test").concat(ofKind("verify"))
+                .map(r => ({ kind: KIND[r.kind], version: r.contentVersion })),
+            previewReq: ofKind("preview").map(r => ({ version: r.contentVersion })),
+            sendReq: ofKind("send").length,
+            stopQueued: ofKind("send").some(r => Boolean(r.stopQueued)),
+            authShown: s.signedIn,
+        };
+    }
+
     const WizardCore = {
         initialState,
         resetTestAndVerify,
@@ -488,6 +532,7 @@
         doSendEnabled,
         back6Enabled,
         sendPanel,
+        abstractPage,
     };
 
     if (typeof module === "object" && module.exports) {

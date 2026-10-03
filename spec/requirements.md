@@ -29,6 +29,7 @@ must include the success conditions that are under the app's control.
 | R14 | New merge clears every input the previous merge filled in. | `newMergeClears` | Fixed (bug 15). The model tracks `#bcc-blast-to`, the only field `newMerge()` missed |
 | R15 | A server restart mid-send records which emails went out. | `restartLostSend` (witness) | **Not met.** Job results live in memory; quitting or crashing the app mid-send loses them. Fixing it needs a send log on disk |
 | R16 | The sign-in display follows the latest `/auth/status` answer. | None | Holds by construction since step 3.4: each check is a request (`WizardCore.startRequest(state, "auth")`) and a newer one supersedes it, so an older answer arriving last is dropped (Node test `an older /auth/status answer arriving last is dropped`). The model still treats a check as atomic |
+| R17 | The Next, Send test email and Back buttons on steps 4 to 6 follow the workflow state alone, with no separate flag that can drift from it. | `buttonsDerived` | Holds by construction since step 3.7: `render()` sets them from `WizardCore` selectors (`TestRenderOwnsControls`). `buttonsMatchFlags` and `back6Usable` stay as the record of bugs 5 and 6 |
 
 ## R2: why step 4 is not gated
 

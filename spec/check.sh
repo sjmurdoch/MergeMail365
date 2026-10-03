@@ -33,7 +33,7 @@ fi
 
 cd "$(dirname "$0")"
 
-invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData stopHonoured stoppedReported testNeedsSignIn sendNeedsSignIn noInteractiveAuthInJob canProgress noStepJump previewHonest runningSendVisible noConcurrentSends failedSendReported progressHonest newMergeClears"
+invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData stopHonoured stoppedReported testNeedsSignIn sendNeedsSignIn noInteractiveAuthInJob canProgress noStepJump previewHonest runningSendVisible noConcurrentSends failedSendReported progressHonest newMergeClears buttonsDerived"
 if [ -n "$together" ]; then
     invariants="allInvariants"
 fi

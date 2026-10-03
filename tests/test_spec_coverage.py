@@ -8,12 +8,18 @@ These checks are textual and fast (no browser, no Quint):
   action in the model's ``step`` relation is reachable from an entry point
   or listed as an environment action;
 - every action in ``step`` cites the code it transcribes;
+- every action in ``step`` is a WizardCore event (``WizardCore.ACTIONS``),
+  is driven by a ``JobStore`` method, or is listed as render-only or
+  environment-only in coverage.toml;
 - spec/check.sh checks exactly the invariants in ``allInvariants``;
 - every invariant has a requirement in spec/requirements.md, and every
   check named there exists.
 """
 
+import json
 import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -28,6 +34,7 @@ WEB = ROOT / "src" / "mail_merge" / "web"
 INDEX_HTML = WEB / "templates" / "index.html"
 APP_JS = WEB / "static" / "app.js"
 APP_PY = WEB / "app.py"
+WIZARD_CORE = WEB / "static" / "wizard-core.js"
 
 # A comment above each action in `step` must name the code it models.
 CITATION_RE = re.compile(r"\b(app\.js|app\.py|sender\.py|api\.py|auth\.py|environment):")
@@ -177,6 +184,82 @@ class TestCoverageInventory:
             "Actions in `step` that no entry point in spec/coverage.toml triggers "
             f"(add the entry point, or list the action under [environment]): {orphans}"
         )
+
+
+def wizard_core_exports() -> dict:
+    """WizardCore.ACTIONS and EVENTS, read by Node."""
+    script = (
+        f"const C = require({json.dumps(str(WIZARD_CORE))});"
+        "console.log(JSON.stringify({actions: C.ACTIONS, events: C.EVENTS,"
+        " page: Object.keys(C.abstractPage(C.initialState()))}))"
+    )
+    result = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=60, check=True)
+    return json.loads(result.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+class TestImplementation:
+    """Each model action names the code that carries it out (docs/quint-model-plan.md, step 3)."""
+
+    def test_every_action_is_implemented(self):
+        from mail_merge.web.jobs import JobStore
+
+        impl = coverage()["implementation"]
+        page = set(wizard_core_exports()["actions"])
+        server = impl["server"]
+        for action, method in server.items():
+            assert callable(getattr(JobStore, method, None)), f"{action}: JobStore.{method} does not exist"
+        other = set(impl["render"]) | set(impl["environment"])
+        assert not other & (page | set(server)), "render/environment actions must have no event or method"
+        missing = sorted(set(step_actions(spec_text())) - page - set(server) - other)
+        assert not missing, (
+            "Actions in `step` with no event in WizardCore.ACTIONS and no entry under "
+            f"[implementation] in spec/coverage.toml: {missing}"
+        )
+
+    def test_events_name_model_actions(self):
+        exports = wizard_core_exports()
+        actions = step_actions(spec_text())
+        stray = sorted(set(exports["actions"]) - set(actions))
+        assert not stray, f"WizardCore.ACTIONS names actions not in the model's `step`: {stray}"
+        unknown = sorted({a["type"] for a in exports["actions"].values()} - set(exports["events"]))
+        assert not unknown, f"WizardCore.ACTIONS maps to events reduce() doesn't handle: {unknown}"
+
+
+def model_fields() -> tuple[set[str], set[str]]:
+    """The State fields in wizard.qnt: (non-ghost, ghost)."""
+    body = re.search(r"type State = \{(.*?)\n  \}", spec_text(), re.DOTALL)
+    assert body
+    real, ghost = body[1].split("// --- ghost ---")
+    field = re.compile(r"^\s*(\w+):", re.MULTILINE)
+    return set(field.findall(real)), set(field.findall(ghost))
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+class TestAbstraction:
+    """abstractPage (client) and JobStore.abstract (server) cover the model's state."""
+
+    def test_every_field_is_mapped(self):
+        from mail_merge.web.jobs import JobStore
+
+        real, _ghost = model_fields()
+        page = set(wizard_core_exports()["page"])
+        server = set(JobStore().abstract(None))
+        not_mapped = coverage()["abstraction"]["not_mapped"]
+        missing = sorted(real - page - server - set(not_mapped))
+        assert not missing, (
+            "Model fields that neither abstractPage nor JobStore.abstract returns; "
+            f"return them or list them under [abstraction] in spec/coverage.toml: {missing}"
+        )
+
+    def test_mapped_names_are_model_fields(self):
+        from mail_merge.web.jobs import JobStore
+
+        real, ghost = model_fields()
+        page = set(wizard_core_exports()["page"])
+        server = set(JobStore().abstract(None))
+        stray = sorted((page | server | set(coverage()["abstraction"]["not_mapped"])) - real - ghost)
+        assert not stray, f"names that are not State fields in wizard.qnt: {stray}"
 
 
 class TestCitations:
