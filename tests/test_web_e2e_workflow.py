@@ -22,7 +22,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 import mail_merge.api
-from mail_merge.web.app import create_app
+from mail_merge.web.app import _job_store, create_app
 
 STARTUP_TOKEN = "e2e-workflow-token"
 ACTIVE = re.compile(r"\bactive\b")
@@ -36,6 +36,7 @@ class JobGate:
         self.calls: list[tuple[str, threading.Event]] = []
         self.finished: list[threading.Event] = []
         self.hold: set[str] = set()
+        self.closed = False
 
     def __call__(self, **kwargs: Any) -> list[Any]:
         if kwargs.get("test_email"):
@@ -46,9 +47,9 @@ class JobGate:
             mode = "dry_run"
         done = threading.Event()
         finished = threading.Event()
-        if mode not in self.hold:
-            done.set()
         with self._lock:
+            if mode not in self.hold or self.closed:
+                done.set()
             self.calls.append((mode, done))
             self.finished.append(finished)
         try:
@@ -72,6 +73,16 @@ class JobGate:
     def release_all(self) -> None:
         for _, done in self.calls:
             done.set()
+
+    def close(self) -> None:
+        """Release every job, including one that reaches the gate later.
+
+        A test can end as soon as the page shows a send starting, before
+        the job thread has called the gate.
+        """
+        with self._lock:
+            self.closed = True
+            self.release_all()
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +131,15 @@ def gate(monkeypatch: pytest.MonkeyPatch) -> Iterator[JobGate]:
     g = JobGate()
     monkeypatch.setattr(mail_merge.api, "send_merge", g)
     yield g
-    g.release_all()
+    g.close()
+    # The job store is shared by every app in the process, so a send still
+    # running would be reconnected to by the pages of later tests.
+    for _ in range(100):
+        if _job_store.running_send() is None:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("a send job was still running after the test")
 
 
 class AuthStub:
