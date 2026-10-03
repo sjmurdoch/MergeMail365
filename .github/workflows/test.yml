@@ -92,5 +92,8 @@ jobs:
       - name: Simulate fixed against every invariant
         run: spec/node_modules/.bin/quint run spec/wizard.qnt --main=fixed --backend=typescript --invariant=allInvariants --max-samples=2000 --max-steps=20
 
+      - name: Install Playwright browser
+        run: uv run playwright install --with-deps chromium
+
       - name: Conformance and spec coverage
-        run: uv run pytest tests/test_conformance.py tests/test_spec_coverage.py tests/test_wizard_core_js.py
+        run: uv run pytest tests/test_conformance.py tests/test_conformance_e2e.py tests/test_spec_coverage.py tests/test_wizard_core_js.py

@@ -1011,4 +1011,28 @@ module conformance {
     nondet desktop = Bool.oneOf() fwd(signIn(desktop)),
     undo(signOut), undo(tokenExpires), undo(reload), undo(serverRestart),
   }
+  // For the browser tier: the same, but a pending recipient preview or
+  // start-job response is answered before anything else (the browser tier
+  // doesn't hold responses; the await windows are covered by the client
+  // tier and tests/test_web_e2e_workflow.py), and no server restart (it
+  // keeps one server).
+  action settled(a: bool): bool = all { s.previewReq.size() == 0, s.sendReq.size() == 0, a }
+  action eStep = any {
+    // The first upload moves forward; a later one starts the merge again.
+    if (s.dataLoaded) undo(settled(upload)) else fwd(settled(upload)),
+    fwd(settled(next1)), nondet bcc = Bool.oneOf() undo(settled(edit(bcc))), backUp(settled(back2)), fwd(settled(next2)),
+    nondet ok = Bool.oneOf() if (ok) fwd(previewResponse(true)) else undo(previewResponse(false)),
+    backUp(settled(back3)), fwd(settled(next3)),
+    fwd(settled(sendTestEmail)), nondet a = Bool.oneOf() backUp(settled(back4(a))), fwd(settled(next4)),
+    nondet a = Bool.oneOf() backUp(settled(back5(a))), fwd(settled(next5)),
+    fwd(settled(typeSend)), fwd(settled(startSend)), fwd(startSendResponse),
+    nondet a = Bool.oneOf() backUp(settled(back6(a))), fwd(settled(stopSend)), fwd(settled(newMerge)),
+    nondet ok = Bool.oneOf() if (ok) fwd(settled(completeJob(true))) else undo(settled(completeJob(false))),
+    fwd(settled(completeOrphan)),
+    fwd(settled(sendNext)), nondet failed = Bool.oneOf() if (failed) undo(settled(finishSend(true))) else fwd(settled(finishSend(false))),
+    undo(settled(sendWithoutToken)),
+    nondet desktop = Bool.oneOf() fwd(settled(signIn(desktop))),
+    undo(settled(signOut)), undo(settled(tokenExpires)), undo(settled(reload))
+  }
+
 }
