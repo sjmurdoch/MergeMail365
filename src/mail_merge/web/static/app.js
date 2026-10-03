@@ -50,7 +50,7 @@ const state = {
         this.verifyPassed = false;
         this.testGen++;
         this.verifyGen++;
-        $("btn-send-test").disabled = false;
+        $("btn-send-test").disabled = !_auth.isSignedIn;
         $("btn-send-test").removeAttribute("aria-busy");
         $("btn-next-4").disabled = true;
         $("btn-next-5").disabled = true;
@@ -469,7 +469,33 @@ async function checkAuthStatus() {
             _auth.tokenExpiresAt = null;
         }
         updateSignInButton();
+        updateAuthGates();
     } catch (_e) { /* ignore */ }
+}
+
+// The test email and the send go out from the signed-in account. While the
+// page shows signed out, steps 4 and 6 disable their send buttons and offer
+// sign-in on the step itself (spec/wizard.qnt, testNeedsSignIn,
+// sendNeedsSignIn and canProgress).
+function updateAuthGates() {
+    const signedIn = _auth.isSignedIn;
+    for (const id of ["signin-callout-4", "signin-callout-6"]) {
+        if (signedIn) hide(id); else show(id);
+    }
+    // In browser mode, signing in leaves the page and comes back to step 1.
+    for (const el of document.querySelectorAll(".signin-reload-note")) {
+        if (_auth.desktopMode) hide(el); else show(el);
+    }
+    const testBusy = $("btn-send-test").getAttribute("aria-busy") === "true";
+    $("btn-send-test").disabled = testBusy || !signedIn;
+    $("btn-retry-test").disabled = !signedIn;
+    if (!state.sendStarted) {
+        $("btn-do-send").disabled = !signedIn || !sendConfirmed();
+    }
+}
+
+function sendConfirmed() {
+    return $("send-confirm-input").value.trim().toUpperCase() === "SEND";
 }
 
 // Auth message below sign-in button
@@ -491,6 +517,10 @@ function updateSignInButton() {
     const btn = $("btn-sign-in");
     const progress = $("auth-progress");
     btn.removeAttribute("aria-busy");
+    // The sign-in buttons on steps 4 and 6 are only shown while signed out.
+    for (const id of ["btn-sign-in-4", "btn-sign-in-6"]) {
+        $(id).textContent = _auth.signInPoll ? "Cancel sign-in" : "Sign in with Microsoft";
+    }
 
     if (_auth.signInPoll) {
         // Currently waiting for sign-in to complete
@@ -535,7 +565,7 @@ async function doSignOut() {
     await checkAuthStatus();
 }
 
-$("btn-sign-in").addEventListener("click", async () => {
+async function onSignInClick() {
     // If currently waiting for sign-in, cancel it
     if (_auth.signInPoll) {
         cancelSignIn("Sign-in cancelled.");
@@ -554,6 +584,7 @@ $("btn-sign-in").addEventListener("click", async () => {
     const tenantId = $("tenant-id").value.trim() || "common";
     if (!clientId) {
         showAuthMessage("Please enter a Client ID first.", "error");
+        if (state.currentStep !== 1) alert("Enter a Client ID on step 1 before signing in.");
         return;
     }
 
@@ -597,7 +628,11 @@ $("btn-sign-in").addEventListener("click", async () => {
         // Browser mode: redirect to auth login
         window.location.href = `/auth/login?client_id=${encodeURIComponent(clientId)}&tenant_id=${encodeURIComponent(tenantId)}`;
     }
-});
+}
+
+$("btn-sign-in").addEventListener("click", onSignInClick);
+$("btn-sign-in-4").addEventListener("click", onSignInClick);
+$("btn-sign-in-6").addEventListener("click", onSignInClick);
 
 // Test connection
 $("btn-test-connection").addEventListener("click", async () => {
@@ -1273,8 +1308,10 @@ async function sendTestEmail() {
 }
 
 function showTestResult(success, msg) {
-    $("btn-send-test").disabled = false;
+    $("btn-send-test").disabled = !_auth.isSignedIn;
     $("btn-send-test").removeAttribute("aria-busy");
+    // A test that failed for want of a token shows the sign-in callout.
+    if (!success) checkAuthStatus();
     const el = $("test-result");
     show(el);
     el.className = success ? "callout callout-info" : "callout callout-danger";
@@ -1375,10 +1412,11 @@ function prepareSend() {
     $("btn-do-send").disabled = true;
     // startSend() disables Back; re-enable it for the next merge.
     $("btn-back-6").disabled = false;
+    checkAuthStatus();
 }
 
 $("send-confirm-input").addEventListener("input", () => {
-    $("btn-do-send").disabled = $("send-confirm-input").value.trim().toUpperCase() !== "SEND";
+    $("btn-do-send").disabled = !_auth.isSignedIn || !sendConfirmed();
 });
 
 async function startSend() {

@@ -23,7 +23,7 @@
 
 [environment]
 # Actions that no user entry point triggers: the server finishing work.
-actions = ["completeJob", "completeOrphan", "sendNext", "finishSend"]
+actions = ["completeJob", "completeOrphan", "sendNext", "finishSend", "sendWithoutToken", "tokenExpires"]
 
 [entries]
 # --- templates/index.html inline handlers ---
@@ -49,7 +49,9 @@ actions = ["completeJob", "completeOrphan", "sendNext", "finishSend"]
 
 # --- static/app.js listeners ---
 "js:window:beforeunload" = { out_of_scope = "Browser leave-page warning while sending; the page itself is unchanged." }
-"js:#btn-sign-in:click" = { out_of_scope = "Sign-in and sign-out: modelled in step 2c (docs/quint-model-plan.md)." }
+"js:#btn-sign-in:click" = { actions = ["signIn", "signOut"] }
+"js:#btn-sign-in-4:click" = { actions = ["signIn"] }
+"js:#btn-sign-in-6:click" = { actions = ["signIn"] }
 "js:#btn-test-connection:click" = { out_of_scope = "Diagnostics display (/auth/debug); no state change." }
 "js:#spreadsheet-file:change" = { actions = ["upload"] }
 "js:#sheet-select:change" = { actions = ["upload"] }
@@ -77,18 +79,19 @@ actions = ["completeJob", "completeOrphan", "sendNext", "finishSend"]
 "js:document:DOMContentLoaded" = { actions = ["reload"] }
 
 # --- static/app.js timers ---
-"js:setInterval@#btn-sign-in:click" = { out_of_scope = "Desktop sign-in polling: modelled in step 2c (docs/quint-model-plan.md)." }
+"js:setInterval@fn:onSignInClick" = { actions = ["signIn"] }
 "js:setTimeout@fn:onTemplateChange" = { out_of_scope = "Debounced placeholder and HTML warnings; display only." }
 "js:setInterval@document:DOMContentLoaded" = { out_of_scope = "Session expiry display and localStorage auto-save; what auto-save keeps is covered by reload." }
 
 # --- web/app.py routes ---
 "route:GET /" = { actions = ["reload"] }
-"route:GET /auth/login" = { out_of_scope = "Sign-in: modelled in step 2c (docs/quint-model-plan.md)." }
-"route:GET /auth/callback" = { out_of_scope = "Sign-in: modelled in step 2c (docs/quint-model-plan.md)." }
-"route:GET /auth/status" = { out_of_scope = "Sign-in status: modelled in step 2c (docs/quint-model-plan.md)." }
-"route:POST /auth/logout" = { out_of_scope = "Sign-out: modelled in step 2c (docs/quint-model-plan.md)." }
+"route:GET /auth/login" = { actions = ["signIn"] }
+"route:GET /auth/callback" = { actions = ["signIn"] }
+# checkAuthStatus(): on load, entering steps 4 and 6, after a failed test, and while polling a desktop sign-in.
+"route:GET /auth/status" = { actions = ["reload", "next3", "next5", "completeJob", "signIn", "signOut"] }
+"route:POST /auth/logout" = { actions = ["signOut"] }
 "route:GET /auth/debug" = { out_of_scope = "Diagnostics; no state change." }
-"route:POST /auth/interactive" = { out_of_scope = "Desktop sign-in: modelled in step 2c (docs/quint-model-plan.md)." }
+"route:POST /auth/interactive" = { actions = ["signIn"] }
 "route:GET /api/config" = { actions = ["reload"] }
 "route:POST /api/state" = { out_of_scope = "Stores the step and flags for display; on reload the page returns to step 1 and resets the flags whatever was stored." }
 "route:POST /api/reset" = { actions = ["newMerge"] }

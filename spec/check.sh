@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Bounded model checking of spec/wizard.qnt with Apalache (via quint verify).
 #
-#   spec/check.sh buggy  # each invariant should be violated (documents the bugs)
-#   spec/check.sh fixed  # every invariant must hold
+#   spec/check.sh buggy        # each invariant should be violated (documents the bugs)
+#   spec/check.sh fixed        # every invariant must hold
+#   spec/check.sh --all fixed  # same, as one run of allInvariants: about as long
+#                              # as a single invariant, but names no culprit
 #
 # Settings (env var or flag): QUINT / --quint (quint executable),
 # MAX_STEPS / --max-steps (bound, default 16).
@@ -12,23 +14,28 @@ set -euo pipefail
 QUINT="${QUINT:-quint}"
 MAX_STEPS="${MAX_STEPS:-16}"
 target=""
+together=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --quint) QUINT="$2"; shift 2 ;;
         --max-steps) MAX_STEPS="$2"; shift 2 ;;
+        --all) together=1; shift ;;
         buggy|fixed) target="$1"; shift ;;
-        *) echo "usage: $0 [--quint PATH] [--max-steps N] buggy|fixed" >&2; exit 2 ;;
+        *) echo "usage: $0 [--quint PATH] [--max-steps N] [--all] buggy|fixed" >&2; exit 2 ;;
     esac
 done
 if [ -z "$target" ]; then
-    echo "usage: $0 [--quint PATH] [--max-steps N] buggy|fixed" >&2
+    echo "usage: $0 [--quint PATH] [--max-steps N] [--all] buggy|fixed" >&2
     exit 2
 fi
 
 cd "$(dirname "$0")"
 
-invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData stopHonoured stoppedReported"
+invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData stopHonoured stoppedReported testNeedsSignIn sendNeedsSignIn noInteractiveAuthInJob canProgress"
+if [ -n "$together" ]; then
+    invariants="allInvariants"
+fi
 status=0
 
 for inv in $invariants; do

@@ -140,6 +140,34 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     return token
 
 
+class NotSignedInError(RuntimeError):
+    """The token cache has no account with a usable token."""
+
+
+def acquire_token_silent(client_id: str, tenant_id: str = "common") -> str:
+    """Acquire an access token from the cache only, never prompting.
+
+    For background jobs (the web UI), which have nobody to answer a prompt:
+    raises :class:`NotSignedInError` at once instead of starting the
+    device-code flow.
+
+    Returns the access token string.
+    """
+    app, cache = _build_msal_app(client_id, tenant_id)
+
+    accounts: list[dict[str, Any]] = app.get_accounts()
+    result: dict[str, Any] | None = None
+    if accounts:
+        result = app.acquire_token_silent(SCOPES, account=accounts[0])
+    _save_cache(cache)
+
+    if not result or "access_token" not in result:
+        raise NotSignedInError("Not signed in. Sign in with Microsoft, then try again.")
+
+    token: str = result["access_token"]
+    return token
+
+
 def sign_out(client_id: str, tenant_id: str = "common") -> bool:
     """Remove cached accounts for the given client/tenant.
 

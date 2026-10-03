@@ -8,7 +8,9 @@ These checks are textual and fast (no browser, no Quint):
   action in the model's ``step`` relation is reachable from an entry point
   or listed as an environment action;
 - every action in ``step`` cites the code it transcribes;
-- spec/check.sh checks exactly the invariants in ``allInvariants``.
+- spec/check.sh checks exactly the invariants in ``allInvariants``;
+- every invariant has a requirement in spec/requirements.md, and every
+  check named there exists.
 """
 
 import re
@@ -21,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "spec" / "wizard.qnt"
 COVERAGE = ROOT / "spec" / "coverage.toml"
 CHECK_SH = ROOT / "spec" / "check.sh"
+REQUIREMENTS = ROOT / "spec" / "requirements.md"
 WEB = ROOT / "src" / "mail_merge" / "web"
 INDEX_HTML = WEB / "templates" / "index.html"
 APP_JS = WEB / "static" / "app.js"
@@ -131,6 +134,15 @@ class TestExtraction:
 
 
 class TestCoverageInventory:
+    def test_extractor_sees_every_listener(self):
+        """A listener in a form the regex can't read (e.g. ``$(id).addEventListener``) fails here."""
+        text = APP_JS.read_text(encoding="utf-8")
+        total = len(re.findall(r"\.addEventListener\(", text))
+        seen = len(re.findall(
+            r"""(\$\(["'][\w-]+["']\)|\b[A-Za-z_]\w*)\.addEventListener\(\s*["'][\w-]+["']""", text,
+        ))
+        assert seen == total, "app.js has addEventListener calls the coverage extractor cannot key"
+
     def test_every_entry_point_is_listed(self):
         missing = sorted(all_entry_points() - set(coverage()["entries"]))
         assert not missing, (
@@ -183,11 +195,45 @@ class TestCitations:
         )
 
 
+def all_invariants() -> set[str]:
+    body = re.search(r"val allInvariants = and \{(.*?)\}", spec_text(), re.DOTALL)
+    assert body
+    return set(re.findall(r"\w+", body[1]))
+
+
 class TestCheckScript:
     def test_check_sh_runs_every_invariant(self):
-        body = re.search(r"val allInvariants = and \{(.*?)\}", spec_text(), re.DOTALL)
-        assert body
-        invariants = set(re.findall(r"\w+", body[1]))
         listed = re.search(r'^invariants="([^"]*)"', CHECK_SH.read_text(encoding="utf-8"), re.MULTILINE)
         assert listed
-        assert set(listed[1].split()) == invariants
+        assert set(listed[1].split()) == all_invariants()
+
+
+class TestRequirements:
+    def _checked_by(self) -> dict[str, set[str]]:
+        """Requirement ID -> names in its "Checked by" cell."""
+        rows: dict[str, set[str]] = {}
+        for line in REQUIREMENTS.read_text(encoding="utf-8").splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) == 4 and re.fullmatch(r"R\d+", cells[0]):
+                rows[cells[0]] = set(re.findall(r"`(\w+)`", cells[2]))
+        assert rows, "no requirement rows found in spec/requirements.md"
+        return rows
+
+    def test_named_checks_exist_in_model(self):
+        defined = set(re.findall(r"^\s*val\s+(\w+)", spec_text(), re.MULTILINE))
+        for req, names in self._checked_by().items():
+            unknown = names - defined
+            assert not unknown, f"{req} names checks not defined in wizard.qnt: {sorted(unknown)}"
+
+    def test_every_invariant_has_a_requirement(self):
+        named = set().union(*self._checked_by().values())
+        missing = sorted(all_invariants() - named)
+        assert not missing, f"invariants with no requirement in spec/requirements.md: {missing}"
+
+    def test_named_invariants_are_checked(self):
+        """A name in the table is either an invariant run by check.sh or a witness."""
+        witnesses_section = REQUIREMENTS.read_text(encoding="utf-8").split("## Witnesses", 1)[1]
+        witnesses = set(re.findall(r"`(\w+)`", witnesses_section))
+        for req, names in self._checked_by().items():
+            stray = names - all_invariants() - witnesses
+            assert not stray, f"{req}: {sorted(stray)} are neither in allInvariants nor listed as witnesses"

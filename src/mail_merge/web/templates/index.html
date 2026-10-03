@@ -284,6 +284,12 @@
             <div id="test-preview-info"></div>
         </div>
 
+        <div id="signin-callout-4" class="callout callout-warning hidden">
+            <p>You are not signed in. The test email is sent from your Microsoft account, so sign in first.</p>
+            <p class="signin-reload-note">Signing in leaves this page and brings you back to step 1. Your spreadsheet, subject and body are kept; filters, CC, BCC, reply-to, importance, attachments and BCC mode must be set again.</p>
+            <button type="button" id="btn-sign-in-4" class="outline">Sign in with Microsoft</button>
+        </div>
+
         <div class="button-row">
             <button type="button" id="btn-send-test" onclick="sendTestEmail()">Send test email</button>
             <button type="button" id="btn-retry-test" class="outline hidden" onclick="sendTestEmail()">Retry</button>
@@ -319,6 +325,11 @@
         <div id="send-confirm" class="callout callout-danger">
             <p><strong>You are about to send <span id="send-count">?</span> real emails. This cannot be undone.</strong></p>
             <div id="send-confirm-details"></div>
+            <div id="signin-callout-6" class="hidden">
+                <p><strong>You are not signed in.</strong> The emails are sent from your Microsoft account, so sign in first.</p>
+                <p class="signin-reload-note">Signing in leaves this page and brings you back to step 1. Your spreadsheet, subject and body are kept; filters, CC, BCC, reply-to, importance, attachments and BCC mode must be set again.</p>
+                <button type="button" id="btn-sign-in-6" class="outline">Sign in with Microsoft</button>
+            </div>
             <label for="send-confirm-input">Type <strong>SEND</strong> to confirm:</label>
             <input type="text" id="send-confirm-input" class="confirm-input" placeholder="SEND" autocomplete="off">
             <button type="button" id="btn-do-send" disabled onclick="startSend()">Send emails</button>

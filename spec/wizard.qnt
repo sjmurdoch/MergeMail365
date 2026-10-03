@@ -67,12 +67,16 @@ module wizard {
     sessionJob: Set[SessionJob],  // empty or singleton
     nextJobId: int,
     sendJob: Set[SendJob],        // empty or singleton
+    // --- auth ---
+    signedIn: bool,               // the token cache has an account with a usable token
+    authShown: bool,              // what the page last showed from /auth/status (_auth.isSignedIn)
     // --- ghost ---
     testedVersions: Set[int],
     verifiedVersions: Set[int],
     realSendStarted: bool,
     untestedSend: bool,
     sentAfterStop: int,           // emails the send loop sent after Stop was pressed
+    interactiveAuthInJob: bool,   // a job waited for the device-code flow
   }
 
   var s: State
@@ -86,13 +90,38 @@ module wizard {
     btnDoSend: false, btnBack6: true, doneNav: false,
     pending: Set(),
     sessionJob: Set(), nextJobId: 0, sendJob: Set(),
+    signedIn: false, authShown: false,
     testedVersions: Set(), verifiedVersions: Set(),
     realSendStarted: false, untestedSend: false, sentAfterStop: 0,
+    interactiveAuthInJob: false,
   }
+
+  // ---------------------------------------------------------------------
+  // What the page offers. Actions use these as guards and the invariants
+  // read them, so the two can't drift apart.
+  // ---------------------------------------------------------------------
+
+  // The sign-in button: on step 1 always, and (FIXED) in the callout that
+  // steps 4 and 6 show while the page shows signed out.
+  pure def signInOffered(st: State): bool =
+    st.step == 1
+      or (FIXED and not(st.authShown)
+          and (st.step == 4 or (st.step == 6 and not(st.sendStarted))))
+
+  // "Send test email" can be clicked. FIXED: also disabled while signed out.
+  pure def sendTestEnabled(st: State): bool =
+    st.btnSendTest and (not(FIXED) or st.authShown)
+
+  // "Send emails" can be clicked. FIXED: also disabled while signed out.
+  pure def doSendEnabled(st: State): bool =
+    st.btnDoSend and (not(FIXED) or st.authShown)
 
   // ---------------------------------------------------------------------
   // Helpers mirroring app.js functions
   // ---------------------------------------------------------------------
+
+  // checkAuthStatus(): GET /auth/status, then the page shows the result.
+  pure def checkAuthStatus(st: State): State = { ...st, authShown: st.signedIn }
 
   // POST /api/start-job, then streamEvents(...) attaches `handler`.
   pure def startJob(st: State, kind: Kind, gen: int): State = {
@@ -135,7 +164,12 @@ module wizard {
       else if (n == 5 and not(st.testPassed)) st
       else if (n == 6 and not(st.verifyPassed)) st
       else {
-        val st1 = if (n == 5) startVerify(st) else if (n == 6) prepareSend(st) else st
+        val st1 =
+          if (n == 4) checkAuthStatus(st)
+          else if (n == 5) startVerify(st)
+          // FIXED: prepareSend() also refreshes the sign-in display.
+          else if (n == 6) { if (FIXED) checkAuthStatus(prepareSend(st)) else prepareSend(st) }
+          else st
         { ...st1, step: n }
       }
     } else { ...st, step: n }
@@ -163,6 +197,9 @@ module wizard {
       | Test =>
         if (FIXED and j.gen != st1.testGen) st1
         else if (ok) { ...st1, btnSendTest: true, testPassed: true, btnNext4: true }
+        // FIXED: a failed test refreshes the sign-in display, so a test that
+        // failed for want of a token shows the sign-in callout.
+        else if (FIXED) checkAuthStatus({ ...st1, btnSendTest: true })
         else { ...st1, btnSendTest: true }
       | Verify =>
         if (FIXED and j.gen != st1.verifyGen) st1
@@ -211,7 +248,7 @@ module wizard {
   // Step 4
   // app.js: sendTestEmail() (#btn-send-test, #btn-retry-test); web/app.py: api_start_job (mode test_email)
   action sendTestEmail = all {
-    s.step == 4, s.btnSendTest,
+    s.step == 4, sendTestEnabled(s),
     val g = s.testGen + 1
     act("sendTestEmail", { ...startJob(s, Test, g),
       testGen: g, testPassed: false, btnSendTest: false,
@@ -237,7 +274,7 @@ module wizard {
   }
   // app.js: startSend() (#btn-do-send); web/app.py: api_start_job (mode send)
   action startSend = all {
-    s.step == 6, not(s.sendStarted), s.btnDoSend,
+    s.step == 6, not(s.sendStarted), doSendEnabled(s),
     val ok = s.testedVersions.contains(s.version) and s.verifiedVersions.contains(s.version)
     act("startSend", { ...startJob(s, Send, 0),
       sendStarted: true, btnBack6: false, btnDoSend: false,
@@ -274,20 +311,32 @@ module wizard {
     }),
   }
 
+  // A test email needs a token. Without one, the job's token provider
+  // (web/app.py _make_token_provider) calls auth.acquire_token(), which falls
+  // back to the device-code flow: the prompt goes to the job log and the
+  // job blocks until the code expires, then fails.
+  // FIXED: the provider is silent-only and fails at once.
+  pure def finishJob(st: State, j: Job, ok: bool): State = {
+    val noToken = j.kind == Test and not(st.signedIn)
+    val st1 = { ...st,
+      interactiveAuthInJob: st.interactiveAuthInJob or (noToken and not(FIXED)) }
+    markSessionJobDone(complete(st1, j, ok and not(noToken)), j.id)
+  }
+
   // The server finishes a test or dry-run job; the page's callback (if any)
   // fires. Send jobs finish through the send loop below instead.
   // environment: web/app.py api_start_job._run_job; app.js streamEvents() completion
   action completeJob(ok: bool): bool = all {
     s.pending.exists(p => p.kind != Send),
     nondet j = s.pending.filter(p => p.kind != Send).oneOf()
-    act("complete", markSessionJobDone(complete(s, j, ok), j.id)),
+    act("complete", finishJob(s, j, ok)),
   }
 
   // Deterministic completion of a specific job, for scenario tests.
   action completeById(id: int, ok: bool): bool = all {
     s.pending.exists(p => p.id == id and p.kind != Send),
     nondet j = s.pending.filter(p => p.id == id).oneOf()
-    act("complete", markSessionJobDone(complete(s, j, ok), j.id)),
+    act("complete", finishJob(s, j, ok)),
   }
 
   // The server finishes the session's test or dry-run job with nobody
@@ -296,7 +345,9 @@ module wizard {
   action completeOrphan = all {
     s.sessionJob.exists(sj => not(sj.done) and sj.kind != Send and s.pending.forall(p => p.id != sj.id)),
     nondet sj = s.sessionJob.oneOf()
-    act("completeOrphan", markSessionJobDone(s, sj.id)),
+    act("completeOrphan", markSessionJobDone({ ...s,
+      interactiveAuthInJob: s.interactiveAuthInJob
+        or (sj.kind == Test and not(s.signedIn) and not(FIXED)) }, sj.id)),
   }
 
   // One iteration of the send loop: send_one() for the next recipient.
@@ -304,6 +355,7 @@ module wizard {
   // FIXED: the loop checks the job's should_stop() before each email.
   // environment: sender.py send_all() / send_bcc_blast() loop body
   action sendNext = all {
+    s.signedIn,
     s.sendJob.exists(j => j.status == Running and j.sent < TOTAL
       and (not(FIXED) or not(j.stopRequested))),
     nondet j = s.sendJob.oneOf()
@@ -320,29 +372,80 @@ module wizard {
     s.sendJob.exists(j => j.status == Running
       and (failed or j.sent == TOTAL or (FIXED and j.stopRequested))),
     nondet j = s.sendJob.oneOf()
-    val status = if (failed) Failed else if (j.sent == TOTAL) Completed else Stopped
-    val st1 = { ...s, sendJob: Set({ ...j, status: status }) }
-    val st2 = s.pending.filter(p => p.id == j.id).fold(st1, (acc, p) => complete(acc, p, not(failed)))
-    act("finishSend", markSessionJobDone(st2, j.id)),
+    act("finishSend", finishSendJob(s, j, failed)),
   }
 
-  // Page reload: JS memory and DOM reset; session, temp files, localStorage
-  // and server jobs survive. loadConfig() then runs.
+  pure def finishSendJob(st: State, j: SendJob, failed: bool): State = {
+    val status = if (failed) Failed else if (j.sent == TOTAL) Completed else Stopped
+    val st1 = { ...st, sendJob: Set({ ...j, status: status }) }
+    val st2 = st.pending.filter(p => p.id == j.id).fold(st1, (acc, p) => complete(acc, p, not(failed)))
+    markSessionJobDone(st2, j.id)
+  }
+
+  // The send loop needs a token for the next email and the cache has none.
+  // Bug: the token provider falls into the device-code flow and the job
+  // blocks (it fails later, through finishSend, when the code expires).
+  // FIXED: the provider raises at once and the job fails.
+  // environment: sender.py send_one() -> get_token(); web/app.py _make_token_provider
+  action sendWithoutToken = all {
+    not(s.signedIn),
+    s.sendJob.exists(j => j.status == Running and j.sent < TOTAL
+      and (not(FIXED) or not(j.stopRequested))),
+    nondet j = s.sendJob.oneOf()
+    act("sendWithoutToken",
+      if (FIXED) finishSendJob(s, j, true)
+      else { ...s, interactiveAuthInJob: true }),
+  }
+
+  // Sign in. Browser mode redirects to Microsoft and back, which reloads the
+  // page; desktop mode starts the system-browser flow and polls /auth/status
+  // until it finishes. Only the successful outcome is modelled: a cancelled
+  // or failed sign-in leaves the state as it was.
+  // app.js: #btn-sign-in click (signed out), the sign-in poll timer; FIXED also #btn-sign-in-4, #btn-sign-in-6;
+  // web/app.py: auth_login, auth_callback, auth_interactive, auth_status
+  action signIn(desktop: bool): bool = all {
+    signInOffered(s), not(s.authShown),
+    act("signIn",
+      if (desktop) { ...s, signedIn: true, authShown: true }
+      else reloadState({ ...s, signedIn: true })),
+  }
+
+  // app.js: #btn-sign-in click (signed in), doSignOut(); web/app.py: auth_logout
+  action signOut = all {
+    s.step == 1, s.authShown,
+    act("signOut", { ...s, signedIn: false, authShown: false }),
+  }
+
+  // The cached token stops working: no usable refresh token, consent
+  // revoked, or a sign-out from another window or the CLI. The page keeps
+  // showing what it last fetched.
+  // environment: MSAL token cache (auth.py)
+  action tokenExpires = all {
+    s.signedIn,
+    act("tokenExpires", { ...s, signedIn: false }),
+  }
+
+  // Page reload: JS memory and DOM reset; session, temp files, localStorage,
+  // the token cache and server jobs survive. loadConfig() and
+  // checkAuthStatus() then run.
   // app.js: DOMContentLoaded, loadConfig(); web/app.py: api_config
-  action reload = {
+  action reload = act("reload", reloadState(s))
+
+  pure def reloadState(st: State): State = {
     val fresh = { ...init_state,
-      dataLoaded: s.dataLoaded, version: s.version,
-      sessionJob: s.sessionJob, nextJobId: s.nextJobId, sendJob: s.sendJob,
-      testGen: s.testGen, verifyGen: s.verifyGen,
-      testedVersions: s.testedVersions, verifiedVersions: s.verifiedVersions,
-      realSendStarted: s.realSendStarted, untestedSend: s.untestedSend,
-      sentAfterStop: s.sentAfterStop,
+      dataLoaded: st.dataLoaded, version: st.version,
+      sessionJob: st.sessionJob, nextJobId: st.nextJobId, sendJob: st.sendJob,
+      testGen: st.testGen, verifyGen: st.verifyGen,
+      signedIn: st.signedIn, authShown: st.signedIn,
+      testedVersions: st.testedVersions, verifiedVersions: st.verifiedVersions,
+      realSendStarted: st.realSendStarted, untestedSend: st.untestedSend,
+      sentAfterStop: st.sentAfterStop, interactiveAuthInJob: st.interactiveAuthInJob,
     }
     // Bug: /api/config reports session["job_id"] as active whenever it is
     // still in _jobs, whatever its mode and even if it has finished.
     val active =
-      if (FIXED) s.sessionJob.filter(sj => sj.kind == Send)
-      else s.sessionJob
+      if (FIXED) st.sessionJob.filter(sj => sj.kind == Send)
+      else st.sessionJob
     val after =
       if (active.size() == 0) fresh
       else {
@@ -359,10 +462,10 @@ module wizard {
         } else {
           // Reattach the send-step callback to whatever job this is.
           { ...reconnected, pending: Set({
-              id: sj.id, kind: sj.kind, handler: Send, version: s.version, gen: 0 }) }
+              id: sj.id, kind: sj.kind, handler: Send, version: st.version, gen: 0 }) }
         }
       }
-    act("reload", after)
+    after
   }
 
   action step = any {
@@ -372,7 +475,8 @@ module wizard {
     typeSend, startSend, nondet a = Bool.oneOf() back6(a), stopSend, newMerge,
     nondet ok = Bool.oneOf() completeJob(ok),
     completeOrphan,
-    sendNext, nondet failed = Bool.oneOf() finishSend(failed),
+    sendNext, nondet failed = Bool.oneOf() finishSend(failed), sendWithoutToken,
+    nondet desktop = Bool.oneOf() signIn(desktop), signOut, tokenExpires,
     reload,
   }
 
@@ -419,11 +523,53 @@ module wizard {
   val stoppedReported = s.sendJob.forall(j =>
     (j.stopEarly and j.status != Running and j.status != Failed) implies j.status == Stopped)
 
+  /// On step 4, while the page shows signed out, "Send test email" is
+  /// disabled and the sign-in button is offered on the step.
+  val testNeedsSignIn =
+    (s.step == 4 and not(s.authShown)) implies (not(sendTestEnabled(s)) and signInOffered(s))
+
+  /// "Send emails" can only be clicked while the page shows signed in, and
+  /// step 6 offers sign-in before sending while it shows signed out.
+  val sendNeedsSignIn =
+    (s.step == 6 and not(s.sendStarted))
+      implies ((doSendEnabled(s) implies s.authShown) and (s.authShown or signInOffered(s)))
+
+  /// No web job ever waits for interactive sign-in input.
+  val noInteractiveAuthInJob = not(s.interactiveAuthInJob)
+
+  /// Dead-end check, from the same guards the actions use: on steps 4 and 6
+  /// the user can finish the step from the step itself, without going back.
+  /// Steps 1-3 always offer their forward action; a failed dry run on step 5
+  /// is fixed upstream (the content is wrong), so Back is the right way out.
+  val canProgress =
+    (s.step == 4 implies (
+        s.pending.exists(p => p.handler == Test)
+        or (s.btnNext4 and s.testPassed)
+        or (sendTestEnabled(s) and s.authShown)
+        or signInOffered(s)))
+    and ((s.step == 6 and not(s.sendStarted)) implies (s.authShown or signInOffered(s)))
+
   val allInvariants = and {
     noUntestedSend, next4Honest, next5Honest, buttonsMatchFlags,
     back6Usable, sendScreenHonest, sendScreenNotStuck, stepNeedsData,
     stopHonoured, stoppedReported,
+    testNeedsSignIn, sendNeedsSignIn, noInteractiveAuthInJob, canProgress,
   }
+
+  // ---------------------------------------------------------------------
+  // Witnesses (quint run --witnesses): states that are allowed but worth a
+  // look. spec/requirements.md records how often each is reached and why it
+  // is acceptable.
+  // ---------------------------------------------------------------------
+
+  /// The page shows signed in on step 4 or 6, but the token is gone.
+  val staleSignIn = (s.step == 4 or s.step == 6) and s.authShown and not(s.signedIn)
+
+  /// A job is running on the server with no page listening for it.
+  val orphanJob = s.sessionJob.exists(sj => not(sj.done) and s.pending.forall(p => p.id != sj.id))
+
+  /// A send failed after some emails went out.
+  val partialFailedSend = s.sendJob.exists(j => j.status == Failed and j.sent > 0)
 
   // ---------------------------------------------------------------------
   // Scenarios (quint test). Each replays one counterexample; the invariant
@@ -435,6 +581,9 @@ module wizard {
 
   action toStep4 = upload.then(next1).then(next2).then(next3)
 
+  // Start signed in (desktop sign-in on step 1).
+  action start = init.then(signIn(true))
+
   // The send loop sends every email, then the job finishes.
   action sendAll = sendNext.then(sendNext).then(sendNext).then(finishSend(false))
 
@@ -443,19 +592,19 @@ module wizard {
       .then(next4).then(completeById(testId + 1, true))
 
   run happyPathTest =
-    init.then(toStep4).then(passTestAndVerify(0))
+    start.then(toStep4).then(passTestAndVerify(0))
       .then(next5).then(typeSend).then(startSend).then(sendAll)
       .expect(allInvariants and s.doneNav)
 
   /// A test that completes after the user went back and edited enables Next.
   run staleTestCompletionTest =
-    init.then(toStep4).then(sendTestEmail).then(back4(true)).then(back3)
+    start.then(toStep4).then(sendTestEmail).then(back4(true)).then(back3)
       .then(completeById(0, true)).then(edit).then(next2).then(next3)
       .expect(bugIff(next4Honest))
 
   /// An old dry run completing during a newer one enables Next on step 5.
   run staleVerifyCompletionTest =
-    init.then(toStep4).then(sendTestEmail).then(completeById(0, true))
+    start.then(toStep4).then(sendTestEmail).then(completeById(0, true))
       .then(next4)                                   // dry run 1 starts
       .then(back5(true)).then(back4(true)).then(back3).then(edit)
       .then(next2).then(next3).then(sendTestEmail).then(completeById(2, true))
@@ -465,22 +614,22 @@ module wizard {
 
   /// Re-sending a test leaves Next enabled while testPassed is false.
   run retestLeavesNextEnabledTest =
-    init.then(toStep4).then(sendTestEmail).then(completeById(0, true)).then(sendTestEmail)
+    start.then(toStep4).then(sendTestEmail).then(completeById(0, true)).then(sendTestEmail)
       .expect(bugIff(buttonsMatchFlags))
 
   /// Reloading during a test email jumps to the Send step.
   run reloadDuringTestTest =
-    init.then(toStep4).then(sendTestEmail).then(reload)
+    start.then(toStep4).then(sendTestEmail).then(reload)
       .expect(bugIff(sendScreenHonest))
 
   /// Reloading after a test email finished leaves the page stuck on "Sending".
   run reloadAfterTestTest =
-    init.then(toStep4).then(sendTestEmail).then(completeById(0, true)).then(reload)
+    start.then(toStep4).then(sendTestEmail).then(completeById(0, true)).then(reload)
       .expect(bugIff(sendScreenNotStuck))
 
   /// Reloading after a real send finished also gets stuck.
   run reloadAfterSendTest =
-    init.then(toStep4).then(passTestAndVerify(0))
+    start.then(toStep4).then(passTestAndVerify(0))
       .then(next5).then(typeSend).then(startSend).then(sendAll)
       .then(reload)
       .expect(bugIff(sendScreenNotStuck))
@@ -488,7 +637,7 @@ module wizard {
   /// Stop sending does nothing: the loop keeps sending (bug 7). Fixed: the
   /// loop stops before the next email and the job ends as Stopped.
   run stopIgnoredTest =
-    init.then(toStep4).then(passTestAndVerify(0))
+    start.then(toStep4).then(passTestAndVerify(0))
       .then(next5).then(typeSend).then(startSend).then(sendNext).then(stopSend)
       .then(any { all { FIXED, finishSend(false) }, all { not(FIXED), sendNext } })
       .expect(bugIff(stopHonoured)
@@ -496,14 +645,54 @@ module wizard {
 
   /// A stopped send reports Completed once every email has gone out.
   run stoppedReportedTest =
-    init.then(toStep4).then(passTestAndVerify(0))
+    start.then(toStep4).then(passTestAndVerify(0))
       .then(next5).then(typeSend).then(startSend).then(stopSend)
       .then(any { all { FIXED, finishSend(false) }, all { not(FIXED), sendAll } })
       .expect(bugIff(stoppedReported))
 
+  /// A signed-out user reaches step 4 with no way to sign in there (bug 8).
+  run signedOutStep4Test =
+    init.then(toStep4)
+      .expect(bugIff(testNeedsSignIn and canProgress))
+
+  /// Fixed: signing in from the step 4 callout enables the test email.
+  run signInOnStep4Test =
+    init.then(toStep4)
+      .then(any { all { FIXED, signIn(true) }, all { not(FIXED), back4(true).then(back3).then(back2).then(signIn(true)).then(next1).then(next2).then(next3) } })
+      .expect(s.step == 4 and sendTestEnabled(s) and allInvariants)
+
+  /// A test email sent after the token expired waits in the device-code
+  /// flow (bug 9). Fixed: it fails at once and the page offers sign-in.
+  run testWithoutTokenTest =
+    start.then(toStep4).then(tokenExpires).then(sendTestEmail).then(completeById(0, true))
+      .expect(bugIff(noInteractiveAuthInJob)
+        and not(s.testPassed)
+        and (FIXED implies (signInOffered(s) and not(sendTestEnabled(s)))))
+
+  /// A send whose token expires mid-way waits in the device-code flow.
+  /// Fixed: the job fails at once.
+  run sendWithoutTokenTest =
+    start.then(toStep4).then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(startSend).then(sendNext).then(tokenExpires)
+      .then(sendWithoutToken)
+      .expect(bugIff(noInteractiveAuthInJob)
+        and (FIXED implies (s.doneNav and s.sendJob.forall(j => j.status == Failed))))
+
+  /// Vacuity: reaches the actions no other scenario takes, so a guard that
+  /// can never be true is caught. completeOrphan is only reachable in fixed:
+  /// the buggy reload reattaches every unfinished job.
+  run remainingActionsTest =
+    start.then(toStep4).then(passTestAndVerify(0)).then(next5)
+      .then(back6(false)).then(back6(true))
+      .then(sendTestEmail).then(completeJob(true))
+      .then(back4(true)).then(back3).then(back2).then(signOut).then(signIn(true))
+      .then(next1).then(next2).then(next3).then(sendTestEmail)
+      .then(any { all { FIXED, reload.then(completeOrphan) }, all { not(FIXED), reload } })
+      .expect(FIXED implies (s.step == 1 and allInvariants))
+
   /// After New merge, Back on step 6 stays disabled.
   run back6AfterNewMergeTest =
-    init.then(toStep4).then(passTestAndVerify(0))
+    start.then(toStep4).then(passTestAndVerify(0))
       .then(next5).then(typeSend).then(startSend).then(sendAll)
       .then(newMerge).then(toStep4).then(passTestAndVerify(3)).then(next5)
       .expect(bugIff(back6Usable))

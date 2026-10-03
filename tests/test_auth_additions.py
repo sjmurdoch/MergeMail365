@@ -1,4 +1,4 @@
-"""Tests for new auth functions: initiate_auth_code_flow, acquire_token_by_auth_code, diagnose_auth, sign_out."""
+"""Tests for new auth functions: initiate_auth_code_flow, acquire_token_by_auth_code, diagnose_auth, sign_out, acquire_token_silent."""
 
 from unittest.mock import MagicMock, create_autospec, patch
 
@@ -6,7 +6,9 @@ import msal
 import pytest
 
 from mail_merge.auth import (
+    NotSignedInError,
     acquire_token_by_auth_code,
+    acquire_token_silent,
     diagnose_auth,
     initiate_auth_code_flow,
     sign_out,
@@ -196,3 +198,52 @@ class TestSignOut:
 
         assert result is False
         mock_app.remove_account.assert_not_called()
+
+
+class TestAcquireTokenSilent:
+    """The web jobs' token source: cache only, never a prompt."""
+
+    @patch("mail_merge.auth._save_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
+    @patch("mail_merge.auth._load_cache")
+    def test_returns_cached_token(self, mock_cache, mock_app_cls, mock_save):
+        mock_cache.return_value = MagicMock()
+        mock_app = _mock_msal_app()
+        mock_app.get_accounts.return_value = [{"username": "me@example.com"}]
+        mock_app.acquire_token_silent.return_value = {"access_token": "tok"}
+        mock_app_cls.return_value = mock_app
+
+        assert acquire_token_silent("cid", "common") == "tok"
+        mock_save.assert_called_once()
+
+    @patch("mail_merge.auth._save_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
+    @patch("mail_merge.auth._load_cache")
+    def test_no_account_raises_without_prompting(self, mock_cache, mock_app_cls, mock_save):
+        mock_cache.return_value = MagicMock()
+        mock_app = _mock_msal_app()
+        mock_app.get_accounts.return_value = []
+        mock_app_cls.return_value = mock_app
+
+        with pytest.raises(NotSignedInError, match="Not signed in"):
+            acquire_token_silent("cid", "common")
+        mock_app.initiate_device_flow.assert_not_called()
+        mock_app.acquire_token_interactive.assert_not_called()
+
+    @patch("mail_merge.auth._save_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
+    @patch("mail_merge.auth._load_cache")
+    def test_failed_refresh_raises_without_prompting(self, mock_cache, mock_app_cls, mock_save):
+        mock_cache.return_value = MagicMock()
+        mock_app = _mock_msal_app()
+        mock_app.get_accounts.return_value = [{"username": "me@example.com"}]
+        mock_app.acquire_token_silent.return_value = None
+        mock_app_cls.return_value = mock_app
+
+        with pytest.raises(NotSignedInError):
+            acquire_token_silent("cid", "common")
+        mock_app.initiate_device_flow.assert_not_called()
+
+    def test_is_a_runtime_error(self):
+        """send_merge() callers already handle RuntimeError from auth."""
+        assert issubclass(NotSignedInError, RuntimeError)

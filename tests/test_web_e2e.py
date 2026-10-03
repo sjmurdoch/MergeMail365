@@ -132,8 +132,8 @@ def big_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="module")
 def _mock_auth():
-    """Module-scoped mock that patches acquire_token for the entire test run."""
-    with patch("mail_merge.auth.acquire_token", return_value="fake-e2e-token"):
+    """Module-scoped mock that patches the web jobs' token source for the entire test run."""
+    with patch("mail_merge.auth.acquire_token_silent", return_value="fake-e2e-token"):
         yield
 
 
@@ -972,6 +972,9 @@ class TestSendConfirmation:
     def test_typing_send_enables_button(self, authenticated_page: Page, sample_xlsx: Path):
         """Typing SEND in the confirmation input enables the send button."""
         page = authenticated_page
+        # Sending needs a signed-in account; the test server has no token cache.
+        page.route("**/auth/status", lambda route: route.fulfill(
+            json={"authenticated": True, "email": "me@example.com", "token_expires_at": None}))
         self._navigate_to_send(page, sample_xlsx)
         page.evaluate("() => { testPassed = true; verifyPassed = true; goToStep(6); }")
         page.wait_for_selector("#step-6.active", timeout=5000)

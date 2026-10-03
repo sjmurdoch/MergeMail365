@@ -888,10 +888,13 @@ def create_app(
             if not client_id:
                 return jsonify({"error": "client_id is required for sending"}), 400  # type: ignore[return-value]
 
+            # Silent only: a job has nobody to answer a sign-in prompt, so
+            # without a cached token it fails at once rather than waiting in
+            # the device-code flow (spec/wizard.qnt, noInteractiveAuthInJob).
             def _make_token_provider(cid: str, tid: str) -> Any:
                 def provider() -> str:
-                    from mail_merge.auth import acquire_token
-                    return acquire_token(cid, tid)
+                    from mail_merge.auth import acquire_token_silent
+                    return acquire_token_silent(cid, tid)
                 return provider
 
             kwargs["token_provider"] = _make_token_provider(client_id, tenant_id)

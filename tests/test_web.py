@@ -911,7 +911,7 @@ class TestJobs:
         assert "nonexistent" in status["error"].lower()
 
     @responses.activate
-    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    @patch("mail_merge.auth.acquire_token_silent", return_value="fake-token")
     def test_send_job_completes(self, mock_auth, web_client, sample_xlsx_web):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         csrf = self._setup_upload(web_client, sample_xlsx_web)
@@ -965,7 +965,7 @@ class TestJobs:
         assert "Too many" in data["error"]
 
     @responses.activate
-    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    @patch("mail_merge.auth.acquire_token_silent", return_value="fake-token")
     def test_test_email_job(self, mock_auth, web_client, sample_xlsx_web):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         csrf = self._setup_upload(web_client, sample_xlsx_web)
@@ -1016,7 +1016,7 @@ class TestJobs:
         assert status["status"] in ("completed", "running", "pending")
 
     @responses.activate
-    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    @patch("mail_merge.auth.acquire_token_silent", return_value="fake-token")
     def test_send_with_failures(self, mock_auth, web_client, sample_xlsx_web):
         """One recipient fails with 400, the other succeeds — partial failure."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=400,
@@ -1092,34 +1092,19 @@ class TestJobs:
     @patch("mail_merge.auth._save_cache")
     @patch("mail_merge.auth._load_cache")
     @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
-    def test_test_email_when_signed_out_waits_in_device_flow(
-        self, mock_app_cls, mock_load_cache, mock_save_cache, web_client, sample_xlsx_web, caplog,
+    def test_test_email_when_signed_out_fails_at_once(
+        self, mock_app_cls, mock_load_cache, mock_save_cache, web_client, sample_xlsx_web,
     ):
-        """Characterises current behaviour (a known bug, see docs/quint-model-plan.md).
+        """A signed-out web job fails with a sign-in error instead of waiting.
 
-        The wizard lets a signed-out user reach step 4. The job's token
-        provider calls auth.acquire_token(), which falls back to the CLI's
-        device-code flow when the cache has no account: the device-code
-        prompt is posted to the test log and the job thread blocks until the
-        code is used or expires. Invert this test when the behaviour is fixed.
+        The job's token provider is silent-only: with no cached account it
+        must not start the device-code flow, whose prompt would only reach
+        the job log while the job blocked (spec/wizard.qnt,
+        noInteractiveAuthInJob).
         """
-        # setup_logging() sets the root logger to INFO in the real app.
-        caplog.set_level(logging.INFO, logger="mail_merge")
         mock_load_cache.return_value = MagicMock()
         mock_app = _mock_msal_app()
         mock_app.get_accounts.return_value = []
-        prompt = ("To sign in, use a web browser to open the page "
-                  "https://microsoft.com/devicelogin and enter the code ABCD1234")
-        mock_app.initiate_device_flow.return_value = {"user_code": "ABCD1234", "message": prompt}
-        device_flow_waiting = threading.Event()
-        give_up = threading.Event()
-
-        def wait_for_device_code(flow, **kwargs):
-            device_flow_waiting.set()
-            give_up.wait(10)
-            return {"error": "expired_token", "error_description": "Device code expired"}
-
-        mock_app.acquire_token_by_device_flow.side_effect = wait_for_device_code
         mock_app_cls.return_value = mock_app
 
         csrf = self._setup_upload(web_client, sample_xlsx_web)
@@ -1131,21 +1116,40 @@ class TestJobs:
                   "email_column": "email", "subject": "Hello {{name}}", "body": "Body."},
             headers={"X-CSRF-Token": csrf},
         )
-        try:
-            assert resp.status_code == 200, resp.get_json()
-            job_id = resp.get_json()["job_id"]
-            assert device_flow_waiting.wait(5), "device-code flow was not started"
-            time.sleep(0.5)
-            assert web_client.get(f"/api/job/{job_id}/status").get_json()["status"] == "running"
-            from mail_merge.web.app import _jobs
-            logged = [e["data"]["message"] for e in list(_jobs[job_id].events.queue)
-                      if e and e.get("type") == "log"]
-            assert prompt in logged
-        finally:
-            give_up.set()
-        status = wait_for_job(web_client, job_id)
+        assert resp.status_code == 200, resp.get_json()
+        status = wait_for_job(web_client, resp.get_json()["job_id"], timeout_sec=5)
         assert status["status"] == "failed"
-        assert "Device code expired" in status["error"]
+        assert "Not signed in" in status["error"]
+        mock_app.initiate_device_flow.assert_not_called()
+        mock_app.acquire_token_by_device_flow.assert_not_called()
+
+    @patch("mail_merge.auth._save_cache")
+    @patch("mail_merge.auth._load_cache")
+    @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
+    def test_send_when_token_lost_fails_at_once(
+        self, mock_app_cls, mock_load_cache, mock_save_cache, web_client, sample_xlsx_web,
+    ):
+        """A send whose silent refresh fails ends as failed, without a device code."""
+        mock_load_cache.return_value = MagicMock()
+        mock_app = _mock_msal_app()
+        mock_app.get_accounts.return_value = [{"username": "me@example.com"}]
+        mock_app.acquire_token_silent.return_value = None
+        mock_app_cls.return_value = mock_app
+
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        resp = web_client.post(
+            "/api/start-job",
+            data={"mode": "send", "email_column": "email",
+                  "subject": "Hello {{name}}", "body": "Body."},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, resp.get_json()
+        status = wait_for_job(web_client, resp.get_json()["job_id"], timeout_sec=5)
+        assert status["status"] == "failed"
+        assert "Not signed in" in status["error"]
+        mock_app.initiate_device_flow.assert_not_called()
 
     def test_stop_ends_send_early(self, web_client, sample_xlsx_web, monkeypatch):
         """Stop sending stops the loop before the next email (spec/wizard.qnt, stopHonoured)."""
@@ -1482,7 +1486,7 @@ class TestAttachmentDelivery:
         return [json.loads(c.request.body)["message"] for c in responses.calls]
 
     @responses.activate
-    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    @patch("mail_merge.auth.acquire_token_silent", return_value="fake-token")
     def test_test_email_carries_attachments(self, mock_auth, web_client, sample_xlsx_web):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         self._start(web_client, sample_xlsx_web,
@@ -1491,7 +1495,7 @@ class TestAttachmentDelivery:
         assert msg["attachments"] == self._expected(self.FILES)
 
     @responses.activate
-    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    @patch("mail_merge.auth.acquire_token_silent", return_value="fake-token")
     def test_send_attaches_files_to_every_message(self, mock_auth, web_client, sample_xlsx_web):
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)
         files = self.FILES[:2]
@@ -1503,7 +1507,7 @@ class TestAttachmentDelivery:
             assert m["attachments"] == self._expected(files)
 
     @responses.activate
-    @patch("mail_merge.auth.acquire_token", return_value="fake-token")
+    @patch("mail_merge.auth.acquire_token_silent", return_value="fake-token")
     def test_empty_file_field_means_no_attachments(self, mock_auth, web_client, sample_xlsx_web):
         """An empty file input (filename "") is ignored, as before."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)

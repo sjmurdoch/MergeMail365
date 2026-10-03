@@ -123,8 +123,38 @@ def gate(monkeypatch: pytest.MonkeyPatch) -> Iterator[JobGate]:
     g.release_all()
 
 
+class AuthStub:
+    """Answers the page's /auth/status and /auth/interactive requests.
+
+    The server has no real token cache, so the browser is told whether it
+    is signed in; tests flip ``signed_in`` to model sign-in, sign-out and an
+    expired token. POST /auth/interactive (desktop sign-in) signs in.
+    """
+
+    def __init__(self, page: Page) -> None:
+        self.signed_in = True
+        page.route("**/auth/status", self._status)
+        page.route("**/auth/interactive", self._interactive)
+
+    def _status(self, route: Any) -> None:
+        if self.signed_in:
+            route.fulfill(json={"authenticated": True, "email": "me@example.com",
+                                "token_expires_at": None})
+        else:
+            route.fulfill(json={"authenticated": False, "email": None})
+
+    def _interactive(self, route: Any) -> None:
+        self.signed_in = True
+        route.fulfill(json={"status": "started"})
+
+
 @pytest.fixture
-def wizard(page: Page, workflow_server: str) -> Page:
+def auth(page: Page) -> AuthStub:
+    return AuthStub(page)
+
+
+@pytest.fixture
+def wizard(page: Page, workflow_server: str, auth: AuthStub) -> Page:
     page.goto(f"{workflow_server}/?token={STARTUP_TOKEN}")
     page.wait_for_selector("text=Data")
     # confirmGoBack() asks before discarding results; answer yes.
@@ -314,3 +344,63 @@ class TestReload:
         page.reload()
         page.wait_for_selector("#step-6.active", timeout=5000)
         expect(page.locator("#send-done-nav")).to_be_visible(timeout=5000)
+
+
+class TestSignInGate:
+    def test_signed_out_step4_offers_sign_in(
+        self, wizard: Page, gate: JobGate, auth: AuthStub, workflow_xlsx: Path,
+    ):
+        """Model: signedOutStep4Test / testNeedsSignIn, canProgress."""
+        page = wizard
+        auth.signed_in = False
+        _to_step4(page, workflow_xlsx)
+        expect(page.locator("#signin-callout-4")).to_be_visible()
+        expect(page.locator("#btn-sign-in-4")).to_be_enabled()
+        expect(page.locator("#btn-send-test")).to_be_disabled()
+
+    def test_sign_in_on_step4_enables_test_email(
+        self, wizard: Page, gate: JobGate, auth: AuthStub, workflow_xlsx: Path,
+    ):
+        """Model: signInOnStep4Test (desktop sign-in from the step 4 callout)."""
+        page = wizard
+        auth.signed_in = False
+        _to_step4(page, workflow_xlsx)
+        page.evaluate("_auth.desktopMode = true")
+        page.click("#btn-sign-in-4")
+        expect(page.locator("#btn-send-test")).to_be_enabled(timeout=10000)
+        expect(page.locator("#signin-callout-4")).to_be_hidden()
+        _pass_test(page)
+
+    def test_failed_test_email_offers_sign_in(
+        self, wizard: Page, auth: AuthStub, workflow_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Model: testWithoutTokenTest. The token went after step 4 was shown."""
+
+        def not_signed_in(**kwargs: Any) -> list[Any]:
+            raise RuntimeError("Not signed in. Sign in with Microsoft, then try again.")
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", not_signed_in)
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        expect(page.locator("#btn-send-test")).to_be_enabled()
+        auth.signed_in = False
+        page.click("#btn-send-test")
+        expect(page.locator("#test-result")).to_contain_text("Not signed in", timeout=10000)
+        expect(page.locator("#signin-callout-4")).to_be_visible()
+        expect(page.locator("#btn-send-test")).to_be_disabled()
+        expect(page.locator("#btn-next-4")).to_be_disabled()
+
+    def test_signed_out_step6_disables_send(
+        self, wizard: Page, gate: JobGate, auth: AuthStub, workflow_xlsx: Path,
+    ):
+        """Model: sendNeedsSignIn, canProgress."""
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        auth.signed_in = False
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        expect(page.locator("#signin-callout-6")).to_be_visible()
+        page.fill("#send-confirm-input", "SEND")
+        expect(page.locator("#btn-do-send")).to_be_disabled()
