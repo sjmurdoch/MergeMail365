@@ -1,7 +1,7 @@
 """Playwright regression tests for wizard workflow bugs found by the Quint model.
 
 Each test replays one counterexample from ``spec/wizard.qnt`` (see the
-scenario tests there and ``docs/quint-model-plan.md``). ``send_merge`` is
+scenario tests there and ``archive/quint-model-plan.md``). ``send_merge`` is
 replaced by a gate so a test decides exactly when each background job
 finishes, which is what makes the stale-completion interleavings
 reproducible.

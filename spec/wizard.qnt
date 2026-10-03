@@ -3,7 +3,7 @@
  * Workflow layer of the web UI wizard (src/mail_merge/web/static/app.js and
  * the job/session parts of web/app.py).
  *
- * ROUND counts the rounds of fixes in docs/quint-model-plan.md that are
+ * ROUND counts the rounds of fixes in archive/quint-model-plan.md that are
  * applied: `buggy` (0) is the code before any of them, bugs included;
  * `partial` (1) has the fixes of steps 2, 2b and 2c (bugs 1-9); `fixed` (2)
  * is the current code, which must satisfy every invariant. FIXED gates the

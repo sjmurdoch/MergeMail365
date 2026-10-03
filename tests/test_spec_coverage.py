@@ -199,7 +199,7 @@ def wizard_core_exports() -> dict:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
 class TestImplementation:
-    """Each model action names the code that carries it out (docs/quint-model-plan.md, step 3)."""
+    """Each model action names the code that carries it out (archive/quint-model-plan.md, step 3)."""
 
     def test_every_action_is_implemented(self):
         from mail_merge.web.jobs import JobStore

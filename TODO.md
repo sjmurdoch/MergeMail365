@@ -3,7 +3,7 @@
 
 ## Open issues from the Quint model work
 
-Left over when the plan in `docs/quint-model-plan.md` was closed (2026-10-03). The model (`spec/wizard.qnt`) covers one page, one session and one server process at a time; the first three items would extend it.
+Left over when the plan in `archive/quint-model-plan.md` was closed (2026-10-03). The model (`spec/wizard.qnt`) covers one page, one session and one server process at a time; the first three items would extend it.
 
 - **A second tab.** Two pages sharing one session and job store: what should the second tab see while the first one's send runs? The server already refuses a second send (409), but the page side is not modelled or designed.
 - **Session expiry and a lost session cookie.** The 24-hour sliding window and a cookie cleared mid-merge are not modelled; decide what the page should do when its session is gone (especially mid-send).

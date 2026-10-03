@@ -496,7 +496,7 @@
     const KIND = { test: "Test", verify: "Verify", send: "Send" };
 
     /** The page's part of the spec/wizard.qnt State, from this state, for
-     *  conformance testing (docs/quint-model-plan.md, step 4). `confirmed` is
+     *  conformance testing (archive/quint-model-plan.md, step 4). `confirmed` is
      *  whether SEND was typed (the model's btnDoSend lives in the DOM).
      *
      *  Mapping notes: `version` is contentVersion, which also moves on at New

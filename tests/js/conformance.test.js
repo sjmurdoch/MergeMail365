@@ -1,4 +1,4 @@
-// Client-tier conformance (docs/quint-model-plan.md, step 4): replay traces
+// Client-tier conformance (archive/quint-model-plan.md, step 4): replay traces
 // of spec/wizard.qnt (`fixed`) through WizardCore.reduce() and compare
 // abstractPage() with the model's page fields after every step.
 //

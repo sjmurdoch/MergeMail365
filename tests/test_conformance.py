@@ -1,4 +1,4 @@
-"""Model-based conformance (docs/quint-model-plan.md, step 4).
+"""Model-based conformance (archive/quint-model-plan.md, step 4).
 
 Random traces of spec/wizard.qnt are generated with Quint and replayed
 against the code, comparing the model's state with the code's after every

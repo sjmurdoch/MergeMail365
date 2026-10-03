@@ -80,7 +80,7 @@ not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists 
 "js:document:trix-initialize" = { out_of_scope = "Editor set-up." }
 "js:document:trix-change" = { actions = ["edit"] }
 "js:document:trix-file-accept" = { out_of_scope = "Rejects dropped files; no state change." }
-"js:document:trix-before-paste" = { out_of_scope = "Paste sanitisation (out of scope in docs/quint-model-plan.md); the resulting change arrives as trix-change." }
+"js:document:trix-before-paste" = { out_of_scope = "Paste sanitisation (out of scope in archive/quint-model-plan.md); the resulting change arrives as trix-change." }
 "js:#subject-input:input" = { actions = ["edit"] }
 "js:#body-input:input" = { actions = ["edit"] }
 "js:#email-column:change" = { actions = ["edit"] }

@@ -1,4 +1,4 @@
-"""Browser-tier conformance (docs/quint-model-plan.md, step 4).
+"""Browser-tier conformance (archive/quint-model-plan.md, step 4).
 
 Replays a handful of model traces against the real page in Chromium: each
 model action becomes a click, a typed value, a reload or a server-side job

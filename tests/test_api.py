@@ -1394,7 +1394,7 @@ class TestWrapHtmlForEmail:
 
 class TestInterruptedSend:
     """An interrupted send leaves an output CSV that --resume can use, so
-    the emails that went out are not sent again (docs/quint-model-plan.md,
+    the emails that went out are not sent again (archive/quint-model-plan.md,
     "CLI resume after an interrupted run")."""
 
     @pytest.fixture
