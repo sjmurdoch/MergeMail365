@@ -69,7 +69,7 @@ Key design decisions:
 - **`--log-file`** enables file logging at DEBUG level (available on both `mergemail365` and `mergemail365-web`; always on in PyInstaller bundles)
 - **`--device-code`** uses device code flow for authentication (headless/SSH environments). Default behaviour opens the system browser via `acquire_token_interactive_flow()`
 - **`--filter`** (repeatable) filters recipients by column values (`column=value` or `column!=value`, AND logic, case-insensitive)
-- **`--no-resume`** disables automatic resume; by default with `--output`, previous successes in the CSV are automatically skipped
+- **`--no-resume`** disables automatic resume; by default with `--output`, previous successes in the CSV are automatically skipped. With `--send`, the output CSV is written before the first email and each result is appended as it arrives (`report.append_csv()`), then rewritten de-duplicated at the end, so an interrupted run (Ctrl-C, an error, a crash) can be resumed without re-sending (`TestInterruptedSend`)
 - **`--batch-size N`** limits how many emails are sent per invocation
 - **`--name-column`** specifies a spreadsheet column containing recipient display names; each email's `To:` header includes the name (e.g. `"Alice <alice@example.com>"`). In BCC blast mode, use `--bcc-blast-to "Display Name <email>"` instead.
 - Recipient count validation: errors if to + cc + bcc exceeds the Graph API limit of 500
