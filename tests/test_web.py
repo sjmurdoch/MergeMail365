@@ -90,7 +90,7 @@ def wait_for_job(client, job_id, timeout_sec=15):
     while time.monotonic() < deadline:
         resp = client.get(f"/api/job/{job_id}/status")
         status = resp.get_json()
-        if status["status"] in ("completed", "failed"):
+        if status["status"] in ("completed", "failed", "stopped"):
             return status
         time.sleep(0.2)
     return status
@@ -1146,6 +1146,66 @@ class TestJobs:
         status = wait_for_job(web_client, job_id)
         assert status["status"] == "failed"
         assert "Device code expired" in status["error"]
+
+    def test_stop_ends_send_early(self, web_client, sample_xlsx_web, monkeypatch):
+        """Stop sending stops the loop before the next email (spec/wizard.qnt, stopHonoured)."""
+        import mail_merge.sender
+        from mail_merge.sender import SendResult
+
+        first_send_started = threading.Event()
+        release_first = threading.Event()
+        sent: list[str] = []
+
+        def gated_send_one(get_token, to, subject, body, opts=None):
+            sent.append(to.address)
+            first_send_started.set()
+            release_first.wait(5)
+            return SendResult(email=to.address, success=True, status_code=202)
+
+        monkeypatch.setattr(mail_merge.sender, "send_one", gated_send_one)
+        monkeypatch.setattr(mail_merge.sender.time, "sleep", lambda s: None)
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        resp = web_client.post(
+            "/api/start-job",
+            data={"mode": "send", "email_column": "email",
+                  "subject": "Hello {{name}}", "body": "Body."},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, resp.get_json()
+        job_id = resp.get_json()["job_id"]
+        try:
+            assert first_send_started.wait(5), "send did not start"
+            resp = web_client.post(f"/api/job/{job_id}/stop", headers={"X-CSRF-Token": csrf})
+            assert resp.status_code == 200
+        finally:
+            release_first.set()
+        status = wait_for_job(web_client, job_id)
+        assert status["status"] == "stopped"
+        assert sent == ["alice@example.com"]
+        assert status["summary"]["total"] == 1
+        assert [r["email"] for r in status["results"]] == ["alice@example.com"]
+
+    def test_send_without_stop_completes(self, web_client, sample_xlsx_web, monkeypatch):
+        import mail_merge.sender
+        from mail_merge.sender import SendResult
+
+        sent: list[str] = []
+
+        def fake_send_one(get_token, to, subject, body, opts=None):
+            sent.append(to.address)
+            return SendResult(email=to.address, success=True, status_code=202)
+
+        monkeypatch.setattr(mail_merge.sender, "send_one", fake_send_one)
+        monkeypatch.setattr(mail_merge.sender.time, "sleep", lambda s: None)
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        job_id = self._start(web_client, csrf, "send")
+        status = wait_for_job(web_client, job_id)
+        assert status["status"] == "completed"
+        assert sent == ["alice@example.com", "bob@example.com"]
 
     def test_send_enforces_fixed_delay(self, web_client, sample_xlsx_web):
         """The web UI always uses delay=2.0 regardless of what the client sends."""

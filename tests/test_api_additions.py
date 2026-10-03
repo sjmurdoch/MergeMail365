@@ -220,3 +220,41 @@ class TestDeviceCodeParam:
         assert len(results) == 1
         # Called once for fallback auth, plus once via get_token during send
         assert len(device_calls) >= 1
+
+
+class TestShouldStop:
+    """Tests for the should_stop parameter."""
+
+    @responses.activate
+    def test_should_stop_stops_individual_send(self, sample_xlsx):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        with patch("mail_merge.sender.time.sleep"):
+            results = send_merge(
+                spreadsheet=sample_xlsx,
+                subject="Hello {{name}}",
+                email_column="email",
+                body_text="Body.",
+                send=True,
+                confirm=False,
+                token_provider=lambda: "tok",
+                should_stop=lambda: len(responses.calls) >= 1,
+            )
+        assert [r.email for r in results] == ["alice@example.com"]
+        assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_should_stop_stops_bcc_blast(self, sample_xlsx):
+        results = send_merge(
+            spreadsheet=sample_xlsx,
+            subject="Hello",
+            email_column="email",
+            body_text="Body.",
+            send=True,
+            confirm=False,
+            bcc_blast=True,
+            bcc_blast_to="noreply@example.com",
+            token_provider=lambda: "tok",
+            should_stop=lambda: True,
+        )
+        assert results == []
+        assert len(responses.calls) == 0

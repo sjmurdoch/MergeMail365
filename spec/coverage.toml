@@ -1,0 +1,103 @@
+# Coverage inventory for spec/wizard.qnt.
+#
+# Every entry point in the web UI and server is listed here: each inline
+# handler in templates/index.html, each listener, EventSource callback and
+# timer in static/app.js, and each Flask route in web/app.py. Each maps to the
+# model actions that describe it, or is excluded with a reason.
+#
+# tests/test_spec_coverage.py fails when an entry point is missing from this
+# file, when an entry here no longer exists in the code, or when a listed
+# action isn't defined in the model. A new button or route therefore fails CI
+# until someone decides how it is modelled.
+#
+# Keys:
+#   html:<handler>            onclick/onchange/oninput attribute text
+#   js:#<id>:<event>          $("id").addEventListener(event)
+#   js:document:<event>       document.addEventListener(event)
+#   js:window:<event>         window.addEventListener(event)
+#   js:<variable>:<event>     <variable>.addEventListener(event)
+#   js:EventSource:<event>    evtSource.on<event> = ...
+#   js:<timer>@<context>      setInterval/setTimeout, keyed by the enclosing
+#                             top-level function or listener
+#   route:<METHOD> <path>     Flask route
+
+[environment]
+# Actions that no user entry point triggers: the server finishing work.
+actions = ["completeJob", "completeOrphan", "sendNext", "finishSend"]
+
+[entries]
+# --- templates/index.html inline handlers ---
+"html:goToStep(2)" = { actions = ["next1"] }
+"html:setSendMode('individual')" = { actions = ["edit"] }
+"html:setSendMode('bcc')" = { actions = ["edit"] }
+"html:goToStep(1)" = { actions = ["back2"] }
+"html:goToStep(3)" = { actions = ["next2"] }
+"html:changePreviewRecipient(-1)" = { out_of_scope = "Display only: which recipient the preview shows." }
+"html:changePreviewRecipient(1)" = { out_of_scope = "Display only: which recipient the preview shows." }
+"html:confirmGoBack(2)" = { actions = ["back3"] }
+"html:goToStep(4)" = { actions = ["next3"] }
+"html:sendTestEmail()" = { actions = ["sendTestEmail"] }
+"html:confirmGoBack(3)" = { actions = ["back4"] }
+"html:goToStep(5)" = { actions = ["next4"] }
+"html:confirmGoBack(4)" = { actions = ["back5", "back6"] }
+"html:goToStep(6)" = { actions = ["next5"] }
+"html:startSend()" = { actions = ["startSend"] }
+"html:stopSend()" = { actions = ["stopSend"] }
+"html:downloadCsv()" = { out_of_scope = "Builds a CSV of results already shown; no state change." }
+"html:newMerge()" = { actions = ["newMerge"] }
+"html:window.location.reload()" = { actions = ["reload"] }
+
+# --- static/app.js listeners ---
+"js:window:beforeunload" = { out_of_scope = "Browser leave-page warning while sending; the page itself is unchanged." }
+"js:#btn-sign-in:click" = { out_of_scope = "Sign-in and sign-out: modelled in step 2c (docs/quint-model-plan.md)." }
+"js:#btn-test-connection:click" = { out_of_scope = "Diagnostics display (/auth/debug); no state change." }
+"js:#spreadsheet-file:change" = { actions = ["upload"] }
+"js:#sheet-select:change" = { actions = ["upload"] }
+"js:chip:mousedown" = { actions = ["edit"] }
+"js:#filter-chips-container:mousedown" = { actions = ["edit"] }
+"js:document:trix-initialize" = { out_of_scope = "Editor set-up." }
+"js:document:trix-change" = { actions = ["edit"] }
+"js:document:trix-file-accept" = { out_of_scope = "Rejects dropped files; no state change." }
+"js:document:trix-before-paste" = { out_of_scope = "Paste sanitisation (out of scope in docs/quint-model-plan.md); the resulting change arrives as trix-change." }
+"js:#subject-input:input" = { actions = ["edit"] }
+"js:#body-input:input" = { actions = ["edit"] }
+"js:#email-column:change" = { actions = ["edit"] }
+"js:#name-column:change" = { actions = ["edit"] }
+"js:#html-toggle:change" = { actions = ["edit"] }
+"js:#source-toggle:change" = { out_of_scope = "Switches between the rich editor and the HTML source view; a body change it causes arrives as trix-change." }
+"js:#html-source:input" = { actions = ["edit"] }
+"js:#cc-input:input" = { actions = ["edit"] }
+"js:#bcc-input:input" = { actions = ["edit"] }
+"js:#reply-to-input:input" = { actions = ["edit"] }
+"js:#filter-input:input" = { actions = ["edit"] }
+"js:#test-email-input:input" = { out_of_scope = "The test address only changes where the test email goes, not what recipients are sent." }
+"js:#send-confirm-input:input" = { actions = ["typeSend"] }
+"js:EventSource:message" = { actions = ["completeJob", "finishSend"] }
+"js:EventSource:error" = { actions = ["completeJob", "finishSend"] }
+"js:document:DOMContentLoaded" = { actions = ["reload"] }
+
+# --- static/app.js timers ---
+"js:setInterval@#btn-sign-in:click" = { out_of_scope = "Desktop sign-in polling: modelled in step 2c (docs/quint-model-plan.md)." }
+"js:setTimeout@fn:onTemplateChange" = { out_of_scope = "Debounced placeholder and HTML warnings; display only." }
+"js:setInterval@document:DOMContentLoaded" = { out_of_scope = "Session expiry display and localStorage auto-save; what auto-save keeps is covered by reload." }
+
+# --- web/app.py routes ---
+"route:GET /" = { actions = ["reload"] }
+"route:GET /auth/login" = { out_of_scope = "Sign-in: modelled in step 2c (docs/quint-model-plan.md)." }
+"route:GET /auth/callback" = { out_of_scope = "Sign-in: modelled in step 2c (docs/quint-model-plan.md)." }
+"route:GET /auth/status" = { out_of_scope = "Sign-in status: modelled in step 2c (docs/quint-model-plan.md)." }
+"route:POST /auth/logout" = { out_of_scope = "Sign-out: modelled in step 2c (docs/quint-model-plan.md)." }
+"route:GET /auth/debug" = { out_of_scope = "Diagnostics; no state change." }
+"route:POST /auth/interactive" = { out_of_scope = "Desktop sign-in: modelled in step 2c (docs/quint-model-plan.md)." }
+"route:GET /api/config" = { actions = ["reload"] }
+"route:POST /api/state" = { out_of_scope = "Stores the step and flags for display; on reload the page returns to step 1 and resets the flags whatever was stored." }
+"route:POST /api/reset" = { actions = ["newMerge"] }
+"route:POST /api/upload-spreadsheet" = { actions = ["upload"] }
+"route:POST /api/change-sheet" = { actions = ["upload"] }
+"route:POST /api/get-recipients" = { actions = ["next2"] }
+"route:POST /api/preview-template" = { out_of_scope = "Not called by the page; server-side placeholder validation for API clients." }
+"route:POST /api/start-job" = { actions = ["sendTestEmail", "next4", "startSend"] }
+"route:GET /api/job/<job_id>/events" = { actions = ["completeJob", "finishSend", "reload"] }
+"route:GET /api/job/<job_id>/status" = { actions = ["completeJob", "finishSend"] }
+"route:POST /api/job/<job_id>/stop" = { actions = ["stopSend"] }
+"route:GET /api/log-path" = { out_of_scope = "Troubleshooting information; no state change." }

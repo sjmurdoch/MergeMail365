@@ -1446,6 +1446,9 @@ async function fetchAndShowSendResults(jobId) {
         show("send-done-nav");
 
         let html = `<h4>Results</h4>`;
+        if (data.status === "stopped") {
+            html += `<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`;
+        }
         html += `<p><strong>Total:</strong> ${summary.total || 0} | `;
         html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
         html += `<span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`;

@@ -28,7 +28,7 @@ fi
 
 cd "$(dirname "$0")"
 
-invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData"
+invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData stopHonoured stoppedReported"
 status=0
 
 for inv in $invariants; do

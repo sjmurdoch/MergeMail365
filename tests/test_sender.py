@@ -533,3 +533,70 @@ class TestSendBccBlast:
         assert results[1].email == "b@x.com"
         assert results[2].success
         assert results[2].email == "c@x.com"
+
+
+class TestShouldStop:
+    """should_stop is checked before each email or batch (spec/wizard.qnt, stopHonoured)."""
+
+    @responses.activate
+    def test_send_all_stops_before_next_email(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        recipients = [{"email": f"r{i}@example.com"} for i in range(3)]
+        def should_stop() -> bool:
+            return len(responses.calls) >= 1
+
+        with patch("mail_merge.sender.time.sleep"):
+            results = send_all(
+                get_token=lambda: "fake",
+                recipients=recipients,
+                email_column="email",
+                subject_template="Hi",
+                body_template="Body",
+                delay=2.0,
+                should_stop=should_stop,
+            )
+        assert [r.email for r in results] == ["r0@example.com"]
+        assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_send_all_stop_before_first_email_sends_nothing(self):
+        recipients = [{"email": "a@example.com"}, {"email": "b@example.com"}]
+        results = send_all(
+            get_token=lambda: "fake",
+            recipients=recipients,
+            email_column="email",
+            subject_template="Hi",
+            body_template="Body",
+            should_stop=lambda: True,
+        )
+        assert results == []
+        assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_send_all_without_stop_sends_everything(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        recipients = [{"email": "a@example.com"}, {"email": "b@example.com"}]
+        results = send_all(
+            get_token=lambda: "fake",
+            recipients=recipients,
+            email_column="email",
+            subject_template="Hi",
+            body_template="Body",
+            should_stop=lambda: False,
+        )
+        assert len(results) == 2
+        assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_bcc_blast_stops_before_next_batch(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        # Force 1 recipient per batch: reserved = 1 (to) + N (cc) must leave max_per_batch = 1
+        cc = [EmailAddress(address=f"cc{i}@x.com") for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
+        emails = ["a@x.com", "b@x.com", "c@x.com"]
+        results = send_bcc_blast(
+            lambda: "tok", emails, EmailAddress(address="noreply@x.com"), "Hi", "Body",
+            opts=MessageOptions(cc=cc),
+            should_stop=lambda: len(responses.calls) >= 1,
+        )
+        assert [r.email for r in results] == ["a@x.com"]
+        assert len(responses.calls) == 1

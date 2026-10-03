@@ -274,6 +274,7 @@ def send_merge(
     body_text: str | None = None,
     token_provider: Callable[[], str] | None = None,
     device_code: bool = False,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails via Microsoft Graph API.
 
@@ -336,6 +337,9 @@ def send_merge(
             (user copies a code to a browser). If ``False`` (the default),
             use interactive browser flow (opens system browser automatically).
             Falls back to device code flow if interactive fails.
+        should_stop: Callable checked before each email (or BCC batch) is
+            sent. Once it returns ``True``, sending stops and the results so
+            far are returned. Not checked for ``test_email``.
 
     Returns:
         List of :class:`~mail_merge.sender.SendResult` for each recipient.
@@ -636,6 +640,7 @@ def send_merge(
             body=body_template,
             dry_run=not send,
             opts=msg_opts,
+            should_stop=should_stop,
         )
     else:
         results = send_all(
@@ -648,6 +653,7 @@ def send_merge(
             dry_run=not send,
             delay=delay,
             opts=msg_opts,
+            should_stop=should_stop,
         )
 
     # --- Merge with previous results when resuming ---

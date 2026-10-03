@@ -86,6 +86,8 @@ class Job:
     results: list[SendResult] | None = None
     error: str | None = None
     stop_requested: bool = False
+    # Set when the send loop saw stop_requested and stopped early.
+    stopped_early: bool = False
 
 
 class JobLogHandler(logging.Handler):
@@ -903,6 +905,16 @@ def create_app(
         job = Job(id=str(uuid.uuid4()), mode=mode)
         _jobs[job.id] = job
 
+        # The send loop checks this before each email (spec/wizard.qnt,
+        # stopHonoured). api_job_stop sets stop_requested from another thread.
+        def _should_stop() -> bool:
+            if job.stop_requested:
+                job.stopped_early = True
+                return True
+            return False
+
+        kwargs["should_stop"] = _should_stop
+
         def _run_job() -> None:
             job.status = JobStatus.RUNNING
             logger.debug("Job %s started (mode=%r)", job.id, mode)
@@ -915,11 +927,18 @@ def create_app(
                 from mail_merge.api import send_merge
                 results = send_merge(**kwargs)
                 job.results = results
-                job.status = JobStatus.COMPLETED
-                job.events.put({
-                    "type": "completed",
-                    "data": {"message": "Job completed"},
-                })
+                if job.stopped_early:
+                    job.status = JobStatus.STOPPED
+                    job.events.put({
+                        "type": "stopped",
+                        "data": {"message": "Job stopped"},
+                    })
+                else:
+                    job.status = JobStatus.COMPLETED
+                    job.events.put({
+                        "type": "completed",
+                        "data": {"message": "Job completed"},
+                    })
             except Exception as exc:
                 logger.debug("send_merge job failed", exc_info=True)
                 job.error = str(exc)

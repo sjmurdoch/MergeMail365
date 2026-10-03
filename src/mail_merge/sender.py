@@ -170,12 +170,15 @@ def send_bcc_blast(
     body: str,
     dry_run: bool = False,
     opts: MessageOptions | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[SendResult]:
     """Send a single subject/body to all emails via BCC, in batches of up to 499.
 
     Recipients within each batch cannot see each other's addresses.
     Returns one SendResult per recipient email: when a batch succeeds or
     fails, every recipient in that batch receives the same result.
+    If ``should_stop`` returns ``True`` before a batch, no further batches
+    are sent and only the results so far are returned.
     """
     if opts is None:
         opts = MessageOptions()
@@ -186,6 +189,9 @@ def send_bcc_blast(
     results: list[SendResult] = []
     bcc_extra = list(opts.bcc or [])
     for i, batch in enumerate(batches):
+        if should_stop is not None and should_stop():
+            logger.warning("⏹️ Stopped after %d of %d batches", i, total)
+            break
         label = f"batch {i + 1}/{total} ({len(batch)} recipients)"
         if dry_run:
             logger.info("🔄 DRY RUN %s | Subject: %s", label, subject)
@@ -224,12 +230,16 @@ def send_all(
     dry_run: bool = False,
     delay: float = 0.0,
     opts: MessageOptions | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails to all recipients.
 
     In dry-run mode, renders and logs each email without sending.
     If ``name_column`` is set, the recipient's display name is included
     in the ``To:`` header (e.g. ``"Alice <alice@example.com>"``).
+    ``should_stop`` is checked before each recipient; once it returns
+    ``True``, no further emails are sent and only the results so far are
+    returned.
     """
     from mail_merge.template import render
 
@@ -239,6 +249,9 @@ def send_all(
     current_delay = delay
     max_delay = 30.0
     for i, recipient in enumerate(recipients):
+        if should_stop is not None and should_stop():
+            logger.warning("⏹️ Stopped after %d of %d emails", i, len(recipients))
+            break
         to_name = recipient.get(name_column, "").strip() or None if name_column else None
         to = EmailAddress(address=recipient[email_column], name=to_name)
         rendered_subject = render(subject_template, recipient)
