@@ -567,6 +567,36 @@ class TestComposeStep:
         page.wait_for_function("() => window.state.trixEditor !== null")
         page.click("trix-editor")
 
+    def test_trix_found_when_it_initialises_before_app_js(
+        self, page: Page, live_server: str, sample_xlsx: Path,
+    ):
+        """Trix fires trix-initialize on the animation frame after trix.js runs.
+
+        If a frame renders while app.js is still loading, the event fires
+        before app.js listens for it; app.js must still find the editor.
+        Seen on a slow macOS CI runner.
+        """
+        page.add_init_script("""
+            document.addEventListener('trix-initialize', () => {
+                window._trixInitBeforeApp = window.state === undefined;
+            });
+        """)
+
+        def delay_app_js(route):
+            response = route.fetch()
+            time.sleep(0.5)  # let the browser render a frame first
+            route.fulfill(response=response)
+
+        page.route("**/static/app.js", delay_app_js)
+        page.goto(f"{live_server}/?token={STARTUP_TOKEN}")
+        page.wait_for_selector("text=Data")
+        assert page.evaluate("() => window._trixInitBeforeApp") is True
+        _upload_and_go_to_compose(page, sample_xlsx)
+        page.fill("#body-input", "Hi {{name}}")
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null", timeout=5000)
+        expect(page.locator("trix-editor")).to_contain_text("Hi {{name}}")
+
     def test_trix_clipboard_paste_honours_before_paste_edits(
         self, authenticated_page: Page, sample_xlsx: Path,
     ):

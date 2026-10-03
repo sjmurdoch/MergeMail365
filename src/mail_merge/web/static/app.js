@@ -890,10 +890,15 @@ $("filter-chips-container").addEventListener("mousedown", (e) => {
 // Trix HTML editor — sits outside .pico in the DOM for CSS isolation
 // ---------------------------------------------------------------------------
 let trixEditorEl = null;
-document.addEventListener('trix-initialize', (e) => {
-    trixEditorEl = e.target;
-    state.trixEditor = e.target.editor;
-});
+function trixReady(el) {
+    trixEditorEl = el;
+    state.trixEditor = el.editor;
+}
+document.addEventListener('trix-initialize', (e) => trixReady(e.target));
+// trix.js runs before this script and fires trix-initialize on the next
+// animation frame, which can come before this listener exists.
+const initialTrix = document.querySelector("trix-editor");
+if (initialTrix?.editor) trixReady(initialTrix);
 
 document.addEventListener('trix-change', () => {
     // Trix appends <br> inside every <p>, producing <p><br></p> for blank
