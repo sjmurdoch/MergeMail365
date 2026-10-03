@@ -57,3 +57,40 @@ jobs:
 
       - name: Lint app.js
         run: biome lint src/mail_merge/web/static/app.js src/mail_merge/web/static/wizard-core.js
+
+  spec:
+    # The Quint model of the web UI (spec/wizard.qnt): scenario tests, a
+    # short random simulation against every invariant, and model-based
+    # conformance tests replaying model traces against the code
+    # (tests/test_conformance.py). Apalache (spec/check.sh) is too slow to
+    # run here; run it locally when spec/ changes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.18"
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      # Pinned with a lockfile resolved 7 days back (spec/package.json).
+      - name: Install Quint
+        run: npm ci --prefix spec --ignore-scripts
+
+      - name: Typecheck and scenario tests
+        run: |
+          spec/node_modules/.bin/quint typecheck spec/wizard.qnt
+          for variant in buggy partial fixed; do
+            spec/node_modules/.bin/quint test --main=$variant --max-samples=1 --backend=typescript spec/wizard.qnt
+          done
+
+      - name: Simulate fixed against every invariant
+        run: spec/node_modules/.bin/quint run spec/wizard.qnt --main=fixed --backend=typescript --invariant=allInvariants --max-samples=2000 --max-steps=20
+
+      - name: Conformance and spec coverage
+        run: uv run pytest tests/test_conformance.py tests/test_spec_coverage.py tests/test_wizard_core_js.py

@@ -15,3 +15,5 @@ projects/
 
 # Apalache model checker output
 _apalache-out/
+spec/node_modules/
+spec/tmp/
