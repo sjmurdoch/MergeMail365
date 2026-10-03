@@ -1211,6 +1211,83 @@ class TestJobs:
         assert status["status"] == "completed"
         assert sent == ["alice@example.com", "bob@example.com"]
 
+    def _start_held_send(self, web_client, sample_xlsx_web, monkeypatch):
+        """Start a send whose send_merge() blocks until the returned event is set."""
+        import mail_merge.api
+        release = threading.Event()
+        started = threading.Event()
+
+        def held_send_merge(**kwargs):
+            started.set()
+            release.wait(10)
+            return []
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", held_send_merge)
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        resp = web_client.post(
+            "/api/start-job",
+            data={"mode": "send", "email_column": "email",
+                  "subject": "Hello {{name}}", "body": "Body."},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, resp.get_json()
+        assert started.wait(5)
+        return resp.get_json()["job_id"], csrf, release
+
+    def test_config_resumes_running_send_the_session_does_not_name(
+        self, web_client, sample_xlsx_web, monkeypatch,
+    ):
+        """A reload before the start-job response arrived still finds the send.
+
+        spec/wizard.qnt, runningSendVisible: the session cookie naming the job
+        only arrives with the response.
+        """
+        job_id, _csrf, release = self._start_held_send(web_client, sample_xlsx_web, monkeypatch)
+        try:
+            with web_client.session_transaction() as sess:
+                sess.pop("job_id", None)
+            assert web_client.get("/api/config").get_json()["active_job_id"] == job_id
+        finally:
+            release.set()
+
+    def test_second_send_refused_while_one_runs(self, web_client, sample_xlsx_web, monkeypatch):
+        """spec/wizard.qnt, noConcurrentSends (for example from a second tab)."""
+        _job_id, csrf, release = self._start_held_send(web_client, sample_xlsx_web, monkeypatch)
+        try:
+            resp = web_client.post(
+                "/api/start-job",
+                data={"mode": "send", "email_column": "email",
+                      "subject": "Hello {{name}}", "body": "Body."},
+                headers={"X-CSRF-Token": csrf},
+            )
+            assert resp.status_code == 409
+            assert "already in progress" in resp.get_json()["error"]
+        finally:
+            release.set()
+
+    def test_failed_send_keeps_emails_already_sent(self, web_client, sample_xlsx_web, monkeypatch):
+        """spec/wizard.qnt, failedSendReported: a send failing part-way lists what went out."""
+        import mail_merge.sender
+        from mail_merge.sender import SendResult
+
+        def send_one_then_fail(get_token, to, subject, body, opts=None):
+            if to.address != "alice@example.com":
+                raise RuntimeError("Not signed in. Sign in with Microsoft, then try again.")
+            return SendResult(email=to.address, success=True, status_code=202)
+
+        monkeypatch.setattr(mail_merge.sender, "send_one", send_one_then_fail)
+        monkeypatch.setattr(mail_merge.sender.time, "sleep", lambda s: None)
+        csrf = self._setup_upload(web_client, sample_xlsx_web)
+        with web_client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+        job_id = self._start(web_client, csrf, "send")
+        status = web_client.get(f"/api/job/{job_id}/status").get_json()
+        assert status["status"] == "failed"
+        assert "Not signed in" in status["error"]
+        assert [r["email"] for r in status["results"]] == ["alice@example.com"]
+
     def test_send_enforces_fixed_delay(self, web_client, sample_xlsx_web):
         """The web UI always uses delay=2.0 regardless of what the client sends."""
         csrf = self._setup_upload(web_client, sample_xlsx_web)

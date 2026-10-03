@@ -350,6 +350,8 @@ def send_merge(
         ValueError: If placeholders are unresolvable, recipients exceed Graph
             API limits, or an attachment is too large.
         RuntimeError: If authentication fails.
+        SendAborted: (a ``RuntimeError``) If sending stops part-way because
+            of an error; its ``results`` lists the emails attempted so far.
     """
     # --- Resolve client_id / tenant_id via config precedence ---
     config = load_config()

@@ -23,7 +23,7 @@
 
 [environment]
 # Actions that no user entry point triggers: the server finishing work.
-actions = ["completeJob", "completeOrphan", "sendNext", "finishSend", "sendWithoutToken", "tokenExpires"]
+actions = ["completeJob", "completeOrphan", "sendNext", "finishSend", "sendWithoutToken", "tokenExpires", "previewResponse", "startSendResponse", "serverRestart"]
 
 [entries]
 # --- templates/index.html inline handlers ---
@@ -97,9 +97,9 @@ actions = ["completeJob", "completeOrphan", "sendNext", "finishSend", "sendWitho
 "route:POST /api/reset" = { actions = ["newMerge"] }
 "route:POST /api/upload-spreadsheet" = { actions = ["upload"] }
 "route:POST /api/change-sheet" = { actions = ["upload"] }
-"route:POST /api/get-recipients" = { actions = ["next2"] }
+"route:POST /api/get-recipients" = { actions = ["next2", "previewResponse"] }
 "route:POST /api/preview-template" = { out_of_scope = "Not called by the page; server-side placeholder validation for API clients." }
-"route:POST /api/start-job" = { actions = ["sendTestEmail", "next4", "startSend"] }
+"route:POST /api/start-job" = { actions = ["sendTestEmail", "next4", "startSend", "startSendResponse"] }
 "route:GET /api/job/<job_id>/events" = { actions = ["completeJob", "finishSend", "reload"] }
 "route:GET /api/job/<job_id>/status" = { actions = ["completeJob", "finishSend"] }
 "route:POST /api/job/<job_id>/stop" = { actions = ["stopSend"] }

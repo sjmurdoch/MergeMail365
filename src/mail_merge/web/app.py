@@ -113,6 +113,19 @@ class JobLogHandler(logging.Handler):
 
 # In-memory job store (single job at a time)
 _jobs: dict[str, Job] = {}
+_jobs_lock = threading.Lock()
+
+
+def _running_send_job() -> Job | None:
+    """The send job still in progress, if any.
+
+    The app has one user, so this is checked across sessions: a page whose
+    start-job response never arrived has no job id in its session cookie.
+    """
+    for job in _jobs.values():
+        if job.mode == "send" and job.status not in FINISHED_STATUSES:
+            return job
+    return None
 
 # Track temp directories for cleanup
 _temp_dirs: list[str] = []
@@ -535,10 +548,16 @@ def create_app(
         # Check if there is an active job still running for this session
         # Only a send is resumed after reload; test emails and dry runs are
         # re-run by the user (see spec/wizard.qnt, sendScreenHonest).
+        # A running send is resumed even if the session doesn't name it: a
+        # reload before the start-job response arrived never got the cookie
+        # (spec/wizard.qnt, runningSendVisible).
         active_job_id = None
         job_id = session.get("job_id")
         active_job = _jobs.get(job_id) if job_id else None
-        if active_job and active_job.mode == "send":
+        running_send = _running_send_job()
+        if running_send:
+            active_job_id = running_send.id
+        elif active_job and active_job.mode == "send":
             active_job_id = job_id
 
         fixed_cid = app.config["FIXED_CLIENT_ID"]
@@ -787,6 +806,11 @@ def create_app(
         if not email_column or not subject:
             return jsonify({"error": "email_column and subject are required"}), 400  # type: ignore[return-value]
 
+        # One send at a time, for example from a second tab
+        # (spec/wizard.qnt, noConcurrentSends).
+        if mode == "send" and _running_send_job():
+            return jsonify({"error": "A send is already in progress"}), 409  # type: ignore[return-value]
+
         # Enforce recipient cap (defense-in-depth: api_get_recipients checks
         # this during the wizard, but api_start_job must not trust the client
         # flow).  Uses the same read → validate → filter pipeline.
@@ -899,14 +923,19 @@ def create_app(
 
             kwargs["token_provider"] = _make_token_provider(client_id, tenant_id)
 
-        # Evict completed/failed jobs before creating a new one
-        for jid in list(_jobs):
-            if _jobs[jid].status in FINISHED_STATUSES:
-                del _jobs[jid]
+        with _jobs_lock:
+            # Checked again here: two requests can pass the early check.
+            if mode == "send" and _running_send_job():
+                return jsonify({"error": "A send is already in progress"}), 409  # type: ignore[return-value]
 
-        # Create and start job
-        job = Job(id=str(uuid.uuid4()), mode=mode)
-        _jobs[job.id] = job
+            # Evict completed/failed jobs before creating a new one
+            for jid in list(_jobs):
+                if _jobs[jid].status in FINISHED_STATUSES:
+                    del _jobs[jid]
+
+            # Create and start job
+            job = Job(id=str(uuid.uuid4()), mode=mode)
+            _jobs[job.id] = job
 
         # The send loop checks this before each email (spec/wizard.qnt,
         # stopHonoured). api_job_stop sets stop_requested from another thread.
@@ -944,6 +973,11 @@ def create_app(
                     })
             except Exception as exc:
                 logger.debug("send_merge job failed", exc_info=True)
+                from mail_merge.sender import SendAborted
+                if isinstance(exc, SendAborted):
+                    # Keep the emails that went out before the error
+                    # (spec/wizard.qnt, failedSendReported).
+                    job.results = exc.results
                 job.error = str(exc)
                 job.status = JobStatus.FAILED
                 job.events.put({

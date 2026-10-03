@@ -162,6 +162,18 @@ def send_one(
         )
 
 
+class SendAborted(RuntimeError):
+    """Sending stopped part-way because of an error.
+
+    ``results`` holds the results for the emails attempted before the
+    error, so a caller can still report which went out.
+    """
+
+    def __init__(self, message: str, results: list[SendResult]) -> None:
+        super().__init__(message)
+        self.results = results
+
+
 def send_bcc_blast(
     get_token: Callable[[], str] | None,
     emails: list[str],
@@ -206,7 +218,10 @@ def send_bcc_blast(
         bcc_recipients = [EmailAddress(address=a) for a in batch]
         bcc_all = bcc_extra + bcc_recipients
         batch_opts = replace(opts, bcc=bcc_all)
-        result = send_one(get_token, to, subject, body, opts=batch_opts)
+        try:
+            result = send_one(get_token, to, subject, body, opts=batch_opts)
+        except Exception as exc:
+            raise SendAborted(str(exc), results) from exc
         results.extend(
             SendResult(
                 email=addr,
@@ -268,9 +283,12 @@ def send_all(
             if get_token is None:
                 raise RuntimeError("get_token is required when not in dry-run mode")
             logger.info("📧 Sending [%d/%d] to %s", i + 1, len(recipients), to.address)
-            result = send_one(
-                get_token, to, rendered_subject, rendered_body, opts=opts,
-            )
+            try:
+                result = send_one(
+                    get_token, to, rendered_subject, rendered_body, opts=opts,
+                )
+            except Exception as exc:
+                raise SendAborted(str(exc), results) from exc
             results.append(result)
             if not result.success:
                 logger.error("❌ Failed to send to %s: %s", to.address, result.error)

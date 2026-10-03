@@ -3,21 +3,28 @@
  * Workflow layer of the web UI wizard (src/mail_merge/web/static/app.js and
  * the job/session parts of web/app.py).
  *
- * FIXED = false models the code as of fb28c33, bugs included.
- * FIXED = true models the proposed fixes, which must satisfy every invariant.
+ * ROUND counts the rounds of fixes in docs/quint-model-plan.md that are
+ * applied: `buggy` (0) is the code before any of them, bugs included;
+ * `partial` (1) has the fixes of steps 2, 2b and 2c (bugs 1-9); `fixed` (2)
+ * is the current code, which must satisfy every invariant. FIXED gates the
+ * round 1 fixes and FIXED2 the round 2 fixes (bugs 10-15).
  *
  * Abstractions:
  * - `version` stands for everything that determines what gets sent
  *   (spreadsheet, sheet, compose fields, options). Any upload or edit bumps it.
  * - A job is started by an action and completed later by a separate action,
- *   so completions can interleave with navigation and reloads.
+ *   so completions can interleave with navigation and reloads. Handlers that
+ *   `await` a request whose result changes the page are split the same way
+ *   (the recipient preview, starting a send), so clicks can land in between.
  * - Ghost fields (testedVersions, verifiedVersions, ...) record what really
  *   happened; the code never reads them, only the invariants do.
  * - Button fields mirror `disabled` (true = enabled) for buttons whose state
  *   the code sets explicitly.
  */
 module wizard {
-  const FIXED: bool
+  const ROUND: int
+  pure val FIXED = ROUND >= 1
+  pure val FIXED2 = ROUND >= 2
 
   type Kind = Test | Verify | Send
 
@@ -33,12 +40,16 @@ module wizard {
   type SessionJob = { id: int, kind: Kind, done: bool }
 
   // web/app.py JobStatus, for the server's record of a send job.
-  type Status = Running | Completed | Failed | Stopped
+  type Status = Running | Completed | Failed | Stopped | Killed  // Killed: the server stopped mid-send
 
   // The server's record of the current send job (web/app.py Job, mode
   // "send"): how many emails the send loop has sent and whether Stop was
   // pressed. `stopEarly` is a ghost: Stop was pressed while emails remained.
   type SendJob = { id: int, sent: int, stopRequested: bool, status: Status, stopEarly: bool }
+
+  // POST /api/get-recipients in flight for goToStep(3): the content version
+  // it was sent for and the page's preview generation at the time.
+  type PreviewReq = { version: int, gen: int }
 
   // Recipients in a send. Small, to keep the state space small; three is
   // enough for "stop, then two more emails go out".
@@ -54,15 +65,24 @@ module wizard {
     sendStarted: bool,
     testGen: int,
     verifyGen: int,
+    previewGen: int,
+    recipientsVersion: int,       // content version the page's recipient list was fetched for; -1 = none
     // --- DOM projection (true = enabled / visible) ---
+    btnNext2: bool,
+    verifyShown: bool,            // #verify-result shows a dry-run outcome
+    resultsShown: bool,           // #send-result shows the per-recipient results table
+    progressJob: int,             // send job whose progress #send-progress-text shows; -1 = none
+    bccToMerge: int,              // merge in which #bcc-blast-to was typed; -1 = empty
     btnSendTest: bool,
     btnNext4: bool,
     btnNext5: bool,
     btnDoSend: bool,
     btnBack6: bool,
     doneNav: bool,
-    // --- pending completion callbacks in the current page ---
+    // --- requests and completion callbacks pending in the current page ---
     pending: Set[Job],
+    previewReq: Set[PreviewReq],
+    sendReq: Set[int],            // POST /api/start-job (send) awaiting its response: the job id
     // --- server ---
     sessionJob: Set[SessionJob],  // empty or singleton
     nextJobId: int,
@@ -77,6 +97,12 @@ module wizard {
     untestedSend: bool,
     sentAfterStop: int,           // emails the send loop sent after Stop was pressed
     interactiveAuthInJob: bool,   // a job waited for the device-code flow
+    stepJump: bool,               // a response moved the page from a step the user had left
+    concurrentSends: bool,        // a send started while another was running
+    mergeId: int,                 // counts New merge
+    lostSend: bool,               // a server restart killed a send after emails went out
+    stopLost: bool,               // "Stop sending" was pressed but reached no running send
+    stopQueued: bool,             // FIXED2: Stop pressed before the send's job id was known
   }
 
   var s: State
@@ -85,15 +111,18 @@ module wizard {
   pure val init_state: State = {
     step: 1, dataLoaded: false, version: 0,
     testPassed: false, verifyPassed: false, sendStarted: false,
-    testGen: 0, verifyGen: 0,
+    testGen: 0, verifyGen: 0, previewGen: 0, recipientsVersion: -1,
+    btnNext2: true, verifyShown: false, resultsShown: false, progressJob: -1, bccToMerge: -1,
     btnSendTest: true, btnNext4: false, btnNext5: false,
     btnDoSend: false, btnBack6: true, doneNav: false,
-    pending: Set(),
+    pending: Set(), previewReq: Set(), sendReq: Set(),
     sessionJob: Set(), nextJobId: 0, sendJob: Set(),
     signedIn: false, authShown: false,
     testedVersions: Set(), verifiedVersions: Set(),
     realSendStarted: false, untestedSend: false, sentAfterStop: 0,
     interactiveAuthInJob: false,
+    stepJump: false, concurrentSends: false, mergeId: 0, lostSend: false,
+    stopLost: false, stopQueued: false,
   }
 
   // ---------------------------------------------------------------------
@@ -137,7 +166,7 @@ module wizard {
   pure def resetTestAndVerify(st: State): State =
     { ...st,
       testPassed: false, verifyPassed: false,
-      btnNext4: false, btnNext5: false,
+      btnNext4: false, btnNext5: false, verifyShown: false,
       // FIXED: bump generations so in-flight completions are ignored, and
       // let the user start a fresh test.
       testGen: if (FIXED) st.testGen + 1 else st.testGen,
@@ -148,7 +177,7 @@ module wizard {
   // startVerify(), called on entry to step 5
   pure def startVerify(st: State): State = {
     val g = st.verifyGen + 1
-    { ...startJob(st, Verify, g), verifyGen: g, verifyPassed: false, btnNext5: false }
+    { ...startJob(st, Verify, g), verifyGen: g, verifyPassed: false, btnNext5: false, verifyShown: false }
   }
 
   // prepareSend(), called on entry to step 6
@@ -158,7 +187,10 @@ module wizard {
       btnBack6: if (FIXED) true else st.btnBack6 }
 
   // goToStep(n). Forward guards that `return` early leave state unchanged.
-  pure def goToStep(st: State, n: int): State =
+  // Step 2 -> 3 waits for the recipient list: see next2 and previewResponse.
+  // Every navigation bumps previewGen (checked only when FIXED).
+  pure def goToStep(st0: State, n: int): State = {
+    val st = { ...st0, previewGen: st0.previewGen + 1 }
     if (n > st.step) {
       if (n == 2 and not(st.dataLoaded)) st
       else if (n == 5 and not(st.testPassed)) st
@@ -173,6 +205,7 @@ module wizard {
         { ...st1, step: n }
       }
     } else { ...st, step: n }
+  }
 
   // confirmGoBack(target); `accept` is the answer to the confirm() dialog.
   pure def confirmGoBack(st: State, target: int, accept: bool): State = {
@@ -203,9 +236,14 @@ module wizard {
         else { ...st1, btnSendTest: true }
       | Verify =>
         if (FIXED and j.gen != st1.verifyGen) st1
-        else if (ok) { ...st1, verifyPassed: true, btnNext5: true }
-        else st1
-      | Send => { ...st1, doneNav: true }
+        else if (ok) { ...st1, verifyPassed: true, btnNext5: true, verifyShown: true }
+        else { ...st1, verifyShown: true }
+      // Completed or stopped: fetchAndShowSendResults() shows the table.
+      // Bug: a failed send only shows the error (showSendResult), and the
+      // job kept no results to show. FIXED2: the job keeps the results so far
+      // and the page shows them with the error.
+      | Send => { ...st1, doneNav: true,
+          resultsShown: ok or (FIXED2 and st1.sendJob.exists(sj => sj.id == j.id and sj.sent > 0)) }
     }
   }
 
@@ -227,17 +265,49 @@ module wizard {
 
   // Step 1: upload or change sheet
   // app.js: #spreadsheet-file change, #sheet-select change; web/app.py: api_upload_spreadsheet, api_change_sheet
-  action upload = all { s.step == 1, act("upload", { ...s, dataLoaded: true, version: s.version + 1 }) }
+  // The new data replaces state.spreadsheetData, so the filtered recipient
+  // list is gone until the next preview.
+  action upload = all { s.step == 1, act("upload", { ...s, dataLoaded: true, version: s.version + 1,
+    recipientsVersion: -1, previewGen: s.previewGen + 1 }) }
   // app.js: goToStep(2) (#btn-next-1)
   action next1 = all { s.step == 1, act("next1", goToStep(s, 2)) }
 
-  // Step 2: edit any compose field
+  // Step 2: edit any compose field. `bcc`: the field is #bcc-blast-to.
+  // Editing bumps previewGen (checked only when FIXED).
   // app.js: onTemplateChange() and the compose input listeners, setSendMode()
-  action edit = all { s.step == 2, act("edit", { ...s, version: s.version + 1 }) }
+  action edit(bcc: bool): bool = all { s.step == 2, act("edit", { ...s, version: s.version + 1,
+    previewGen: s.previewGen + 1,
+    bccToMerge: if (bcc) s.mergeId else s.bccToMerge }) }
   // app.js: goToStep(1) (step 2 Back)
   action back2 = all { s.step == 2, act("back2", goToStep(s, 1)) }
-  // app.js: goToStep(3) (#btn-next-2); web/app.py: api_get_recipients
-  action next2 = all { s.step == 2, act("next2", goToStep(s, 3)) }
+  // goToStep(3) awaits loadPreview(), which disables Next and posts the
+  // current filters to /api/get-recipients.
+  // app.js: goToStep(3) (#btn-next-2), loadPreview(); web/app.py: api_get_recipients
+  action next2 = all {
+    s.step == 2, s.btnNext2,
+    val g = s.previewGen + 1
+    act("next2", { ...s, btnNext2: false, previewGen: g,
+      previewReq: s.previewReq.union(Set({ version: s.version, gen: g })) }),
+  }
+
+  // The recipient list arrives (`ok`) or the request fails (an alert). Next
+  // is re-enabled either way.
+  // Bug: loadPreview() writes the list into whatever state.spreadsheetData
+  // now is, and goToStep() then sets step 3 wherever the page is, so a Back,
+  // an edit or a new upload while waiting is overridden.
+  // FIXED2: a response whose preview generation is stale is dropped.
+  // environment: app.js loadPreview() and goToStep(3) after `await`; web/app.py api_get_recipients
+  action previewResponse(ok: bool): bool = all {
+    s.previewReq.size() > 0,
+    nondet r = s.previewReq.oneOf()
+    val st = { ...s, previewReq: s.previewReq.exclude(Set(r)), btnNext2: true }
+    val current = not(FIXED2) or (r.gen == s.previewGen and s.step == 2)
+    act("previewResponse",
+      if (ok and current)
+        { ...st, recipientsVersion: r.version, step: 3,
+          stepJump: s.stepJump or s.step != 2 }
+      else st),
+  }
 
   // Step 3
   // app.js: confirmGoBack(2) (step 3 Back)
@@ -272,14 +342,47 @@ module wizard {
     s.step == 6, not(s.sendStarted),
     act("typeSend", { ...s, btnDoSend: true }),
   }
+  // startSend() switches to the sending screen and awaits POST
+  // /api/start-job. The server creates the job and its thread at once; the
+  // session cookie naming the job and the page's callback only arrive with
+  // the response (startSendResponse).
+  // Bug: progress text from an earlier send stays until the first log line.
+  // FIXED2: startSend() resets it.
   // app.js: startSend() (#btn-do-send); web/app.py: api_start_job (mode send)
   action startSend = all {
     s.step == 6, not(s.sendStarted), doSendEnabled(s),
     val ok = s.testedVersions.contains(s.version) and s.verifiedVersions.contains(s.version)
-    act("startSend", { ...startJob(s, Send, 0),
-      sendStarted: true, btnBack6: false, btnDoSend: false,
+    act("startSend", { ...s,
+      sendStarted: true, btnBack6: false, btnDoSend: false, resultsShown: false,
+      progressJob: if (FIXED2) -1 else s.progressJob,
+      stopQueued: false,
+      sendReq: Set(s.nextJobId), nextJobId: s.nextJobId + 1,
       sendJob: Set({ id: s.nextJobId, sent: 0, stopRequested: false, status: Running, stopEarly: false }),
+      concurrentSends: s.concurrentSends or s.sendJob.exists(j => j.status == Running),
       realSendStarted: true, untestedSend: s.untestedSend or not(ok) }),
+  }
+
+  // The start-job response: the session now names the job, and
+  // streamEvents() attaches the send callback. A job that has already
+  // finished (a token failure can end it at once) delivers its queued
+  // events, so the callback fires straight away.
+  // FIXED2: a Stop pressed while waiting is sent now.
+  // environment: app.js startSend() after `await`; web/app.py api_start_job response
+  action startSendResponse = all {
+    s.sendReq.size() > 0,
+    nondet id = s.sendReq.oneOf()
+    val done = s.sendJob.exists(j => j.id == id and j.status != Running)
+    val job = { id: id, kind: Send, handler: Send, version: s.version, gen: 0 }
+    val st1 = { ...s, sendReq: Set(), sessionJob: Set({ id: id, kind: Send, done: done }) }
+    val st2 =
+      if (FIXED2 and s.stopQueued) { ...st1, stopQueued: false,
+        sendJob: st1.sendJob.map(j => if (j.id == id and j.status == Running)
+          { ...j, stopRequested: true, stopEarly: j.stopEarly or j.sent < TOTAL } else j) }
+      else st1
+    val failed = s.sendJob.exists(j => j.id == id and j.status == Failed)
+    act("startSendResponse",
+      if (done) complete({ ...st2, pending: st2.pending.union(Set(job)) }, job, not(failed))
+      else { ...st2, pending: st2.pending.union(Set(job)) }),
   }
   // app.js: confirmGoBack(4) (#btn-back-6)
   action back6(accept: bool): bool = all {
@@ -288,25 +391,34 @@ module wizard {
   }
 
   // "Stop sending" is inside #send-progress, shown from startSend() until the
-  // results replace it. It posts to the current job, which while sending is
-  // the send job.
+  // results replace it. It posts to state.currentJobId.
+  // Bug: until the start-job response arrives, currentJobId is still the dry
+  // run's id, so a Stop pressed then reaches no send.
+  // FIXED2: the page remembers it and posts it once the job id is known.
   // app.js: stopSend() (#btn-stop-send); web/app.py: api_job_stop
   action stopSend = all {
     s.step == 6, s.sendStarted, not(s.doneNav),
-    act("stopSend", { ...s,
-      sendJob: s.sendJob.map(j =>
-        if (j.status == Running)
-          { ...j, stopRequested: true, stopEarly: j.stopEarly or j.sent < TOTAL }
-        else j) }),
+    act("stopSend",
+      if (s.sendReq.size() > 0) {
+        if (FIXED2) { ...s, stopQueued: true }
+        else { ...s, stopLost: s.stopLost or s.sendJob.exists(j => j.status == Running) }
+      } else { ...s,
+        sendJob: s.sendJob.map(j =>
+          if (j.status == Running)
+            { ...j, stopRequested: true, stopEarly: j.stopEarly or j.sent < TOTAL }
+          else j) }),
   }
 
   // newMerge() — only reachable from send-done-nav
   // app.js: newMerge() (#btn-new-merge); web/app.py: api_reset
+  // Bug: #bcc-blast-to keeps the previous merge's address. FIXED2: cleared.
   action newMerge = all {
     s.step == 6, s.doneNav,
     act("newMerge", { ...resetTestAndVerify(s),
       step: 1, dataLoaded: false, version: s.version + 1,
-      sendStarted: false, btnDoSend: false, doneNav: false,
+      sendStarted: false, btnDoSend: false, doneNav: false, resultsShown: false,
+      recipientsVersion: -1, mergeId: s.mergeId + 1,
+      bccToMerge: if (FIXED2) -1 else s.bccToMerge,
       sessionJob: Set(),  // POST /api/reset pops job_id
     }),
   }
@@ -361,6 +473,9 @@ module wizard {
     nondet j = s.sendJob.oneOf()
     act("sendNext", { ...s,
       sendJob: Set({ ...j, sent: j.sent + 1 }),
+      // The "Sending [i/n]" log line updates the progress text if the page
+      // is listening to this job.
+      progressJob: if (s.pending.exists(p => p.id == j.id and p.handler == Send)) j.id else s.progressJob,
       sentAfterStop: if (j.stopRequested) s.sentAfterStop + 1 else s.sentAfterStop }),
   }
 
@@ -416,6 +531,22 @@ module wizard {
     act("signOut", { ...s, signedIn: false, authShown: false }),
   }
 
+  // The server process ends mid-session: the desktop app is quit or crashes,
+  // or the terminal running mergemail365-web is closed. Running jobs die
+  // with it; the token cache and the emails already sent remain. The user
+  // starts again from a new page with a new startup token and session.
+  // environment: process exit (web/__init__.py main)
+  action serverRestart = act("serverRestart", { ...init_state,
+    signedIn: s.signedIn, authShown: s.signedIn,
+    nextJobId: s.nextJobId, version: s.version + 1, mergeId: s.mergeId + 1,
+    sendJob: s.sendJob.map(j => if (j.status == Running) { ...j, status: Killed } else j),
+    testedVersions: s.testedVersions, verifiedVersions: s.verifiedVersions,
+    realSendStarted: s.realSendStarted, untestedSend: s.untestedSend,
+    sentAfterStop: s.sentAfterStop, interactiveAuthInJob: s.interactiveAuthInJob,
+    stepJump: s.stepJump, concurrentSends: s.concurrentSends, stopLost: s.stopLost,
+    lostSend: s.lostSend or s.sendJob.exists(j => j.status == Running and j.sent > 0),
+  })
+
   // The cached token stops working: no usable refresh token, consent
   // revoked, or a sign-out from another window or the CLI. The page keeps
   // showing what it last fetched.
@@ -440,11 +571,20 @@ module wizard {
       testedVersions: st.testedVersions, verifiedVersions: st.verifiedVersions,
       realSendStarted: st.realSendStarted, untestedSend: st.untestedSend,
       sentAfterStop: st.sentAfterStop, interactiveAuthInJob: st.interactiveAuthInJob,
+      stepJump: st.stepJump, concurrentSends: st.concurrentSends, mergeId: st.mergeId,
+      lostSend: st.lostSend, stopLost: st.stopLost,
     }
     // Bug: /api/config reports session["job_id"] as active whenever it is
-    // still in _jobs, whatever its mode and even if it has finished.
+    // still in _jobs, whatever its mode and even if it has finished; and only
+    // that job, so a send whose start-job response never reached the page
+    // (and so never set the session cookie) runs unseen.
+    // FIXED: only send jobs. FIXED2: and a running send job even if the
+    // session doesn't name it (the app has one user).
+    val running = st.sendJob.filter(j => j.status == Running)
+      .map(j => { id: j.id, kind: Send, done: false })
     val active =
-      if (FIXED) st.sessionJob.filter(sj => sj.kind == Send)
+      if (FIXED2 and running.size() > 0) running
+      else if (FIXED) st.sessionJob.filter(sj => sj.kind == Send)
       else st.sessionJob
     val after =
       if (active.size() == 0) fresh
@@ -458,7 +598,9 @@ module wizard {
           // so the new SSE stream only gets keepalives and never "done".
           // FIXED: the server ends the stream of a finished job with an
           // empty queue, so the page fetches and shows the results.
-          if (FIXED) { ...reconnected, doneNav: true } else reconnected
+          if (FIXED) { ...reconnected, doneNav: true,
+            resultsShown: st.sendJob.exists(j => j.id == sj.id and (j.status != Failed or (FIXED2 and j.sent > 0))) }
+          else reconnected
         } else {
           // Reattach the send-step callback to whatever job this is.
           { ...reconnected, pending: Set({
@@ -469,15 +611,16 @@ module wizard {
   }
 
   action step = any {
-    upload, next1, edit, back2, next2, back3, next3,
+    upload, next1, nondet bcc = Bool.oneOf() edit(bcc), back2, next2,
+    nondet ok = Bool.oneOf() previewResponse(ok), back3, next3,
     sendTestEmail, nondet a = Bool.oneOf() back4(a), next4,
     nondet a = Bool.oneOf() back5(a), next5,
-    typeSend, startSend, nondet a = Bool.oneOf() back6(a), stopSend, newMerge,
+    typeSend, startSend, startSendResponse, nondet a = Bool.oneOf() back6(a), stopSend, newMerge,
     nondet ok = Bool.oneOf() completeJob(ok),
     completeOrphan,
     sendNext, nondet failed = Bool.oneOf() finishSend(failed), sendWithoutToken,
     nondet desktop = Bool.oneOf() signIn(desktop), signOut, tokenExpires,
-    reload,
+    reload, serverRestart,
   }
 
   // ---------------------------------------------------------------------
@@ -506,22 +649,22 @@ module wizard {
   /// The "sending" screen only appears for a real send.
   val sendScreenHonest = (s.step == 6 and s.sendStarted) implies s.realSendStarted
 
-  /// The sending screen always eventually offers a way out: either a callback
-  /// is pending or the done navigation is shown.
+  /// The sending screen always eventually offers a way out: the start-job
+  /// response or a callback is pending, or the done navigation is shown.
   val sendScreenNotStuck =
     (s.step == 6 and s.sendStarted)
-      implies (s.doneNav or s.pending.exists(p => p.handler == Send))
+      implies (s.doneNav or s.sendReq.size() > 0 or s.pending.exists(p => p.handler == Send))
 
   val stepNeedsData = s.step >= 2 implies s.dataLoaded
 
   /// No email is sent after Stop is pressed. An email already being sent when
   /// Stop is pressed counts as sent before it, because sendNext is atomic.
-  val stopHonoured = s.sentAfterStop == 0
+  /// A Stop pressed before the start-job response arrives still stops it.
+  val stopHonoured = s.sentAfterStop == 0 and not(s.stopLost)
 
   /// A send stopped while emails remained ends as Stopped (unless it failed),
   /// never as Completed.
-  val stoppedReported = s.sendJob.forall(j =>
-    (j.stopEarly and j.status != Running and j.status != Failed) implies j.status == Stopped)
+  val stoppedReported = s.sendJob.forall(j => not(j.stopEarly and j.status == Completed))
 
   /// On step 4, while the page shows signed out, "Send test email" is
   /// disabled and the sign-in button is offered on the step.
@@ -547,13 +690,41 @@ module wizard {
         or (s.btnNext4 and s.testPassed)
         or (sendTestEnabled(s) and s.authShown)
         or signInOffered(s)))
+    and (s.step == 5 implies (s.pending.exists(p => p.handler == Verify) or s.verifyShown))
     and ((s.step == 6 and not(s.sendStarted)) implies (s.authShown or signInOffered(s)))
+
+  /// The page only moves where the user last sent it: a response to an
+  /// earlier request never moves it from a step the user has since left.
+  val noStepJump = not(s.stepJump)
+
+  /// The recipients shown on steps 3 to 6 were fetched for the current content.
+  val previewHonest = (s.step >= 3 and not(s.sendStarted)) implies s.recipientsVersion == s.version
+
+  /// A running send is always on screen, and there is only one at a time.
+  val runningSendVisible =
+    s.sendJob.exists(j => j.status == Running) implies (s.step == 6 and s.sendStarted)
+  val noConcurrentSends = not(s.concurrentSends)
+
+  /// After a send ends, the page lists which emails went out, even if it
+  /// failed part-way.
+  val failedSendReported =
+    (s.step == 6 and s.doneNav) implies (s.resultsShown or s.sendJob.forall(j => j.sent == 0))
+
+  /// The progress text describes the send under way.
+  val progressHonest =
+    (s.step == 6 and s.sendStarted and s.progressJob >= 0)
+      implies s.sendJob.exists(j => j.id == s.progressJob)
+
+  /// New merge clears every input the previous merge filled in.
+  val newMergeClears = s.bccToMerge < 0 or s.bccToMerge == s.mergeId
 
   val allInvariants = and {
     noUntestedSend, next4Honest, next5Honest, buttonsMatchFlags,
     back6Usable, sendScreenHonest, sendScreenNotStuck, stepNeedsData,
     stopHonoured, stoppedReported,
     testNeedsSignIn, sendNeedsSignIn, noInteractiveAuthInJob, canProgress,
+    noStepJump, previewHonest, runningSendVisible, noConcurrentSends,
+    failedSendReported, progressHonest, newMergeClears,
   }
 
   // ---------------------------------------------------------------------
@@ -571,6 +742,10 @@ module wizard {
   /// A send failed after some emails went out.
   val partialFailedSend = s.sendJob.exists(j => j.status == Failed and j.sent > 0)
 
+  /// A server restart killed a send after some emails went out: nothing
+  /// records which.
+  val restartLostSend = s.lostSend
+
   // ---------------------------------------------------------------------
   // Scenarios (quint test). Each replays one counterexample; the invariant
   // must fail in the buggy model and hold in the fixed one. Job ids are
@@ -579,7 +754,16 @@ module wizard {
 
   pure def bugIff(inv: bool): bool = if (FIXED) inv else not(inv)
 
-  action toStep4 = upload.then(next1).then(next2).then(next3)
+  // For round 2 bugs, which are present in both `buggy` and `partial`.
+  pure def bugIff2(inv: bool): bool = if (FIXED2) inv else not(inv)
+
+  // Next on step 2, and the recipient list arrives.
+  action preview = next2.then(previewResponse(true))
+
+  // "Send emails", and the start-job response arrives.
+  action send = startSend.then(startSendResponse)
+
+  action toStep4 = upload.then(next1).then(preview).then(next3)
 
   // Start signed in (desktop sign-in on step 1).
   action start = init.then(signIn(true))
@@ -593,21 +777,21 @@ module wizard {
 
   run happyPathTest =
     start.then(toStep4).then(passTestAndVerify(0))
-      .then(next5).then(typeSend).then(startSend).then(sendAll)
+      .then(next5).then(typeSend).then(send).then(sendAll)
       .expect(allInvariants and s.doneNav)
 
   /// A test that completes after the user went back and edited enables Next.
   run staleTestCompletionTest =
     start.then(toStep4).then(sendTestEmail).then(back4(true)).then(back3)
-      .then(completeById(0, true)).then(edit).then(next2).then(next3)
+      .then(completeById(0, true)).then(edit(false)).then(preview).then(next3)
       .expect(bugIff(next4Honest))
 
   /// An old dry run completing during a newer one enables Next on step 5.
   run staleVerifyCompletionTest =
     start.then(toStep4).then(sendTestEmail).then(completeById(0, true))
       .then(next4)                                   // dry run 1 starts
-      .then(back5(true)).then(back4(true)).then(back3).then(edit)
-      .then(next2).then(next3).then(sendTestEmail).then(completeById(2, true))
+      .then(back5(true)).then(back4(true)).then(back3).then(edit(false))
+      .then(preview).then(next3).then(sendTestEmail).then(completeById(2, true))
       .then(next4)                                   // dry run 3 starts
       .then(completeById(1, true))                   // stale dry run 1 finishes
       .expect(bugIff(next5Honest))
@@ -630,7 +814,7 @@ module wizard {
   /// Reloading after a real send finished also gets stuck.
   run reloadAfterSendTest =
     start.then(toStep4).then(passTestAndVerify(0))
-      .then(next5).then(typeSend).then(startSend).then(sendAll)
+      .then(next5).then(typeSend).then(send).then(sendAll)
       .then(reload)
       .expect(bugIff(sendScreenNotStuck))
 
@@ -638,7 +822,7 @@ module wizard {
   /// loop stops before the next email and the job ends as Stopped.
   run stopIgnoredTest =
     start.then(toStep4).then(passTestAndVerify(0))
-      .then(next5).then(typeSend).then(startSend).then(sendNext).then(stopSend)
+      .then(next5).then(typeSend).then(send).then(sendNext).then(stopSend)
       .then(any { all { FIXED, finishSend(false) }, all { not(FIXED), sendNext } })
       .expect(bugIff(stopHonoured)
         and (FIXED implies (s.doneNav and s.sendJob.forall(j => j.status == Stopped and j.sent == 1))))
@@ -646,7 +830,7 @@ module wizard {
   /// A stopped send reports Completed once every email has gone out.
   run stoppedReportedTest =
     start.then(toStep4).then(passTestAndVerify(0))
-      .then(next5).then(typeSend).then(startSend).then(stopSend)
+      .then(next5).then(typeSend).then(send).then(stopSend)
       .then(any { all { FIXED, finishSend(false) }, all { not(FIXED), sendAll } })
       .expect(bugIff(stoppedReported))
 
@@ -658,7 +842,7 @@ module wizard {
   /// Fixed: signing in from the step 4 callout enables the test email.
   run signInOnStep4Test =
     init.then(toStep4)
-      .then(any { all { FIXED, signIn(true) }, all { not(FIXED), back4(true).then(back3).then(back2).then(signIn(true)).then(next1).then(next2).then(next3) } })
+      .then(any { all { FIXED, signIn(true) }, all { not(FIXED), back4(true).then(back3).then(back2).then(signIn(true)).then(next1).then(preview).then(next3) } })
       .expect(s.step == 4 and sendTestEnabled(s) and allInvariants)
 
   /// A test email sent after the token expired waits in the device-code
@@ -673,7 +857,7 @@ module wizard {
   /// Fixed: the job fails at once.
   run sendWithoutTokenTest =
     start.then(toStep4).then(passTestAndVerify(0))
-      .then(next5).then(typeSend).then(startSend).then(sendNext).then(tokenExpires)
+      .then(next5).then(typeSend).then(send).then(sendNext).then(tokenExpires)
       .then(sendWithoutToken)
       .expect(bugIff(noInteractiveAuthInJob)
         and (FIXED implies (s.doneNav and s.sendJob.forall(j => j.status == Failed))))
@@ -686,22 +870,83 @@ module wizard {
       .then(back6(false)).then(back6(true))
       .then(sendTestEmail).then(completeJob(true))
       .then(back4(true)).then(back3).then(back2).then(signOut).then(signIn(true))
-      .then(next1).then(next2).then(next3).then(sendTestEmail)
+      .then(next1).then(preview).then(next3).then(sendTestEmail)
       .then(any { all { FIXED, reload.then(completeOrphan) }, all { not(FIXED), reload } })
       .expect(FIXED implies (s.step == 1 and allInvariants))
+
+  /// Back while the recipient preview loads: the page still jumps to step 3
+  /// when the list arrives (bug 10).
+  run previewJumpTest =
+    start.then(upload).then(next1).then(next2).then(back2).then(previewResponse(true))
+      .expect(bugIff2(noStepJump) and (FIXED2 implies (s.step == 1 and s.btnNext2)))
+
+  /// Editing (or re-uploading) while the preview loads: the list shown is
+  /// for the old content (bug 10).
+  run previewStaleTest =
+    start.then(upload).then(next1).then(next2).then(edit(false)).then(previewResponse(true))
+      .expect(bugIff2(previewHonest) and (FIXED2 implies (s.step == 2 and s.btnNext2)))
+
+  /// A reload before the start-job response arrives leaves the send running
+  /// unseen (bug 11). In `buggy` the old reload bug (bug 3) masks it: the page
+  /// reattaches to the finished dry run and shows "Sending…".
+  run sendUnseenAfterReloadTest =
+    start.then(toStep4).then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(startSend).then(reload)
+      .expect(if (FIXED2) runningSendVisible else if (FIXED) not(runningSendVisible) else true)
+
+  /// Stop pressed before the start-job response arrives is lost (bug 12).
+  run earlyStopTest =
+    start.then(toStep4).then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(startSend).then(stopSend).then(startSendResponse)
+      .expect(bugIff2(stopHonoured)
+        and (FIXED2 implies s.sendJob.forall(j => j.stopRequested)))
+
+  /// A send that fails part-way shows only the error, not which emails went
+  /// out (bug 13).
+  run failedSendTest =
+    start.then(toStep4).then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(send).then(sendNext).then(finishSend(true))
+      .expect(bugIff2(failedSendReported))
+
+  /// The second send's progress text starts with the first send's count
+  /// (bug 14).
+  run staleProgressTest =
+    start.then(toStep4).then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(send).then(sendAll)
+      .then(newMerge).then(toStep4).then(passTestAndVerify(3))
+      .then(next5).then(typeSend).then(startSend)
+      .expect(bugIff2(progressHonest))
+
+  /// New merge leaves the BCC To address in place (bug 15).
+  run bccToLeftTest =
+    start.then(upload).then(next1).then(edit(true)).then(preview).then(next3)
+      .then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(send).then(sendAll).then(newMerge)
+      .expect(bugIff2(newMergeClears))
+
+  /// Restarting the server mid-send loses the record of what went out.
+  /// Allowed (witness restartLostSend): fixing it needs a send log on disk.
+  run restartMidSendTest =
+    start.then(toStep4).then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(send).then(sendNext).then(serverRestart)
+      .expect(s.lostSend and s.step == 1 and (FIXED2 implies allInvariants))
 
   /// After New merge, Back on step 6 stays disabled.
   run back6AfterNewMergeTest =
     start.then(toStep4).then(passTestAndVerify(0))
-      .then(next5).then(typeSend).then(startSend).then(sendAll)
+      .then(next5).then(typeSend).then(send).then(sendAll)
       .then(newMerge).then(toStep4).then(passTestAndVerify(3)).then(next5)
       .expect(bugIff(back6Usable))
 }
 
 module buggy {
-  import wizard(FIXED = false).*
+  import wizard(ROUND = 0).*
+}
+
+module partial {
+  import wizard(ROUND = 1).*
 }
 
 module fixed {
-  import wizard(FIXED = true).*
+  import wizard(ROUND = 2).*
 }

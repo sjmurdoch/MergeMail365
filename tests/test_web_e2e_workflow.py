@@ -404,3 +404,162 @@ class TestSignInGate:
         expect(page.locator("#signin-callout-6")).to_be_visible()
         page.fill("#send-confirm-input", "SEND")
         expect(page.locator("#btn-do-send")).to_be_disabled()
+
+
+@pytest.fixture
+def held_preview(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[threading.Event, threading.Event]]:
+    """Hold /api/get-recipients until released: (request arrived, release)."""
+    import mail_merge.excel
+
+    arrived = threading.Event()
+    release = threading.Event()
+    real = mail_merge.excel.read_recipients
+
+    def held(*args: Any, **kwargs: Any) -> Any:
+        arrived.set()
+        release.wait(10)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(mail_merge.excel, "read_recipients", held)
+    yield arrived, release
+    release.set()
+
+
+def _to_step2(page: Page, xlsx: Path) -> None:
+    page.set_input_files("#spreadsheet-file", str(xlsx))
+    page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+    page.click("#btn-next-1")
+    page.wait_for_selector("#step-2.active", timeout=5000)
+    page.fill("#subject-input", "Hello {{name}}")
+    page.fill("#body-input", "Hi {{name}}")
+
+
+class TestAwaitWindows:
+    def test_back_while_preview_loads_stays_on_step1(
+        self, wizard: Page, workflow_xlsx: Path, held_preview: tuple[threading.Event, threading.Event],
+    ):
+        """Model: previewJumpTest / noStepJump."""
+        page = wizard
+        arrived, release = held_preview
+        _to_step2(page, workflow_xlsx)
+        page.click("#btn-next-2")
+        assert arrived.wait(5)
+        page.click("#step-2 button:has-text('Back')")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        release.set()
+        page.wait_for_timeout(1000)
+        expect(page.locator("#step-1")).to_have_class(ACTIVE)
+        assert page.evaluate("state.currentStep") == 1
+
+    def test_edit_while_preview_loads_stays_on_step2(
+        self, wizard: Page, workflow_xlsx: Path, held_preview: tuple[threading.Event, threading.Event],
+    ):
+        """Model: previewStaleTest / previewHonest."""
+        page = wizard
+        arrived, release = held_preview
+        _to_step2(page, workflow_xlsx)
+        page.click("#btn-next-2")
+        assert arrived.wait(5)
+        page.fill("#body-input", "Edited while the preview loads")
+        release.set()
+        page.wait_for_timeout(1000)
+        expect(page.locator("#step-2")).to_have_class(ACTIVE)
+        expect(page.locator("#btn-next-2")).to_be_enabled()
+
+    def test_stop_before_start_response_reaches_the_send(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Model: earlyStopTest / stopHonoured."""
+        import mail_merge.web.app as web_app
+
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        page.fill("#send-confirm-input", "SEND")
+        arrived = threading.Event()
+        release = threading.Event()
+        real_count = web_app._validated_recipient_count
+
+        def held_count(*args: Any, **kwargs: Any) -> int:
+            arrived.set()
+            release.wait(10)
+            return real_count(*args, **kwargs)
+
+        monkeypatch.setattr(web_app, "_validated_recipient_count", held_count)
+        gate.hold = {"send"}
+        page.click("#btn-do-send")
+        assert arrived.wait(5)
+        page.click("#btn-stop-send")
+        release.set()
+        gate.wait_started(3)
+        for _ in range(50):
+            sends = [j for j in web_app._jobs.values() if j.mode == "send"]
+            if sends and sends[-1].stop_requested:
+                break
+            page.wait_for_timeout(100)
+        assert sends and sends[-1].stop_requested
+
+
+class TestSendOutcome:
+    def test_failed_send_lists_emails_already_sent(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Model: failedSendTest / failedSendReported."""
+        from mail_merge.sender import SendAborted, SendResult
+
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+
+        def fail_after_one(**kwargs: Any) -> list[Any]:
+            raise SendAborted("Not signed in. Sign in with Microsoft, then try again.",
+                              [SendResult(email="alice@example.com", success=True, status_code=202)])
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", fail_after_one)
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=10000)
+        expect(page.locator("#send-result")).to_contain_text("Not signed in")
+        expect(page.locator("#send-result .results-table")).to_contain_text("alice@example.com")
+
+    def test_second_send_starts_with_fresh_progress(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
+    ):
+        """Model: staleProgressTest / progressHonest."""
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        page.evaluate("showSendProgress(2, 2)")  # as the first send's log lines would
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=10000)
+        page.click("#btn-new-merge")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        gate.hold = {"send"}
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-progress-text")).to_have_text("Sending...")
+
+    def test_new_merge_clears_bcc_to(self, wizard: Page, gate: JobGate, workflow_xlsx: Path):
+        """Model: bccToLeftTest / newMergeClears."""
+        page = wizard
+        _to_step2(page, workflow_xlsx)
+        # The send-mode buttons are inside a collapsed section.
+        page.evaluate("setSendMode('bcc'); $('bcc-blast-to').value = 'Team <team@example.com>'")
+        page.evaluate("newMerge()")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        assert page.input_value("#bcc-blast-to") == ""

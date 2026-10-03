@@ -9,6 +9,7 @@ from mail_merge.sender import (
     GRAPH_SEND_URL,
     MAX_RECIPIENTS_PER_MESSAGE,
     MessageOptions,
+    SendAborted,
     SendResult,
     send_all,
     send_bcc_blast,
@@ -600,3 +601,46 @@ class TestShouldStop:
         )
         assert [r.email for r in results] == ["a@x.com"]
         assert len(responses.calls) == 1
+
+
+class TestSendAborted:
+    """An error part-way keeps the results so far (spec/wizard.qnt, failedSendReported)."""
+
+    def test_send_all_reports_emails_sent_before_the_error(self):
+        calls: list[str] = []
+
+        def get_token() -> str:
+            if len(calls) == 1:
+                raise RuntimeError("Not signed in")
+            return "tok"
+
+        def fake_send_one(get_token, to, subject, body, opts=None):
+            get_token()
+            calls.append(to.address)
+            return SendResult(email=to.address, success=True, status_code=202)
+
+        recipients = [{"email": "a@example.com"}, {"email": "b@example.com"}]
+        with patch("mail_merge.sender.send_one", side_effect=fake_send_one), \
+                patch("mail_merge.sender.time.sleep"):
+            with pytest.raises(SendAborted, match="Not signed in") as exc_info:
+                send_all(get_token, recipients, "email", "Hi", "Body", delay=1.0)
+        assert [r.email for r in exc_info.value.results] == ["a@example.com"]
+        assert isinstance(exc_info.value, RuntimeError)
+
+    def test_bcc_blast_reports_batches_sent_before_the_error(self):
+        cc = [EmailAddress(address=f"cc{i}@x.com") for i in range(MAX_RECIPIENTS_PER_MESSAGE - 2)]
+        outcomes = iter([SendResult(email="to@x.com", success=True, status_code=202),
+                         RuntimeError("Not signed in")])
+
+        def fake_send_one(*args, **kwargs):
+            outcome = next(outcomes)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        with patch("mail_merge.sender.send_one", side_effect=fake_send_one):
+            with pytest.raises(SendAborted) as exc_info:
+                send_bcc_blast(lambda: "tok", ["a@x.com", "b@x.com"],
+                               EmailAddress(address="to@x.com"), "Hi", "Body",
+                               opts=MessageOptions(cc=cc))
+        assert [r.email for r in exc_info.value.results] == ["a@x.com"]

@@ -28,6 +28,13 @@ const state = {
     // matches is stale and its completion is ignored (spec/wizard.qnt).
     testGen: 0,
     verifyGen: 0,
+    // Bumped by any navigation or edit, so a recipient preview that arrives
+    // after the user has moved on or changed the content is dropped
+    // (spec/wizard.qnt, noStepJump and previewHonest).
+    previewGen: 0,
+    // "Stop sending" pressed before the start-job response gave the send's
+    // job id; sent once the id is known (spec/wizard.qnt, stopHonoured).
+    stopQueued: false,
     sendResults: null,
 
     // Dirty flag for localStorage auto-save
@@ -161,6 +168,7 @@ function apiFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 async function goToStep(n) {
     console.log("Navigating to step", n, "from", state.currentStep);
+    const gen = ++state.previewGen;
     // Only perform validation/trigger side-effects when advancing forward
     if (n > state.currentStep) {
         // Step 1 → 2: need a spreadsheet uploaded
@@ -171,7 +179,9 @@ async function goToStep(n) {
         // Step 2 → 3: validate compose fields, load recipient preview
         if (n === 3 && state.currentStep === 2) {
             if (!validateCompose()) return;
-            const previewOk = await loadPreview();
+            const previewOk = await loadPreview(
+                () => gen === state.previewGen && state.currentStep === 2,
+            );
             if (!previewOk) return;
         }
         // Step 3 → 4: pre-fill test email
@@ -302,6 +312,7 @@ function validateCompose() {
 
 function setSendMode(mode) {
     state.sendMode = mode;
+    state.previewGen++;
     if (mode === "individual") {
         $("mode-individual").classList.add("active-mode");
         $("mode-individual").classList.remove("outline");
@@ -419,18 +430,8 @@ async function loadConfig() {
             window.addEventListener("beforeunload", beforeUnloadWarn);
             state.currentStep = 6;
             updateStepUI(6);
-            streamEvents(state.currentJobId, "send-log", (result) => {
-                window.removeEventListener("beforeunload", beforeUnloadWarn);
-                if (result.status === "completed" || result.status === "stopped") {
-                    fetchAndShowSendResults(state.currentJobId);
-                } else {
-                    showSendResult(false, result.error || "Send failed");
-                }
-            }, (current, total) => {
-                $("send-progress-bar").max = total;
-                $("send-progress-bar").value = current;
-                $("send-progress-text").textContent = `Sending ${current} of ${total}...`;
-            });
+            const jobId = state.currentJobId;
+            streamEvents(jobId, "send-log", (result) => onSendComplete(jobId, result), showSendProgress);
         } else if (data.current_step > 1) {
             // On reload, we have the spreadsheet in session but not the
             // filtered recipients list.  We can only safely restore to
@@ -680,6 +681,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
             return;
         }
         state.spreadsheetData = data;
+        state.previewGen++;
         show("spreadsheet-info");
         renderSpreadsheetSummary(data);
         $("btn-next-1").disabled = false;
@@ -711,6 +713,7 @@ $("sheet-select").addEventListener("change", async () => {
             return;
         }
         state.spreadsheetData = data;
+        state.previewGen++;
         renderSpreadsheetSummary(data);
         buildPreviewTable(data.columns, data.rows, data.total_rows);
         showFilterChips(data.columns);
@@ -846,6 +849,7 @@ $("filter-chips-container").addEventListener("mousedown", (e) => {
         const pos = start + insertion.length;
         target.setSelectionRange(pos, pos);
     }
+    onTemplateChange();
 });
 
 // ---------------------------------------------------------------------------
@@ -920,6 +924,7 @@ function activateHtmlEditor() {
 // Real-time placeholder and HTML validation
 let validationTimer = null;
 function onTemplateChange() {
+    state.previewGen++;
     clearTimeout(validationTimer);
     validationTimer = setTimeout(() => {
         validatePlaceholders();
@@ -1083,7 +1088,9 @@ function validateHtmlBody() {
 // ---------------------------------------------------------------------------
 // Step 3: Preview
 // ---------------------------------------------------------------------------
-async function loadPreview() {
+// isCurrent() is false once the user has navigated or edited since the
+// request was sent; the response is then dropped.
+async function loadPreview(isCurrent = () => true) {
     $("btn-next-2").ariaBusy = "true";
     $("btn-next-2").disabled = true;
 
@@ -1100,6 +1107,7 @@ async function loadPreview() {
             body: form
         });
         const data = await resp.json();
+        if (!isCurrent()) return false;
 
         if (!resp.ok) {
             alert(data.error || "Failed to load recipients");
@@ -1128,7 +1136,7 @@ async function loadPreview() {
         return true;
 
     } catch (e) {
-        alert(`Error loading preview: ${e.message}`);
+        if (isCurrent()) alert(`Error loading preview: ${e.message}`);
         return false;
     } finally {
         $("btn-next-2").ariaBusy = "false";
@@ -1421,10 +1429,16 @@ $("send-confirm-input").addEventListener("input", () => {
 
 async function startSend() {
     state.sendStarted = true;
+    // Until the response names the send's job, Stop is queued rather than
+    // sent to the previous (dry-run) job.
+    state.currentJobId = null;
+    state.stopQueued = false;
     hide("send-confirm");
     show("send-progress");
     show("send-log");
     $("send-log").innerHTML = "";
+    $("send-progress-text").textContent = "Sending...";
+    $("send-progress-bar").value = 0;
     $("btn-back-6").disabled = true;
 
     // beforeunload warning
@@ -1440,21 +1454,32 @@ async function startSend() {
             return;
         }
         state.currentJobId = data.job_id;
-        streamEvents(data.job_id, "send-log", (result) => {
-            window.removeEventListener("beforeunload", beforeUnloadWarn);
-            if (result.status === "completed" || result.status === "stopped") {
-                fetchAndShowSendResults(data.job_id);
-            } else {
-                showSendResult(false, result.error || "Send failed");
-            }
-        }, (current, total) => {
-            $("send-progress-bar").max = total;
-            $("send-progress-bar").value = current;
-            $("send-progress-text").textContent = `Sending ${current} of ${total}...`;
-        });
+        if (state.stopQueued) {
+            state.stopQueued = false;
+            stopSend();
+        }
+        streamEvents(data.job_id, "send-log", (result) => onSendComplete(data.job_id, result), showSendProgress);
     } catch (e) {
         window.removeEventListener("beforeunload", beforeUnloadWarn);
         showSendResult(false, `Error: ${e.message}`);
+    }
+}
+
+function showSendProgress(current, total) {
+    $("send-progress-bar").max = total;
+    $("send-progress-bar").value = current;
+    $("send-progress-text").textContent = `Sending ${current} of ${total}...`;
+}
+
+// A send that failed part-way still lists the emails that went out
+// (spec/wizard.qnt, failedSendReported).
+function onSendComplete(jobId, result) {
+    window.removeEventListener("beforeunload", beforeUnloadWarn);
+    if (result.status === "completed" || result.status === "stopped"
+        || (result.results && result.results.length > 0)) {
+        fetchAndShowSendResults(jobId);
+    } else {
+        showSendResult(false, result.error || "Send failed");
     }
 }
 
@@ -1464,7 +1489,10 @@ function beforeUnloadWarn(e) {
 }
 
 async function stopSend() {
-    if (!state.currentJobId) return;
+    if (!state.currentJobId) {
+        if (state.sendStarted) state.stopQueued = true;
+        return;
+    }
     await apiFetch(`/api/job/${state.currentJobId}/stop`, {
         method: "POST",
         headers: { "X-CSRF-Token": CSRF_TOKEN },
@@ -1486,6 +1514,8 @@ async function fetchAndShowSendResults(jobId) {
         let html = `<h4>Results</h4>`;
         if (data.status === "stopped") {
             html += `<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`;
+        } else if (data.status === "failed") {
+            html += `<div class="callout callout-danger">Sending failed: ${escapeHtml(data.error || "unknown error")}. Recipients not listed below were not sent an email.</div>`;
         }
         html += `<p><strong>Total:</strong> ${summary.total || 0} | `;
         html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
@@ -1572,6 +1602,7 @@ function newMerge() {
     $("cc-input").value = "";
     $("bcc-input").value = "";
     $("reply-to-input").value = "";
+    $("bcc-blast-to").value = "";
     $("importance-select").value = "";
     $("filter-input").value = "";
     $("attachment-input").value = "";
