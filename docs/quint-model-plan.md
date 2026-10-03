@@ -1,12 +1,12 @@
 # Formal model of the web UI wizard (Quint)
 
-## Current status (2026-10-03)
+## Status: closed (2026-10-03)
 
-Steps 1, 2, 2b and 2c are done, and so is a second round of web UI modelling (bugs 10–15, see "Round 2: awaits, failed sends and restarts"). Step 3 (re-architecting the web UI so the model maps onto it, revised for the richer model) is next, then steps 4 and 5. Nothing is in progress.
+All steps are done: the model and its checks (1, 2, 2b, 2c, round 2), the re-architecture so the model maps onto the code (3), model-based conformance in client, server and browser tiers, run in CI (4), and the interrupted-send fixes from step 5 (bugs 16 and 17). Seventeen bugs were found and fixed. The remaining step 5 candidates and other open issues moved to `TODO.md`. This document is now a record; the model, its checks and the conformance tests stay in use as described in `CLAUDE.md` ("Formal model of the wizard").
 
 ### Bugs fixed
 
-All nine were found by the model or while modelling, reproduced by tests that failed before the fix, and fixed. Details under "Bugs found".
+Bugs 1–15 were found by the model or while modelling, and bug 16 by the commit-history review; each was reproduced by tests that failed before the fix. Details under "Bugs found" and "Round 2".
 
 | # | Bug | Fix commit | Regression tests |
 |---|---|---|---|
@@ -43,9 +43,7 @@ Decided: steps 4 and 6 can be entered signed out, because they offer sign-in the
 
 ### Next actions
 
-1. Step 3: re-architect the web UI so the model maps onto it (client core with one event per model action, `render()` from selectors, request ids, a server `JobStore`, abstraction functions), and split the spec into modules. Revised plan below.
-2. Step 4: conformance, replaying `quint run --mbt` traces in client, server and end-to-end tiers.
-3. Step 5: CLI resume after an interrupted run (bug 16) and a send the app didn't finish (bug 17, R15) are fixed; the remaining candidates are listed under step 5.
+None: the plan is closed. Open issues are in `TODO.md`.
 
 ### Resuming: how to run the model
 
@@ -449,13 +447,10 @@ Revised 2026-10-03 for the richer model. Conformance runs against `fixed` only.
 
 ### Step 5 — Extend coverage
 
-Candidates, roughly in order of risk:
+Done for the two interrupted-send candidates; the others moved to `TODO.md` when the plan was closed.
 
 - ~~Persisting send results so a restart mid-send can report what went out (R15)~~: done (bug 17). A running send logs its results to disk; the next start reports a send it didn't finish until dismissed. The model keeps the log across `serverRestart` (`sendLog`), and the conformance tiers replay restarts against it. The CLI resume bug after an interrupted run is fixed without modelling the CLI (bug 16): the output CSV is now written as the send goes.
-- Out-of-order `/auth/status` answers (R16): falls out of step 3's request ids, then needs only invariants.
-- A second tab: two pages sharing one session and job store.
-- Session expiry (24-hour sliding window) and a lost session cookie.
-- Sheet change invalidating column selections, and the HTML/source toggle view state (the last two original candidates; reload with an active send is done).
+- Moved to `TODO.md`: out-of-order `/auth/status` answers (R16, handled in the code, not modelled), a second tab, session expiry and a lost session cookie, and the sheet-change and HTML/source view state.
 
 ## Out of scope
 
@@ -463,10 +458,10 @@ Trix and paste sanitisation, CSS/Pico layout, SSE framing, Graph retry logic ins
 
 ## Risks
 
-- **Model drift.** The coverage test catches missing actions and invariants without requirements; conformance (step 4) catches actions that don't match the code. Until step 4 runs in CI, treat the spec as design documentation backed by scenario tests.
+- **Model drift.** The coverage test catches missing actions and invariants without requirements; conformance (step 4, in the CI `spec` job) catches actions that don't match the code.
 - **Intent leaking into the model.** An action written from what the code should do passes every check. The citation rule helps; the server conformance tier is the real defence.
 - **The re-architecture itself introducing bugs.** It touches every handler. Mitigations: one area at a time, the Playwright workflow regressions (one per model bug), the 600+ existing tests, and keeping `window.state` and the legacy aliases until the E2E tests no longer need them.
 - **Over-engineering a single-user local tool.** A reducer, an effects runner and a job store are more structure than ~1,900 lines of JS strictly need. The justification is conformance: without one event per model action and an abstraction function, the model can only be checked by hand, which is how bugs 7, 11 and 12 were missed. If step 4 is dropped, steps 3.2 (request ids) and 3.6 (job store) are still worth doing on their own.
-- **ES modules in the desktop app.** `<script type="module">` needs a reasonably current WebView2 (Windows) or WKWebView (macOS); both bundled pywebview backends support it, but check the release bundles before relying on it.
-- **Second language to maintain.** Splitting the spec into modules (step 3.7) keeps it readable; conformance keeps it honest.
+- **ES modules in the desktop app.** Avoided: `wizard-core.js` is a classic script (step 3.1).
+- **Second language to maintain.** The spec stayed one file (step 3.7 explains why); conformance keeps it honest.
 - **Apalache needs Java and is slow.** If it isn't available in CI, rely on simulation, scenarios and conformance, and run Apalache locally on spec changes.
