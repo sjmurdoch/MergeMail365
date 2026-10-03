@@ -2,7 +2,7 @@
 
 ## Current status (2026-10-03)
 
-Steps 1, 2, 2b and 2c are done, and so is a second round of web UI modelling (bugs 10–15, see "Round 2: awaits, failed sends and restarts"). Step 3 (reducer) is next, then steps 4 and 5. Nothing is in progress.
+Steps 1, 2, 2b and 2c are done, and so is a second round of web UI modelling (bugs 10–15, see "Round 2: awaits, failed sends and restarts"). Step 3 (re-architecting the web UI so the model maps onto it, revised for the richer model) is next, then steps 4 and 5. Nothing is in progress.
 
 ### Bugs fixed
 
@@ -44,9 +44,9 @@ Decided: steps 4 and 6 can be entered signed out, because they offer sign-in the
 
 ### Next actions
 
-1. Step 3: reducer.
-2. Consider splitting the job model into `spec/jobs.qnt`: `wizard.qnt` is now about 950 lines.
-3. Decide whether to persist send results (R15) and fix CLI resume after an interrupted run.
+1. Step 3: re-architect the web UI so the model maps onto it (client core with one event per model action, `render()` from selectors, request ids, a server `JobStore`, abstraction functions), and split the spec into modules. Revised plan below.
+2. Step 4: conformance, replaying `quint run --mbt` traces in client, server and end-to-end tiers.
+3. Decide whether to persist send results (R15) and fix CLI resume after an interrupted run (step 5).
 
 ### Resuming: how to run the model
 
@@ -339,33 +339,105 @@ Goal: invariants come from written requirements, including "can this step succee
 
 Then fix: gate step 4 (and "Send test email" / "Send emails") on sign-in, offering the sign-in control on step 4; make the web token provider silent-only (raise a "not signed in" error instead of the device-code fallback); add a Playwright regression for the step gate and invert the characterisation test.
 
-### Step 3 — Restructure `app.js` around a reducer
+### Step 3 — Re-architect the web UI so the model maps onto it
 
-- Extract the workflow layer into a pure `reduce(state, event) → state` (no DOM, no fetch) with an explicit event list matching the Quint actions, and `render(state)` that sets panel visibility and button `disabled` state.
-- Side effects (fetch, SSE, alerts/confirm) stay in thin handlers that dispatch events.
-- Keep `window.state` and the legacy aliases for existing E2E tests.
-- Biome lint and the existing test suites must stay green after each sub-step; do it incrementally, one event at a time.
+Revised 2026-10-03, after steps 2b, 2c and round 2 made the model much richer than when this step was first written. The original step 3 extracted a reducer from `app.js`; the model now also describes the server's job lifecycle, the send loop, Stop, sign-in and the token cache, in-flight requests, and server restarts, so the re-architecture has to cover both sides.
+
+**Goal.** Each model action corresponds to one named event in the code, and each model state field is computed by an abstraction function from real state, on the client and on the server. Conformance (step 4) can then replay a model trace event by event and compare states, and a mismatch names the action and the field.
+
+**Why the code doesn't map today.** Each gap below is something the model had to paper over, and most of bugs 1–15 lived in one:
+
+| Gap | Where | Model workaround | Bugs that lived there |
+|---|---|---|---|
+| Button and panel state is set imperatively in many places, apart from the flags it should follow | `app.js`: `disabled` written in 20+ places | Separate `btn*` fields, plus invariants that they agree with the flags | 5, 6, 8, 14 |
+| Async handlers change state after an `await`, with ad hoc staleness checks | `goToStep(3)`, `sendTestEmail()`, `startVerify()`, `startSend()`, `stopSend()` | Request/response split per handler; three generation counters | 1, 2, 10, 12 |
+| "What gets sent" is the live DOM, with no version of it in the code | form fields read by `buildJobFormData()` | The abstract `version` counter | 1, 2, 10 |
+| Server job state is spread through a Flask closure, a module dict, the session cookie and a thread | `web/app.py` `api_start_job._run_job`, `_jobs`, `session["job_id"]`, `api_config` | `sessionJob`, `sendJob`, `nextJobId` assembled by hand | 3, 4, 7, 11, 13 |
+| Reload recovery is spread over `loadConfig()`, localStorage and DOM defaults | `loadConfig()`, `DOMContentLoaded` | `reloadState()` re-derives the page | 3, 4, 11 |
+| Auth display and gates are separate imperative updates | `checkAuthStatus()`, `updateAuthGates()` | `authShown` separate from `signedIn` | 8 |
+
+**Target architecture.**
+
+1. **Client core, `web/static/wizard-core.js`.** A pure ES module, no DOM and no `fetch`, loadable in Node and the browser:
+   - `initialState()` and `reduce(state, event) → { state, effects }`. Events are plain objects named after model actions, including the response events the model already has (`previewResponse`, `startSendResponse`, `jobCompleted`, `authStatus`). Effects are data (`{ type: "fetch", request: ... }`, `{ type: "stream", jobId }`, `{ type: "confirm", ... }`) that the shell performs.
+   - Every request carries an id the reducer records in `state.requests`; a response for an id no longer recorded is dropped. This replaces `testGen`, `verifyGen`, `previewGen`, `stopQueued` and the `isCurrent` callbacks with one mechanism, so a new awaiting handler gets staleness handling by construction.
+   - `state.contentVersion`, incremented by every content event (upload, sheet change, any compose edit). Jobs, the recipient list and test/dry-run passes record the version they were made for. The model's abstract `version` becomes a real field, and checks like `previewHonest` and `next4Honest` become comparisons the code itself can make.
+   - Selectors for everything the UI enables or shows: `canSendTest(state)`, `canDoSend(state)`, `signInOffered(state)`, `nextEnabled(state, step)`. They have the same names and definitions as the model's `pure def`s (`sendTestEnabled`, `doSendEnabled`, `signInOffered`), so a mismatch between them is a one-line diff.
+   - `EVENTS`: the exported list of event names.
+2. **Client shell, `app.js`.** Wires DOM events to `dispatch(event)`, runs effects (fetch, `EventSource`, `confirm()`, localStorage), and calls `render(state)`. `render()` is the only code that sets `disabled`, `hidden` or panel visibility, and it reads only selectors. Compose fields stay in the DOM; `dispatch` reads them when building a job request and bumps `contentVersion` on input events.
+3. **Server job store, `web/jobs.py`.** A `JobStore` class with no Flask and no threads: `start(mode, version, …)`, `record_sent(job_id, result)`, `request_stop(job_id)`, `finish(job_id, status)`, `running_send()`, `config_view(session_job_id)`. `web/app.py` routes become thin adapters, and `_run_job` drives the store. Sending, token acquisition and the clock are injected (`send_one`, `token_provider`, `sleep`), so a test can step the send loop one email at a time, expire the token, or kill the job.
+4. **Abstraction functions.** `wizard-core.js` exports `abstractPage(state)` and `jobs.py` exports `abstract_server(store, session)`. Each returns the model's field names, ghost fields excluded. Each function is the one place that says how real state maps to the model: job UUIDs become creation order, `sent` is the number of recorded results, `signedIn` comes from the token-cache adapter.
+5. **One event vocabulary.** `tests/test_spec_coverage.py` additionally checks that `EVENTS` and the action names in the model's `step` relation are the same set, apart from listed environment actions. The DOM-listener scan stays, now checking that every listener dispatches a listed event.
+
+**Changes to the model in the same step.**
+
+- Rename actions where needed so each matches its event name one-to-one, including the response events.
+- Once `render()` derives buttons from selectors, replace `btnNext4`, `btnNext5`, `btnSendTest`, `btnDoSend`, `btnBack6` and `doneNav` with `pure def`s of the state. `buttonsMatchFlags` and `back6Usable` then hold by construction in `fixed`; keep them, and the `buggy` variant, as the record of bugs 5 and 6.
+- Replace the generation counters with request ids, as in the code.
+- Split `wizard.qnt` into `page.qnt` (client), `server.qnt` (job store, send loop, token cache) and `wizard.qnt` (composition, invariants, scenarios). At about 950 lines it is past what one file can hold readably.
+- Freeze `buggy` and `partial`: they can't be replayed against current code, so they stay as regression documentation, checked by `quint test` but not by conformance. A future bug is transcribed into `fixed` as the code is (conformance will insist), shown to break an invariant, then fixed in code and model together, with a scenario test recording it. Adding a `ROUND` per bug fix doesn't scale.
+
+**Sequencing.** One area at a time, each sub-step green on Biome, mypy and the full test suite, including the 17 Playwright workflow regressions, which pin the behaviour being moved:
+
+1. `wizard-core.js` with the state object, `contentVersion`, selectors and `render()` for steps 4–6 (test, dry run, send, Stop), where most bugs were. `app.js` becomes `<script type="module">`; the `window.*` exports used by inline handlers and the E2E tests stay.
+2. Requests and effects: move `sendTestEmail`, `startVerify`, `startSend`, `stopSend` and `streamEvents` onto request ids, and delete the generation counters.
+3. Navigation and the recipient preview (`goToStep`, `confirmGoBack`, `loadPreview`).
+4. Auth: `authStatus` events, `signInOffered`, the sign-in callouts.
+5. Reload and New merge: `init(config)` replaces `loadConfig()`'s state handling; `newMerge` resets state through `initialState()`, so new fields are reset by default.
+6. Server: extract `JobStore`, inject the sender, token provider and clock, and add `abstract_server`.
+7. Model: renames, derived buttons, request ids, split into modules; rerun `spec/check.sh --all fixed` and the scenario tests.
+
+Exit criteria: every model action is an event (checked by the coverage test); `abstractPage` and `abstract_server` cover every non-ghost model field; nothing outside `render()` writes `disabled` or visibility (a grep check in the coverage test); all existing tests pass.
 
 ### Step 4 — Model-based conformance testing
 
-- `quint run --out-itf` generates traces (ITF JSON) from the spec.
-- Fast tier: a Node test harness replays traces against `reduce()` and compares abstract state after each step. Runs in CI on every push.
-- Slow tier: a Python Playwright driver replays a small number of traces against the real app (mocked Graph/MSAL, as in `test_web_e2e.py`), reading `window.state` and the DOM button/panel state after each action and comparing with the trace.
-- Server tier (reason 3): replay traces that include job actions (send one email, stop, finish) against the Flask app with the test client and a gated `send_one`, comparing job status, sent count and `/api/config` / `/api/job/<id>/status` responses with the trace. This catches a model action that encodes intent rather than code: the trace says the job stops, the real server keeps sending, and the replay fails even if the model was wrong.
-- Every trace action needs a driver step. A trace action with no driver fails the run, so the coverage inventory and conformance cannot drift apart.
-- Add `spec/package.json` + lockfile pinning Quint; CI job runs `quint typecheck`, `quint test`, the simulator with invariants, the coverage test and conformance.
+Revised 2026-10-03 for the richer model. Conformance runs against `fixed` only.
+
+**Traces.** `quint run --mbt --out-itf=… --n-traces=N` (checked with Quint 0.32.0) records, for every state, `mbt::actionTaken` (the action name) and `mbt::nondetPicks` (the values chosen for `ok`, `failed`, `accept`, `desktop`, `bcc` and which pending job or request `j`, `r`, `id` was picked). That is enough to replay a trace without inventing anything. Job ids in picks are mapped to real ids by creation order.
+
+**Drivers.** Every action needs a driver in every tier that covers it; a trace action with no driver fails the run, so the inventory and conformance can't drift apart. Environment actions are driven through the injection points from step 3:
+
+| Model action | Driver |
+|---|---|
+| `completeJob(ok)` | release the held test or dry-run job, succeeding or raising |
+| `sendNext` | let the injected `send_one` complete one email |
+| `finishSend(failed)` / `sendWithoutToken` | end the loop, or make the token provider raise |
+| `previewResponse(ok)` / `startSendResponse` | release the held response (client tier: dispatch the response event) |
+| `tokenExpires`, `signIn`, `signOut` | flip the fake token cache; in the browser, answer `/auth/status` as `AuthStub` does |
+| `reload` | client tier: `init(config)` from the server's `config_view`; browser: `page.reload()` |
+| `serverRestart` | discard the `JobStore` and session and start a fresh client |
+| `completeOrphan` | finish a job the page has no callback for |
+
+**Tiers.**
+
+- **Client tier (fast, Node, every push).** `node --test` (built in, no dependencies) replays traces against `reduce()`. Server answers come from the next trace state's server fields, so this tier checks the client alone; it compares `abstractPage(state)` with the trace after every step. Hundreds of traces in seconds.
+- **Server tier (fast, pytest, every push).** Replays the server-side actions against `JobStore` and the Flask test client with the injected sender, token provider and clock; compares `abstract_server` after every step. This is the tier that catches a model action written from intent (reason 3): the trace says the job stops, the real loop keeps sending, and the replay fails.
+- **End-to-end tier (slow, Playwright, a handful of traces).** Full stack with `JobGate`-style holds, comparing both abstractions and the rendered DOM (button `disabled`, visible panels and callouts) with the selectors.
+
+**Ghost fields** are not compared directly; the fakes record what was really sent and with which `contentVersion`, and the harness recomputes `testedVersions`, `verifiedVersions`, `sentAfterStop` and the rest from that record and checks them against the trace.
+
+**CI.** Add `spec/package.json` and a lockfile pinning Quint 0.32.0 (subject to the supply-chain cooldown). On every push: `quint typecheck`, `quint test` for all three variants, simulation of `fixed` with `allInvariants`, the coverage test, and the client and server conformance tiers. Apalache is too slow for every push (about an hour for `--all fixed` at 16 steps on 4 cores): run it when `spec/` changes, at a lower bound (12 steps) in CI and at 16 steps before merging, or nightly.
 
 ### Step 5 — Extend coverage
 
-Candidates, in order of past bug density: reload with an active send job (SSE reconnect), sheet change invalidating column selections, HTML/source toggle view state. (Auth moved to step 2c.)
+Candidates, roughly in order of risk:
+
+- Persisting send results so a restart mid-send can report what went out (R15), and the CLI resume bug after an interrupted run, which would bring the CLI's run/CSV protocol into the model.
+- Out-of-order `/auth/status` answers (R16): falls out of step 3's request ids, then needs only invariants.
+- A second tab: two pages sharing one session and job store.
+- Session expiry (24-hour sliding window) and a lost session cookie.
+- Sheet change invalidating column selections, and the HTML/source toggle view state (the last two original candidates; reload with an active send is done).
 
 ## Out of scope
 
-Trix and paste sanitisation, CSS/Pico layout, template rendering, SSE framing, Graph retry logic. These are either covered by existing tests or are not state-machine problems. The send loop is no longer out of scope: its control flow (next email, stop, finish, status) is modelled in step 2b, but HTTP details inside `send_one` are not. Anything excluded must be listed in `spec/coverage.toml` with a reason.
+Trix and paste sanitisation, CSS/Pico layout, SSE framing, Graph retry logic inside `send_one`, and template rendering (the JS and Python placeholder rules are kept in line by `test_render_template_matches_server`, not by the model). These are either covered by tests or are not state-machine problems. The send loop's control flow (next email, stop, finish, token failure, status) is modelled; anything else excluded must be listed in `spec/coverage.toml` with a reason.
 
 ## Risks
 
-- Model drift: mitigated by the coverage test (step 2b) for missing actions, and by conformance (step 4) for actions that don't match the code. Without step 4, treat the spec as design documentation.
-- Intent leaking into `buggy`: an action written from what the code should do passes every check. Mitigated by the source-citation rule in step 2b and by server-tier conformance.
-- Second language to maintain: keep the spec small and limited to the workflow layer and job lifecycle. Step 2b will take it past the original 200–300 line target; consider splitting the job model into its own module (`spec/jobs.qnt`) imported by `wizard.qnt`.
-- Apalache requires Java; if unavailable in CI, rely on simulation and conformance.
+- **Model drift.** The coverage test catches missing actions and invariants without requirements; conformance (step 4) catches actions that don't match the code. Until step 4 runs in CI, treat the spec as design documentation backed by scenario tests.
+- **Intent leaking into the model.** An action written from what the code should do passes every check. The citation rule helps; the server conformance tier is the real defence.
+- **The re-architecture itself introducing bugs.** It touches every handler. Mitigations: one area at a time, the Playwright workflow regressions (one per model bug), the 600+ existing tests, and keeping `window.state` and the legacy aliases until the E2E tests no longer need them.
+- **Over-engineering a single-user local tool.** A reducer, an effects runner and a job store are more structure than ~1,900 lines of JS strictly need. The justification is conformance: without one event per model action and an abstraction function, the model can only be checked by hand, which is how bugs 7, 11 and 12 were missed. If step 4 is dropped, steps 3.2 (request ids) and 3.6 (job store) are still worth doing on their own.
+- **ES modules in the desktop app.** `<script type="module">` needs a reasonably current WebView2 (Windows) or WKWebView (macOS); both bundled pywebview backends support it, but check the release bundles before relying on it.
+- **Second language to maintain.** Splitting the spec into modules (step 3.7) keeps it readable; conformance keeps it honest.
+- **Apalache needs Java and is slow.** If it isn't available in CI, rely on simulation, scenarios and conformance, and run Apalache locally on spec changes.
