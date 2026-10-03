@@ -31,6 +31,7 @@ from playwright.sync_api import Page
 
 import mail_merge.web.app as web_app
 from mail_merge.web.app import create_app
+from mail_merge.web.jobs import JobStore
 from tests.conformance_support import TOTAL, FakeSendMerge, Handle, load_trace
 from tests.test_conformance import QUINT, generate
 
@@ -79,9 +80,15 @@ class TokenCache:
 def e2e_server() -> Iterator[tuple[str, FakeSendMerge, TokenCache]]:
     fake = FakeSendMerge()
     cache = TokenCache()
+    # Its own job store: the module-level one is shared with every other
+    # web test in the process.
+    store = JobStore()
     with patch("mail_merge.auth._build_msal_app", side_effect=RuntimeError("no MSAL in tests")), \
             patch("mail_merge.api.send_merge", fake), \
-            patch("mail_merge.auth.acquire_token_silent", cache.silent):
+            patch("mail_merge.auth.acquire_token_silent", cache.silent), \
+            patch.object(web_app, "_job_store", store), \
+            patch.object(web_app, "_jobs", store.jobs), \
+            patch.object(web_app, "_running_send_job", store.running_send):
         app = create_app(startup_token=STARTUP_TOKEN, port=0, client_id="e2e-client")
         app.config["TESTING"] = True
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -99,7 +106,10 @@ def e2e_server() -> Iterator[tuple[str, FakeSendMerge, TokenCache]]:
                 break
             except Exception:
                 time.sleep(0.1)
-        yield base_url, fake, cache
+        try:
+            yield base_url, fake, cache
+        finally:
+            fake.release_all()
 
 
 # What the page shows, read in one evaluate: the abstraction, the selectors

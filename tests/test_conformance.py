@@ -331,13 +331,15 @@ def replay_server(traces: Path, monkeypatch, xlsx: Path) -> None:
     for path in files:
         trace = load_trace(path)
         replay = ServerReplay(monkeypatch, xlsx)
-        replay.compare(trace[0]["s"], f"{path.name} init")
-        for i in range(1, len(trace)):
-            actions = " ".join(t["action"] for t in trace[1:i + 1])
-            where = f"{path.name} step {i} ({actions})"
-            replay.step(trace[i - 1]["s"], trace[i]["s"], trace[i]["action"], trace[i]["picks"])
-            replay.compare(trace[i]["s"], where)
-        replay.restart()  # release the runners still waiting
+        try:
+            replay.compare(trace[0]["s"], f"{path.name} init")
+            for i in range(1, len(trace)):
+                actions = " ".join(t["action"] for t in trace[1:i + 1])
+                where = f"{path.name} step {i} ({actions})"
+                replay.step(trace[i - 1]["s"], trace[i]["s"], trace[i]["action"], trace[i]["picks"])
+                replay.compare(trace[i]["s"], where)
+        finally:
+            replay.fake.release_all()  # the runners still waiting
 
 
 def test_server_conformance(traces, monkeypatch, conformance_xlsx):

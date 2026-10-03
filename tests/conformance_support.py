@@ -59,12 +59,19 @@ class FakeSendMerge:
 
     def __init__(self) -> None:
         self.started: queue.Queue[Handle] = queue.Queue()
+        self.handles: list[Handle] = []
+
+    def release_all(self) -> None:
+        """End every job still waiting for a command."""
+        for h in self.handles:
+            h.commands.put("die")
 
     def __call__(self, **kw: Any) -> list[Any]:
         from mail_merge.sender import SendAborted, SendResult
 
         mode = "test_email" if kw.get("test_email") else "send" if kw.get("send") else "dry_run"
         h = Handle(mode)
+        self.handles.append(h)
         self.started.put(h)
         if mode != "send":
             if h.commands.get(timeout=60) != "ok":
