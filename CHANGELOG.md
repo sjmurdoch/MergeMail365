@@ -12,6 +12,10 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Web UI: pasting into the HTML editor could run script hidden in the copied content (for example, text copied from a malicious web page) before the editor cleaned it up. Pasted HTML is now processed without running anything in it.
 - Web UI: an attachment's filename could contain `../` or an absolute path, causing the file to be written outside the app's temporary folder, for example over a startup script. Only the final part of the filename is now used, and names that are left empty, such as `..`, are rejected.
 
+### Added
+
+- Web UI: if the app quits or crashes during a send, the next time it starts it shows which emails were sent before it stopped, with a CSV download, until dismissed. While a send runs, its results are kept in a file readable only by the user (in the app's state folder), which is deleted when the send ends or the report is dismissed.
+
 ### Fixed
 
 - Web UI: attaching two files with the same name no longer sends the second file twice. Both are now attached with their own contents.
@@ -22,6 +26,17 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Web UI: after a completed send and "New merge", the Back button on the Send step stayed disabled, so the user couldn't go back from it before sending.
 - Web UI: reloading the page after sending a test email or running a dry run jumped to the Send step and showed "Sending…" as if a real send were under way. Reloading now only returns to the Send step when a real send was started.
 - Web UI: reloading the page after a job had finished, including a real send, could leave it stuck on "Sending…" with no way to continue. A finished send now shows its results after a reload.
+- Command line: if a send was interrupted part-way (Ctrl-C, an error or a crash), no `--output` report was written, so running again with resume sent the same emails a second time. The report is now written as each email goes, so a resumed run only sends to the people who haven't had one.
+- Web UI: "Stop sending" did nothing; the send carried on to the end. It now stops before the next email, and the results list the emails that were sent.
+- Web UI: "Stop sending" pressed just after "Send emails", before the send had properly started, went to the earlier dry run instead and was lost. It now stops the send.
+- Web UI: while signed out, the Test and Send steps could be reached with their send buttons enabled and no way to sign in from there. The buttons are now disabled until the user signs in, and both steps offer a sign-in button.
+- Web UI: a test email or send started while signed out could wait for several minutes, silently, for a sign-in code that was never shown. It now fails at once with "Not signed in".
+- Web UI: going back, editing the message or uploading another spreadsheet while the recipient list was loading could jump to the Preview step with a list for the old content. The late list is now ignored.
+- Web UI: reloading the page just after clicking "Send emails" could leave the send running with nothing on screen to show it. A running send is now always shown after a reload, and a second send can't be started while one is running.
+- Web UI: a send that failed part-way only showed the error, not which emails had already gone out. Those emails are now listed under the error.
+- Web UI: a second send started with the first send's progress text until its first email went out.
+- Web UI: "New merge" kept the BCC "To" address from the previous merge.
+- Web UI: placeholders for column names with non-English letters, such as `{{Prénom}}`, were filled in the sent email but shown unfilled in the preview, and weren't checked against the spreadsheet's columns. The preview now treats them like the email does.
 
 ### Changed
 
