@@ -23,9 +23,7 @@ const state = Object.assign(WizardCore.initialState(), {
     /** Reset downstream state when compose/data changes */
     resetTestAndVerify() {
         Object.assign(this, WizardCore.resetTestAndVerify(this));
-        $("test-log").innerHTML = "";
-        hide("test-log");
-        $("verify-log").innerHTML = "";
+        clearTestAndVerifyLogs();
         render();
     },
 
@@ -201,78 +199,72 @@ function apiFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 // Step navigation
 // ---------------------------------------------------------------------------
-async function goToStep(n) {
-    console.log("Navigating to step", n, "from", state.currentStep);
-    dropPreview();
-    // Only perform validation/trigger side-effects when advancing forward
-    if (n > state.currentStep) {
-        // Step 1 → 2: need a spreadsheet uploaded
-        if (n === 2 && state.currentStep === 1) {
-            if (!validateDataSource()) return;
-            initComposeStep();
-        }
-        // Step 2 → 3: validate compose fields, load recipient preview
-        if (n === 3 && state.currentStep === 2) {
-            if (!validateCompose()) return;
-            const id = beginRequest("preview");
-            const previewOk = await loadPreview(
-                () => requestIsCurrent(id) && state.currentStep === 2,
-            );
-            finishRequest(id);
-            if (!previewOk) return;
-        }
-        // Step 3 → 4: pre-fill test email
-        if (n === 4) {
-            if (!state.testPassed) {
-                checkAuthForStep4();
-            }
-        }
-        // Step 4 → 5: need test to pass first
-        if (n === 5) {
-            if (!state.testPassed) return;
-            startVerify();
-        }
-        // Step 5 → 6: need verify to pass first
-        if (n === 6) {
-            if (!state.verifyPassed) return;
-            prepareSend();
-        }
-    }
-
-    state.currentStep = n;
-    saveState();
-    updateStepUI(n);
+// Applies an event through WizardCore.reduce() and carries out the effects
+// it returns. Navigation goes through here, so each move is one event
+// (WizardCore.ACTIONS maps them to the spec/wizard.qnt actions).
+async function dispatch(event) {
+    const { state: next, effects } = WizardCore.reduce(state, event);
+    // A navigation that reached its step is saved even if the step didn't
+    // change (newMerge() resets the step before goToStep(1)).
+    const arrived = next.currentStep !== state.currentStep
+        || (event.to !== undefined && next.currentStep === event.to);
+    Object.assign(state, next);
+    if (arrived) saveState();
+    updateStepUI(state.currentStep);
     render();
+    for (const effect of effects) await runEffect(effect);
 }
 
-function resetTestAndVerify() {
-    state.resetTestAndVerify();
+async function runEffect(effect) {
+    switch (effect.type) {
+        case "alert":
+            alert(effect.message);
+            break;
+        case "initCompose":
+            initComposeStep();
+            break;
+        case "fetchPreview": {
+            const ok = await loadPreview(
+                () => requestIsCurrent(effect.id) && state.currentStep === 2,
+            );
+            await dispatch({ type: "previewResponse", id: effect.id, ok });
+            break;
+        }
+        case "enterTest":
+            checkAuthForStep4();
+            break;
+        case "startVerify":
+            startVerify();
+            break;
+        case "prepareSend":
+            prepareSend();
+            break;
+        case "clearLogs":
+            clearTestAndVerifyLogs();
+            break;
+        default:
+            throw new Error(`Unknown effect: ${effect.type}`);
+    }
+}
+
+async function goToStep(n) {
+    console.log("Navigating to step", n, "from", state.currentStep);
+    // The compose form is checked here because it lives in the DOM.
+    const composeOk = n === 3 && state.currentStep === 2 ? validateCompose() : true;
+    await dispatch({ type: "goTo", to: n, composeOk });
 }
 
 function confirmGoBack(targetStep) {
-    // Going back from test/verify/send steps resets test and verify results
-    if (state.currentStep >= 4 && (state.testPassed || state.verifyPassed)) {
-        if (!confirm("Going back will discard your test and verification results. You will need to complete these steps again. Continue?")) {
-            return;
-        }
-        resetTestAndVerify();
-    }
-    // Going back from preview (step 3) to compose (step 2) also invalidates
-    if (state.currentStep === 3 && targetStep === 2) {
-        resetTestAndVerify();
-    }
-    goToStep(targetStep);
+    // Going back from test/verify/send steps discards their results.
+    const accepted = !WizardCore.needsConfirmBack(state)
+        || confirm("Going back will discard your test and verification results. You will need to complete these steps again. Continue?");
+    return dispatch({ type: "back", to: targetStep, accepted });
 }
 
-// ---------------------------------------------------------------------------
-// Step 1: Data Source
-// ---------------------------------------------------------------------------
-function validateDataSource() {
-    if (!state.spreadsheetData) {
-        alert("Please upload a spreadsheet.");
-        return false;
-    }
-    return true;
+function clearTestAndVerifyLogs() {
+    $("test-log").innerHTML = "";
+    hide("test-log");
+    $("verify-log").innerHTML = "";
 }
 
 // ---------------------------------------------------------------------------

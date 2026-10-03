@@ -152,3 +152,98 @@ test("New merge resets everything, drops requests and keeps ids counting", () =>
     assert.equal(C.isCurrent(after, id), false);
     assert.ok(C.startRequest(after, "test").id > id);
 });
+
+// --- reduce(): navigation (spec/wizard.qnt next1..next5, back2..back6, previewResponse) ---
+
+function at(step, fields = {}) {
+    return Object.assign(C.initialState(), { currentStep: step, spreadsheetData: { rows: [] } }, fields);
+}
+
+test("next1 needs a spreadsheet", () => {
+    const r = C.reduce(at(1, { spreadsheetData: null }), C.ACTIONS.next1);
+    assert.equal(r.state.currentStep, 1);
+    assert.deepEqual(r.effects, [{ type: "alert", message: "Please upload a spreadsheet." }]);
+    const ok = C.reduce(at(1), C.ACTIONS.next1);
+    assert.equal(ok.state.currentStep, 2);
+    assert.deepEqual(ok.effects, [{ type: "initCompose" }]);
+});
+
+test("next2 waits for the recipient list; a current response moves to step 3", () => {
+    const s = at(2, { contentVersion: 5 });
+    const blocked = C.reduce(s, { type: "goTo", to: 3, composeOk: false });
+    assert.equal(blocked.state.currentStep, 2);
+    assert.deepEqual(blocked.effects, []);
+    const r = C.reduce(s, { type: "goTo", to: 3, composeOk: true });
+    assert.equal(r.state.currentStep, 2);
+    assert.equal(r.effects.length, 1);
+    const { type, id } = r.effects[0];
+    assert.equal(type, "fetchPreview");
+    const done = C.reduce(r.state, { type: "previewResponse", id, ok: true });
+    assert.equal(done.state.currentStep, 3);
+    assert.equal(done.state.recipientsVersion, 5);
+    assert.equal(C.isCurrent(done.state, id), false);
+});
+
+test("a preview response after Back or an edit is dropped (noStepJump, previewHonest)", () => {
+    const r = C.reduce(at(2), { type: "goTo", to: 3, composeOk: true });
+    const id = r.effects[0].id;
+    // Back to step 1 before the list arrives.
+    const back = C.reduce(r.state, C.ACTIONS.back2);
+    const late = C.reduce(back.state, { type: "previewResponse", id, ok: true });
+    assert.equal(late.state.currentStep, 1);
+    // An edit drops the request, as dropPreview() does in the shell.
+    const edited = Object.assign({}, r.state, C.dropRequests(r.state, ["preview"]));
+    const stale = C.reduce(edited, { type: "previewResponse", id, ok: true });
+    assert.equal(stale.state.currentStep, 2);
+});
+
+test("a failed preview stays on step 2", () => {
+    const r = C.reduce(at(2), { type: "goTo", to: 3, composeOk: true });
+    const failed = C.reduce(r.state, { type: "previewResponse", id: r.effects[0].id, ok: false });
+    assert.equal(failed.state.currentStep, 2);
+});
+
+test("next3 enters the test step; next4 and next5 need the checks to have passed", () => {
+    assert.deepEqual(C.reduce(at(3), C.ACTIONS.next3).effects, [{ type: "enterTest" }]);
+    assert.equal(C.reduce(at(4), C.ACTIONS.next4).state.currentStep, 4);
+    const r4 = C.reduce(at(4, { testPassed: true }), C.ACTIONS.next4);
+    assert.equal(r4.state.currentStep, 5);
+    assert.deepEqual(r4.effects, [{ type: "startVerify" }]);
+    assert.equal(C.reduce(at(5), C.ACTIONS.next5).state.currentStep, 5);
+    const r5 = C.reduce(at(5, { verifyPassed: true }), C.ACTIONS.next5);
+    assert.equal(r5.state.currentStep, 6);
+    assert.deepEqual(r5.effects, [{ type: "prepareSend" }]);
+});
+
+test("back from step 4 or later asks first when a check has passed", () => {
+    const s = at(4, { testPassed: true });
+    assert.equal(C.needsConfirmBack(s), true);
+    const declined = C.reduce(s, { type: "back", to: 3, accepted: false });
+    assert.equal(declined.state.currentStep, 4);
+    assert.equal(declined.state.testPassed, true);
+    const accepted = C.reduce(s, { type: "back", to: 3, accepted: true });
+    assert.equal(accepted.state.currentStep, 3);
+    assert.equal(accepted.state.testPassed, false);
+    assert.deepEqual(accepted.effects, [{ type: "clearLogs" }]);
+    assert.equal(C.needsConfirmBack(at(4)), false);
+});
+
+test("back from step 3 to 2 always resets the checks", () => {
+    const r = C.reduce(at(3, { testPassed: true, verifyPassed: true }), C.ACTIONS.back3);
+    assert.equal(r.state.currentStep, 2);
+    assert.equal(r.state.testPassed, false);
+    assert.equal(r.state.verifyPassed, false);
+});
+
+test("back6 returns to step 4, not to the dry run", () => {
+    const r = C.reduce(at(6), Object.assign({ accepted: true }, C.ACTIONS.back6));
+    assert.equal(r.state.currentStep, 4);
+});
+
+test("reduce returns a new state and rejects unknown events", () => {
+    const s = at(1);
+    const r = C.reduce(s, C.ACTIONS.next1);
+    assert.notEqual(r.state, s);
+    assert.equal(s.currentStep, 1);
+    assert.throws(() => C.reduce(s, { type: "nope" }), /Unknown event/);
+});

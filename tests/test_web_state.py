@@ -721,20 +721,24 @@ class TestComposeStepInit:
 
 
 class TestValidation:
-    def test_validate_data_source_fails_without_spreadsheet(self, authenticated_page: Page):
+    def test_next_without_spreadsheet_alerts_and_stays(self, authenticated_page: Page):
         page = authenticated_page
-        page.on("dialog", lambda d: d.accept())
-        result = page.evaluate("""() => {
+        alerts: list[str] = []
+        page.on("dialog", lambda d: (alerts.append(d.message), d.accept()))
+        result = page.evaluate("""async () => {
             state.spreadsheetData = null;
-            return validateDataSource();
+            state.currentStep = 1;
+            await goToStep(2);
+            return state.currentStep;
         }""")
-        assert result is False
+        assert result == 1
+        assert alerts == ["Please upload a spreadsheet."]
 
-    def test_validate_data_source_passes_with_spreadsheet(self, authenticated_page: Page, sample_xlsx: Path):
+    def test_next_with_spreadsheet_moves_to_compose(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page
         _upload(page, sample_xlsx)
-        result = page.evaluate("() => validateDataSource()")
-        assert result is True
+        result = page.evaluate("async () => { await goToStep(2); return state.currentStep; }")
+        assert result == 2
 
     def test_validate_compose_requires_email_column(self, authenticated_page: Page, sample_xlsx: Path):
         page = authenticated_page

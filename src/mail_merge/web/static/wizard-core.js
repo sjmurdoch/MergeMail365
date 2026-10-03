@@ -25,6 +25,9 @@
             // Counts changes to what would be sent (spreadsheet, sheet,
             // compose fields, options): the model's `version`.
             contentVersion: 0,
+            // The content version the filtered recipient list (step 3) was
+            // fetched for; null before the first preview.
+            recipientsVersion: null,
 
             // Step 4: a test email is being sent; the last one failed;
             // the result shown ({ success, message } or null).
@@ -130,6 +133,107 @@
         return null;
     }
 
+    // --- Events. reduce(state, event) returns { state, effects }: the new
+    // state (a new object) and what the shell (app.js) must do, as data.
+    // Event types and the spec/wizard.qnt actions they implement are listed
+    // in ACTIONS below. ---
+
+    /** Going back from this step asks for confirmation first: it discards a
+     *  passed test email or dry run. */
+    function needsConfirmBack(s) {
+        return s.currentStep >= 4 && (s.testPassed || s.verifyPassed);
+    }
+
+    /** goToStep(to). Moving forward is guarded; moving back always works.
+     *  `composeOk` is whether the compose fields are valid (checked by the
+     *  shell, which reads the form). */
+    function goTo(s0, event) {
+        const to = event.to;
+        // Any navigation makes a pending recipient preview stale.
+        const s = Object.assign({}, s0, dropRequests(s0, ["preview"]));
+        const stay = (effects = []) => ({ state: s, effects });
+        const effects = [];
+        if (to > s.currentStep) {
+            if (to === 2 && s.currentStep === 1) {
+                if (!s.spreadsheetData) {
+                    return stay([{ type: "alert", message: "Please upload a spreadsheet." }]);
+                }
+                effects.push({ type: "initCompose" });
+            }
+            if (to === 3 && s.currentStep === 2) {
+                if (!event.composeOk) return stay();
+                // Wait for the recipient list: previewResponse moves on.
+                const { patch, id } = startRequest(s, "preview");
+                return { state: Object.assign(s, patch), effects: [{ type: "fetchPreview", id }] };
+            }
+            if (to === 4) effects.push({ type: "enterTest" });
+            if (to === 5) {
+                if (!s.testPassed) return stay();
+                effects.push({ type: "startVerify" });
+            }
+            if (to === 6) {
+                if (!s.verifyPassed) return stay();
+                effects.push({ type: "prepareSend" });
+            }
+        }
+        return { state: Object.assign(s, { currentStep: to }), effects };
+    }
+
+    /** confirmGoBack(to). `accepted` is the answer to the confirmation, if
+     *  needsConfirmBack() asked for one. */
+    function back(s0, event) {
+        const s = Object.assign({}, s0);
+        const effects = [];
+        if (needsConfirmBack(s)) {
+            if (!event.accepted) return { state: s, effects };
+            Object.assign(s, resetTestAndVerify(s));
+            effects.push({ type: "clearLogs" });
+        }
+        // Back from the preview to compose: the content may change.
+        if (s.currentStep === 3 && event.to === 2) {
+            Object.assign(s, resetTestAndVerify(s));
+            effects.push({ type: "clearLogs" });
+        }
+        const nav = goTo(s, { to: event.to });
+        return { state: nav.state, effects: effects.concat(nav.effects) };
+    }
+
+    /** The recipient list for preview request `id` arrived (`ok`) or failed.
+     *  Applied only if the request is current and the page is still on step 2. */
+    function previewResponse(s0, event) {
+        const request = s0.requests[event.id];
+        const current = isCurrent(s0, event.id) && s0.currentStep === 2;
+        const s = Object.assign({}, s0, finishRequest(s0, event.id));
+        if (!current || !event.ok) return { state: s, effects: [] };
+        return {
+            state: Object.assign(s, { currentStep: 3, recipientsVersion: request.contentVersion }),
+            effects: [],
+        };
+    }
+
+    const REDUCERS = { goTo, back, previewResponse };
+
+    function reduce(s, event) {
+        const reducer = REDUCERS[event.type];
+        if (!reducer) throw new Error(`Unknown event: ${event.type}`);
+        return reducer(s, event);
+    }
+
+    /** spec/wizard.qnt actions and the events that implement them. */
+    const ACTIONS = {
+        next1: { type: "goTo", to: 2 },
+        back2: { type: "goTo", to: 1 },
+        next2: { type: "goTo", to: 3 },
+        previewResponse: { type: "previewResponse" },
+        back3: { type: "back", to: 2 },
+        next3: { type: "goTo", to: 4 },
+        back4: { type: "back", to: 3 },
+        next4: { type: "goTo", to: 5 },
+        back5: { type: "back", to: 4 },
+        next5: { type: "goTo", to: 6 },
+        back6: { type: "back", to: 4 },
+    };
+
     // --- Selectors. `auth` is { signedIn }, what the page last fetched from
     // /auth/status (the model's authShown). ---
 
@@ -177,6 +281,10 @@
         initialState,
         resetTestAndVerify,
         newMergeState,
+        reduce,
+        needsConfirmBack,
+        EVENTS: Object.keys(REDUCERS),
+        ACTIONS,
         startRequest,
         isCurrent,
         updateRequest,
