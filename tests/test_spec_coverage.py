@@ -30,6 +30,7 @@ SPEC = ROOT / "spec" / "wizard.qnt"
 COVERAGE = ROOT / "spec" / "coverage.toml"
 CHECK_SH = ROOT / "spec" / "check.sh"
 REQUIREMENTS = ROOT / "spec" / "requirements.md"
+MODEL_DOC = ROOT / "docs" / "quint-model.md"
 WEB = ROOT / "src" / "mail_merge" / "web"
 INDEX_HTML = WEB / "templates" / "index.html"
 APP_JS = WEB / "static" / "app.js"
@@ -289,6 +290,20 @@ class TestCheckScript:
         listed = re.search(r'^invariants="([^"]*)"', CHECK_SH.read_text(encoding="utf-8"), re.MULTILINE)
         assert listed
         assert set(listed[1].split()) == all_invariants()
+
+
+class TestModelDoc:
+    """docs/quint-model.md describes every action and invariant."""
+
+    def test_every_action_is_documented(self):
+        doc = MODEL_DOC.read_text(encoding="utf-8")
+        missing = sorted(a for a in set(step_actions(spec_text())) if f"`{a}" not in doc)
+        assert not missing, f"actions in `step` not described in docs/quint-model.md: {missing}"
+
+    def test_every_invariant_is_documented(self):
+        doc = MODEL_DOC.read_text(encoding="utf-8")
+        missing = sorted(i for i in all_invariants() if f"`{i}`" not in doc)
+        assert not missing, f"invariants not described in docs/quint-model.md: {missing}"
 
 
 class TestRequirements:
