@@ -36,6 +36,13 @@
     <div class="step-panel active pico" id="step-1">
         <h3>Connect and upload data</h3>
 
+        <!-- A send the app didn't finish last time (shown by render()) -->
+        <div id="interrupted-send" class="callout callout-warning hidden" role="alert">
+            <div id="interrupted-send-details"></div>
+            <button type="button" id="btn-interrupted-csv" class="outline" onclick="downloadInterruptedCsv()">Download CSV</button>
+            <button type="button" id="btn-dismiss-interrupted" class="outline secondary" onclick="dismissInterrupted()">Dismiss</button>
+        </div>
+
         <!-- Auth -->
         <fieldset>
             <legend>Authentication</legend>

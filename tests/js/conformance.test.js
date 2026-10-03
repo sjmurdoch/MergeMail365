@@ -80,7 +80,13 @@ function modelPage(m) {
         sendReq: m.sendReq.length,
         stopQueued: m.stopQueued,
         authShown: m.authShown,
+        interruptedShown: m.interruptedShown,
     };
+}
+
+/** /api/config's interrupted_sends for the model's send log. */
+function interruptedSends(m) {
+    return m.sendLog.map(l => ({ started: null, results: Array.from({ length: l.sent }, () => ({ success: true })) }));
 }
 
 // --- The replay ---
@@ -190,7 +196,11 @@ class Replay {
         const active = running.length > 0 ? running[0].id : sessionSend.length > 0 ? sessionSend[0].id : null;
         this.dispatch({
             type: "configLoaded",
-            config: { spreadsheet: m.dataLoaded ? DATA : null, active_job_id: active === null ? null : `job-${active}` },
+            config: {
+                spreadsheet: m.dataLoaded ? DATA : null,
+                active_job_id: active === null ? null : `job-${active}`,
+                interrupted_sends: interruptedSends(m),
+            },
         });
         this.answerAuth();
     }
@@ -260,6 +270,7 @@ class Replay {
                 break;
             }
             case "newMerge":
+            case "dismissInterrupted":
                 event(action);
                 break;
             case "signIn":
@@ -275,7 +286,10 @@ class Replay {
             case "serverRestart":
                 // The page starts again against a server with no session.
                 this.fresh();
-                this.dispatch({ type: "configLoaded", config: { spreadsheet: null, active_job_id: null } });
+                this.dispatch({
+                    type: "configLoaded",
+                    config: { spreadsheet: null, active_job_id: null, interrupted_sends: interruptedSends(next) },
+                });
                 this.answerAuth();
                 break;
             case "completeOrphan": case "sendNext": case "tokenExpires":

@@ -47,6 +47,10 @@ module wizard {
   // pressed. `stopEarly` is a ghost: Stop was pressed while emails remained.
   type SendJob = { id: int, sent: int, stopRequested: bool, status: Status, stopEarly: bool }
 
+  // A send whose log on disk outlived the process (web/jobs.py SendLog):
+  // the job and the emails it had sent.
+  type LoggedSend = { id: int, sent: int }
+
   // POST /api/get-recipients in flight for goToStep(3): the content version
   // it was sent for and the page's preview generation at the time.
   type PreviewReq = { version: int, gen: int }
@@ -71,6 +75,7 @@ module wizard {
     btnNext2: bool,
     verifyShown: bool,            // #verify-result shows a dry-run outcome
     resultsShown: bool,           // #send-result shows the per-recipient results table
+    interruptedShown: bool,       // #interrupted-send shows a send the last process didn't finish
     progressJob: int,             // send job whose progress #send-progress-text shows; -1 = none
     bccToMerge: int,              // merge in which #bcc-blast-to was typed; -1 = empty
     btnSendTest: bool,
@@ -87,6 +92,7 @@ module wizard {
     sessionJob: Set[SessionJob],  // empty or singleton
     nextJobId: int,
     sendJob: Set[SendJob],        // empty or singleton
+    sendLog: Set[LoggedSend],     // FIXED2: interrupted sends on disk, not yet dismissed
     // --- auth ---
     signedIn: bool,               // the token cache has an account with a usable token
     authShown: bool,              // what the page last showed from /auth/status (_auth.isSignedIn)
@@ -112,11 +118,11 @@ module wizard {
     step: 1, dataLoaded: false, version: 0,
     testPassed: false, verifyPassed: false, sendStarted: false,
     testGen: 0, verifyGen: 0, previewGen: 0, recipientsVersion: -1,
-    btnNext2: true, verifyShown: false, resultsShown: false, progressJob: -1, bccToMerge: -1,
+    btnNext2: true, verifyShown: false, resultsShown: false, interruptedShown: false, progressJob: -1, bccToMerge: -1,
     btnSendTest: true, btnNext4: false, btnNext5: false,
     btnDoSend: false, btnBack6: true, doneNav: false,
     pending: Set(), previewReq: Set(), sendReq: Set(),
-    sessionJob: Set(), nextJobId: 0, sendJob: Set(),
+    sessionJob: Set(), nextJobId: 0, sendJob: Set(), sendLog: Set(),
     signedIn: false, authShown: false,
     testedVersions: Set(), verifiedVersions: Set(),
     realSendStarted: false, untestedSend: false, sentAfterStop: 0,
@@ -433,6 +439,13 @@ module wizard {
       sessionJob: Set(),  // POST /api/reset pops job_id
     }),
   }
+  // Dismiss the interrupted-send report: the log is deleted.
+  // app.js: dismissInterrupted() (#btn-dismiss-interrupted); web/app.py: api_dismiss_interrupted
+  action dismissInterrupted = all {
+    s.step == 1, s.interruptedShown,
+    act("dismissInterrupted", { ...s, sendLog: Set(), interruptedShown: false }),
+  }
+
 
   // A test email needs a token. Without one, the job's token provider
   // (web/app.py _make_token_provider) calls auth.acquire_token(), which falls
@@ -546,17 +559,25 @@ module wizard {
   // or the terminal running mergemail365-web is closed. Running jobs die
   // with it; the token cache and the emails already sent remain. The user
   // starts again from a new page with a new startup token and session.
+  // Bug: the record of a running send's emails is lost with it (R15).
+  // FIXED2: a running send's log on disk survives, and the new page reports
+  // it until dismissed.
   // environment: process exit (web/__init__.py main)
-  action serverRestart = act("serverRestart", { ...init_state,
+  action serverRestart = {
+    val logged = if (FIXED2) s.sendLog.union(
+      s.sendJob.filter(j => j.status == Running).map(j => { id: j.id, sent: j.sent })) else Set()
+    act("serverRestart", { ...init_state,
     signedIn: s.signedIn, authShown: s.signedIn,
     nextJobId: s.nextJobId, version: s.version + 1, mergeId: s.mergeId + 1,
+    sendLog: logged, interruptedShown: logged.size() > 0,
     sendJob: s.sendJob.map(j => if (j.status == Running) { ...j, status: Killed } else j),
     testedVersions: s.testedVersions, verifiedVersions: s.verifiedVersions,
     realSendStarted: s.realSendStarted, untestedSend: s.untestedSend,
     sentAfterStop: s.sentAfterStop, interactiveAuthInJob: s.interactiveAuthInJob,
     stepJump: s.stepJump, concurrentSends: s.concurrentSends, stopLost: s.stopLost,
-    lostSend: s.lostSend or s.sendJob.exists(j => j.status == Running and j.sent > 0),
+    lostSend: s.lostSend or (not(FIXED2) and s.sendJob.exists(j => j.status == Running and j.sent > 0)),
   })
+  }
 
   // The cached token stops working: no usable refresh token, consent
   // revoked, or a sign-out from another window or the CLI. The page keeps
@@ -577,6 +598,7 @@ module wizard {
     val fresh = { ...init_state,
       dataLoaded: st.dataLoaded, version: st.version,
       sessionJob: st.sessionJob, nextJobId: st.nextJobId, sendJob: st.sendJob,
+      sendLog: st.sendLog, interruptedShown: st.sendLog.size() > 0,
       testGen: st.testGen, verifyGen: st.verifyGen,
       signedIn: st.signedIn, authShown: st.signedIn,
       testedVersions: st.testedVersions, verifiedVersions: st.verifiedVersions,
@@ -627,6 +649,7 @@ module wizard {
     sendTestEmail, nondet a = Bool.oneOf() back4(a), next4,
     nondet a = Bool.oneOf() back5(a), next5,
     typeSend, startSend, startSendResponse, nondet a = Bool.oneOf() back6(a), stopSend, newMerge,
+    dismissInterrupted,
     nondet ok = Bool.oneOf() completeJob(ok),
     completeOrphan,
     sendNext, nondet failed = Bool.oneOf() finishSend(failed), sendWithoutToken,
@@ -748,6 +771,7 @@ module wizard {
     testNeedsSignIn, sendNeedsSignIn, noInteractiveAuthInJob, canProgress,
     noStepJump, previewHonest, runningSendVisible, noConcurrentSends,
     failedSendReported, progressHonest, newMergeClears, buttonsDerived,
+    restartReported, interruptedVisible,
   }
 
   // ---------------------------------------------------------------------
@@ -768,6 +792,13 @@ module wizard {
   /// A server restart killed a send after some emails went out: nothing
   /// records which.
   val restartLostSend = s.lostSend
+
+  /// A server restart never loses the record of a send's emails (R15):
+  /// a running send's log on disk survives it (FIXED2).
+  val restartReported = not(s.lostSend)
+
+  /// While an interrupted send's log is on disk, the page reports it.
+  val interruptedVisible = s.sendLog.size() > 0 implies s.interruptedShown
 
   // ---------------------------------------------------------------------
   // Scenarios (quint test). Each replays one counterexample; the invariant
@@ -947,12 +978,18 @@ module wizard {
       .then(next5).then(typeSend).then(send).then(sendAll).then(newMerge)
       .expect(bugIff2(newMergeClears))
 
-  /// Restarting the server mid-send loses the record of what went out.
-  /// Allowed (witness restartLostSend): fixing it needs a send log on disk.
+  /// Restarting the server mid-send loses the record of what went out
+  /// (R15). FIXED2: the send log reports it on the new page until dismissed.
   run restartMidSendTest =
     start.then(toStep4).then(passTestAndVerify(0))
       .then(next5).then(typeSend).then(send).then(sendNext).then(serverRestart)
-      .expect(s.lostSend and s.step == 1 and (FIXED2 implies allInvariants))
+      .expect(bugIff2(restartReported) and s.step == 1
+        and (FIXED2 implies (allInvariants and s.interruptedShown
+          and s.sendLog.exists(l => l.sent == 1))))
+      .then(reload)
+      .expect(FIXED2 implies s.interruptedShown)
+      .then(if (FIXED2) dismissInterrupted else reload)
+      .expect(not(s.interruptedShown) and s.sendLog.size() == 0)
 
   /// After New merge, Back on step 6 stays disabled.
   run back6AfterNewMergeTest =
@@ -1003,7 +1040,7 @@ module conformance {
     fwd(sendTestEmail), nondet a = Bool.oneOf() backUp(back4(a)), fwd(next4),
     nondet a = Bool.oneOf() backUp(back5(a)), fwd(next5),
     fwd(typeSend), fwd(startSend), fwd(startSendResponse),
-    nondet a = Bool.oneOf() backUp(back6(a)), fwd(stopSend), fwd(newMerge),
+    nondet a = Bool.oneOf() backUp(back6(a)), fwd(stopSend), fwd(newMerge), fwd(dismissInterrupted),
     nondet ok = Bool.oneOf() if (ok) fwd(completeJob(true)) else undo(completeJob(false)),
     fwd(completeOrphan),
     fwd(sendNext), nondet failed = Bool.oneOf() if (failed) undo(finishSend(true)) else fwd(finishSend(false)),
@@ -1027,6 +1064,7 @@ module conformance {
     nondet a = Bool.oneOf() backUp(settled(back5(a))), fwd(settled(next5)),
     fwd(settled(typeSend)), fwd(settled(startSend)), fwd(startSendResponse),
     nondet a = Bool.oneOf() backUp(settled(back6(a))), fwd(settled(stopSend)), fwd(settled(newMerge)),
+    fwd(settled(dismissInterrupted)),
     nondet ok = Bool.oneOf() if (ok) fwd(settled(completeJob(true))) else undo(settled(completeJob(false))),
     fwd(settled(completeOrphan)),
     fwd(settled(sendNext)), nondet failed = Bool.oneOf() if (failed) undo(settled(finishSend(true))) else fwd(settled(finishSend(false))),

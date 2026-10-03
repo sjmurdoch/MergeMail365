@@ -123,8 +123,8 @@ MUTANTS = [
      "return s.signedIn && !s.testRunning;",
      "return s.signedIn;"),
     ("back6-after-send",
-     "return !s.sendStarted;\n    }\n\n    /** Which part",
-     "return true;\n    }\n\n    /** Which part"),
+     "return !s.sendStarted;\n    }\n\n    /** The report of sends",
+     "return true;\n    }\n\n    /** The report of sends"),
 ]
 
 
@@ -149,7 +149,7 @@ from typing import Any  # noqa: E402
 class ServerReplay:
     """Replays the server's side of a trace through the Flask routes."""
 
-    def __init__(self, monkeypatch, xlsx: Path) -> None:
+    def __init__(self, monkeypatch, xlsx: Path, log_root: Path) -> None:
         import mail_merge.web.app as web_app
         from mail_merge.auth import NotSignedInError
 
@@ -167,6 +167,8 @@ class ServerReplay:
 
         monkeypatch.setattr("mail_merge.auth.acquire_token_silent", silent)
         self.handles: list[Handle] = []
+        self.log_root = log_root
+        self.log_dir: Path | None = None
         self.restart()
 
     def restart(self) -> None:
@@ -174,6 +176,14 @@ class ServerReplay:
         from mail_merge.web.app import create_app
         from mail_merge.web.jobs import JobStore
 
+        # The disk as the old process left it: its runners are waiting for a
+        # command, so their logs are complete. Ending them below deletes the
+        # logs in the old directory, as a clean end would; the new process
+        # gets the copy, as after a crash.
+        new_dir = self.log_root / f"process-{len(list(self.log_root.iterdir()))}"
+        if self.log_dir is not None and self.log_dir.exists():
+            shutil.copytree(self.log_dir, new_dir)
+        self.log_dir = new_dir
         for h in self.handles:
             h.commands.put("die")
         store = JobStore()
@@ -181,7 +191,7 @@ class ServerReplay:
         self.monkeypatch.setattr(self.web_app, "_jobs", store.jobs)
         self.monkeypatch.setattr(self.web_app, "_running_send_job", store.running_send)
         self.store = store
-        app = create_app(startup_token="t", port=5050)
+        app = create_app(startup_token="t", port=5050, send_log_dir=self.log_dir)
         app.config["TESTING"] = True
         self.client = app.test_client()
         assert self.client.get("/?token=t").status_code == 302
@@ -256,6 +266,8 @@ class ServerReplay:
             self.upload()
         elif action == "newMerge":
             assert self.post("/api/reset").status_code == 200
+        elif action == "dismissInterrupted":
+            assert self.post("/api/interrupted/dismiss").status_code == 200
         elif action == "startSendResponse":
             self.set_session_job(self.jobs[picks["id"]][0])
         elif action in ("completeJob", "completeOrphan"):
@@ -277,7 +289,10 @@ class ServerReplay:
 
     def check_reload(self, nxt: dict) -> None:
         """/api/config names the send the reloaded model page reconnects to."""
-        active = self.client.get("/api/config").get_json()["active_job_id"]
+        config = self.client.get("/api/config").get_json()
+        assert sorted(len(s["results"]) for s in config["interrupted_sends"]) == sorted(
+            entry["sent"] for entry in nxt["sendLog"]), "config's interrupted sends differ from the send log"
+        active = config["active_job_id"]
         if not (nxt["step"] == 6 and nxt["sendStarted"]):
             assert active is None, "config reports an active job the model doesn't reconnect to"
             return
@@ -307,6 +322,7 @@ class ServerReplay:
                 for j in m["sendJob"] if j["id"] >= shift
             ],
             "nextJobId": m["nextJobId"] - shift,
+            "sendLog": sorted(entry["sent"] for entry in m["sendLog"]),
         }
         assert actual == expected, where
 
@@ -325,12 +341,12 @@ def conformance_xlsx(tmp_path) -> Path:
     return path
 
 
-def replay_server(traces: Path, monkeypatch, xlsx: Path) -> None:
+def replay_server(traces: Path, monkeypatch, xlsx: Path, log_root: Path) -> None:
     files = sorted(traces.glob("*.itf.json"))
     assert files
     for path in files:
         trace = load_trace(path)
-        replay = ServerReplay(monkeypatch, xlsx)
+        replay = ServerReplay(monkeypatch, xlsx, log_root)
         try:
             replay.compare(trace[0]["s"], f"{path.name} init")
             for i in range(1, len(trace)):
@@ -342,8 +358,8 @@ def replay_server(traces: Path, monkeypatch, xlsx: Path) -> None:
             replay.fake.release_all()  # the runners still waiting
 
 
-def test_server_conformance(traces, monkeypatch, conformance_xlsx):
-    replay_server(traces, monkeypatch, conformance_xlsx)
+def test_server_conformance(traces, monkeypatch, conformance_xlsx, tmp_path):
+    replay_server(traces, monkeypatch, conformance_xlsx, tmp_path)
 
 
 def _ignore_stop(job):
@@ -371,6 +387,10 @@ def _stop_without_flag(self, job_id):
     return job_id in self.jobs
 
 
+def _forget_send_log(self, send_log):
+    self.send_log = send_log  # logs sends, but never reads what was left
+
+
 # Bugs seeded into JobStore, each of which the server replay must notice.
 SERVER_MUTANTS = {
     "stop-ignored": ("should_stop", staticmethod(_ignore_stop)),
@@ -378,14 +398,15 @@ SERVER_MUTANTS = {
     "reload-misses-unnamed-send": ("active_job_id", _session_job_only),
     "reload-resumes-dry-run": ("active_job_id", _any_session_job),
     "stop-not-recorded": ("request_stop", _stop_without_flag),
+    "restart-forgets-send-log": ("attach_send_log", _forget_send_log),
 }
 
 
 @pytest.mark.parametrize("name", list(SERVER_MUTANTS))
-def test_server_replay_catches_mutant(traces, monkeypatch, conformance_xlsx, name):
+def test_server_replay_catches_mutant(traces, monkeypatch, conformance_xlsx, tmp_path, name):
     from mail_merge.web.jobs import JobStore
 
     attr, replacement = SERVER_MUTANTS[name]
     monkeypatch.setattr(JobStore, attr, replacement)
     with pytest.raises(AssertionError):
-        replay_server(traces, monkeypatch, conformance_xlsx)
+        replay_server(traces, monkeypatch, conformance_xlsx, tmp_path)

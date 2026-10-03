@@ -563,3 +563,47 @@ class TestSendOutcome:
         page.evaluate("newMerge()")
         page.wait_for_selector("#step-1.active", timeout=5000)
         assert page.input_value("#bcc-blast-to") == ""
+
+
+class TestInterruptedSend:
+    """R15: a send the last process didn't finish is reported on step 1."""
+
+    def test_report_shows_escapes_downloads_and_dismisses(
+        self, page: Page, workflow_server: str, auth: AuthStub, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ):
+        import mail_merge.web.app as web_app
+        from mail_merge.sender import SendResult
+        from mail_merge.web.sendlog import SendLog
+
+        log = SendLog(tmp_path)
+        log.start("old")
+        log.record("old", SendResult(email="a@example.com", success=True, status_code=202))
+        # Spreadsheet content is untrusted: it must not reach the page as HTML.
+        log.record("old", SendResult(email="<img src=x onerror=window.pwned=1>@example.com",
+                                     success=False, status_code=400, error="<b>bad</b>"))
+        store = web_app._job_store
+        monkeypatch.setattr(store, "send_log", None)
+        monkeypatch.setattr(store, "interrupted", [])
+        store.attach_send_log(log)
+
+        page.goto(f"{workflow_server}/?token={STARTUP_TOKEN}")
+        report = page.locator("#interrupted-send")
+        expect(report).to_be_visible()
+        expect(report).to_contain_text("1 email was recorded as sent")
+        expect(report).to_contain_text("<img src=x onerror=window.pwned=1>@example.com")
+        assert page.evaluate("window.pwned") is None
+
+        with page.expect_download() as download:
+            page.click("#btn-interrupted-csv")
+        assert "a@example.com" in Path(download.value.path()).read_text(encoding="utf-8")
+
+        page.click("#btn-dismiss-interrupted")
+        expect(report).to_be_hidden()
+        for _ in range(50):
+            if not list(tmp_path.iterdir()):
+                break
+            time.sleep(0.05)
+        assert list(tmp_path.iterdir()) == []
+        page.reload()
+        page.wait_for_selector("text=Data")
+        expect(report).to_be_hidden()

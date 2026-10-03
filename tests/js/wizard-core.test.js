@@ -453,6 +453,7 @@ test("abstractPage maps a fresh page onto the model's init_state", () => {
         btnSendTest: true, btnNext4: false, btnNext5: false,
         btnDoSend: false, btnBack6: true, doneNav: false,
         pending: [], previewReq: [], sendReq: 0, stopQueued: false, authShown: false,
+        interruptedShown: false,
     });
 });
 
@@ -467,4 +468,25 @@ test("abstractPage reports current requests as the model's pending sets", () => 
     assert.equal(b.stopQueued, true);
     assert.equal(b.btnDoSend, false);
     assert.equal(b.btnBack6, false);
+});
+
+// --- Sends an earlier process didn't finish (R15) ---
+
+test("configLoaded reports interrupted sends until dismissed, across New merge", () => {
+    const sends = [{ started: "2026-10-03 10:00:00", results: [{ email: "a@example.com", success: true }] }];
+    const r = C.reduce(C.initialState(), { type: "configLoaded", config: { interrupted_sends: sends } });
+    assert.equal(C.interruptedShown(r.state), true);
+    assert.deepEqual(r.effects, [{ type: "showInterrupted" }]);
+    assert.equal(C.abstractPage(r.state).interruptedShown, true);
+    const merged = C.reduce(r.state, C.ACTIONS.newMerge).state;
+    assert.equal(C.interruptedShown(merged), true);
+    const dismissed = C.reduce(merged, C.ACTIONS.dismissInterrupted);
+    assert.equal(C.interruptedShown(dismissed.state), false);
+    assert.deepEqual(dismissed.effects, [{ type: "postDismissInterrupted" }]);
+});
+
+test("a config without interrupted sends shows none", () => {
+    const r = C.reduce(C.initialState(), { type: "configLoaded", config: {} });
+    assert.equal(C.interruptedShown(r.state), false);
+    assert.deepEqual(r.effects, []);
 });

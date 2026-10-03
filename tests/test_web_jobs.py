@@ -156,7 +156,7 @@ class TestActiveJob:
 class TestAbstract:
     def test_model_fields(self):
         store = JobStore()
-        assert store.abstract(None) == {"sessionJob": [], "sendJob": [], "nextJobId": 0}
+        assert store.abstract(None) == {"sessionJob": [], "sendJob": [], "nextJobId": 0, "sendLog": []}
         test = store.create("test_email")
         assert store.abstract(test.id)["sessionJob"] == [{"id": 0, "kind": "Test", "done": False}]
         test.status = JobStatus.FAILED
@@ -172,3 +172,93 @@ class TestAbstract:
         store.create("test_email")
         assert send.id not in store.jobs
         assert store.abstract(None)["sendJob"][0]["status"] == "Completed"
+
+
+class TestSendLog:
+    """R15: a running send's results on disk (web/sendlog.py)."""
+
+    def test_finished_send_leaves_no_log(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        store = JobStore()
+        store.attach_send_log(SendLog(tmp_path))
+        job = store.create("send")
+        store.run(job, {}, SteppedRunner([]))
+        assert list(tmp_path.iterdir()) == []
+
+    def test_log_holds_each_email_while_the_send_runs(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        store = JobStore()
+        store.attach_send_log(SendLog(tmp_path))
+        job = store.create("send")
+        runner = SteppedRunner(["a@x.com", "b@x.com"])
+        thread = run_in_thread(store, job, runner)
+        runner.step()
+        # A process that died now would leave this for the next one.
+        left = SendLog(tmp_path).interrupted()
+        assert [[r["email"] for r in s["results"]] for s in left] == [["a@x.com"]]
+        assert left[0]["started"]
+        runner.step()
+        thread.join(5)
+        assert SendLog(tmp_path).interrupted() == []
+
+    def test_only_sends_are_logged(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        store = JobStore()
+        store.attach_send_log(SendLog(tmp_path))
+        job = store.create("test_email")
+        runner = SteppedRunner(["me@x.com"])
+        thread = run_in_thread(store, job, runner)
+        runner.step()
+        assert list(tmp_path.iterdir()) == []
+        thread.join(5)
+
+    def test_next_process_reports_then_dismisses(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        log = SendLog(tmp_path)
+        log.start("old-job")
+        log.record("old-job", ok("a@x.com"))
+        # A crash can cut the last line short.
+        with (tmp_path / "send-old-job.jsonl").open("a", encoding="utf-8") as f:
+            f.write('{"email": "b@x.c')
+        store = JobStore()
+        store.attach_send_log(SendLog(tmp_path))
+        assert [[r["email"] for r in s["results"]] for s in store.interrupted] == [["a@x.com"]]
+        assert store.abstract(None)["sendLog"] == [1]
+        store.dismiss_interrupted()
+        assert store.interrupted == []
+        assert list(tmp_path.iterdir()) == []
+
+    def test_dismiss_keeps_a_send_running_now(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        SendLog(tmp_path).start("old-job")
+        store = JobStore()
+        store.attach_send_log(SendLog(tmp_path))
+        job = store.create("send")
+        runner = SteppedRunner(["a@x.com", "b@x.com"])
+        thread = run_in_thread(store, job, runner)
+        runner.step()
+        store.dismiss_interrupted()
+        assert [p.name for p in tmp_path.iterdir()] == [f"send-{job.id}.jsonl"]
+        runner.step()
+        thread.join(5)
+
+    def test_missing_directory_means_nothing_interrupted(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        store = JobStore()
+        store.attach_send_log(SendLog(tmp_path / "not-yet"))
+        assert store.interrupted == []
+
+    @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX permissions")
+    def test_log_is_private(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        log = SendLog(tmp_path / "sends")
+        log.start("j")
+        assert (tmp_path / "sends").stat().st_mode & 0o777 == 0o700
+        assert (tmp_path / "sends" / "send-j.jsonl").stat().st_mode & 0o777 == 0o600

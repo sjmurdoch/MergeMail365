@@ -32,3 +32,21 @@ def data_dir() -> Path:
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
         return base / "mergemail365"
     return Path.home()
+
+
+def state_dir() -> Path:
+    """Return the platform-appropriate state directory for MergeMail365:
+    files the app keeps between runs that are not config or logs.
+
+    macOS:   ~/Library/Application Support/mergemail365/
+    Windows: %LOCALAPPDATA%/mergemail365/
+    Linux:   ~/.local/state/mergemail365/
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "mergemail365"
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+        return base / "mergemail365"
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    return base / "mergemail365"

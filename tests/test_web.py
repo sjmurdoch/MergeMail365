@@ -1957,3 +1957,68 @@ class TestDebugLogging:
         debug_records = [r for r in caplog.records if r.levelname == "DEBUG" and r.exc_info]
         assert len(debug_records) >= 1
         assert "get-recipients" in debug_records[0].message
+
+
+class TestInterruptedSends:
+    """R15: sends an earlier process didn't finish are reported until dismissed."""
+
+    @pytest.fixture
+    def store(self, monkeypatch):
+        import mail_merge.web.app as web_app
+        from mail_merge.web.jobs import JobStore
+
+        fresh = JobStore()
+        monkeypatch.setattr(web_app, "_job_store", fresh)
+        monkeypatch.setattr(web_app, "_jobs", fresh.jobs)
+        monkeypatch.setattr(web_app, "_running_send_job", fresh.running_send)
+        return fresh
+
+    def _client(self, log_dir):
+        application = create_app(startup_token="test-token-abc", port=5050, send_log_dir=log_dir)
+        application.config["TESTING"] = True
+        c = application.test_client()
+        assert c.get("/?token=test-token-abc").status_code == 302
+        return c
+
+    def test_config_reports_and_dismiss_deletes(self, store, tmp_path):
+        from mail_merge.sender import SendResult
+        from mail_merge.web.sendlog import SendLog
+
+        log = SendLog(tmp_path)
+        log.start("old")
+        log.record("old", SendResult(email="a@example.com", success=True, status_code=202))
+        c = self._client(tmp_path)
+        sends = c.get("/api/config").get_json()["interrupted_sends"]
+        assert [[r["email"] for r in s["results"]] for s in sends] == [["a@example.com"]]
+
+        resp = c.post("/api/interrupted/dismiss", headers={"X-CSRF-Token": get_csrf(c)})
+        assert resp.status_code == 200
+        assert c.get("/api/config").get_json()["interrupted_sends"] == []
+        assert list(tmp_path.iterdir()) == []
+
+    def test_dismiss_needs_csrf(self, store, tmp_path):
+        c = self._client(tmp_path)
+        assert c.post("/api/interrupted/dismiss").status_code == 403
+
+    def test_no_send_log_without_a_directory(self, store, web_client):
+        assert web_client.get("/api/config").get_json()["interrupted_sends"] == []
+        assert store.send_log is None
+
+
+def test_entry_point_keeps_send_logs_in_the_state_dir(monkeypatch, tmp_path):
+    """mergemail365-web turns the send log on; create_app() alone doesn't."""
+    import mail_merge.web as web_pkg
+    from mail_merge import _paths
+
+    seen = {}
+
+    def fake_create_app(**kwargs):
+        seen.update(kwargs)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(_paths, "state_dir", lambda: tmp_path)
+    monkeypatch.setattr("mail_merge.web.app.create_app", fake_create_app)
+    monkeypatch.setattr(web_pkg, "_find_open_port", lambda port: port)
+    with pytest.raises(SystemExit):
+        web_pkg.main([])
+    assert seen["send_log_dir"] == tmp_path / "sends"

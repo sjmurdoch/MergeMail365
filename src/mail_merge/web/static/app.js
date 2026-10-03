@@ -140,6 +140,9 @@ function render() {
         toggle(el, !_auth.desktopMode);
     }
 
+    // Step 1: sends an earlier server process didn't finish
+    toggle("interrupted-send", C.interruptedShown(state));
+
     // Step 6
     const panel = C.sendPanel(state);
     toggle("send-confirm", panel === "confirm");
@@ -270,6 +273,12 @@ async function runEffect(effect) {
             break;
         case "showSendError":
             showSendError(effect.message);
+            break;
+        case "showInterrupted":
+            showInterrupted();
+            break;
+        case "postDismissInterrupted":
+            apiFetch("/api/interrupted/dismiss", { method: "POST" }).catch(() => {});
             break;
         case "reconnectSend":
             reconnectSend(effect.jobId);
@@ -1493,15 +1502,47 @@ function sanitizeCsvValue(val) {
 
 function downloadCsv() {
     if (!state.sendResults || state.sendResults.length === 0) return;
+    saveCsv(state.sendResults, "mergemail365-results.csv");
+}
+
+// The "showInterrupted" effect: what each unfinished send had sent.
+// Addresses come from the spreadsheet, so they are escaped.
+function showInterrupted() {
+    let html = "";
+    for (const send of state.interrupted) {
+        const sent = send.results.filter(r => r.success).length;
+        html += `<p><strong>The app closed while sending</strong> (started ${escapeHtml(send.started || "at an unknown time")}). `;
+        html += `${sent} email${sent === 1 ? " was" : "s were"} recorded as sent. Recipients not listed were not sent an email, except perhaps the one being sent when the app stopped.</p>`;
+        if (send.results.length > 0) {
+            html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th></tr></thead><tbody>`;
+            for (const r of send.results) {
+                html += `<tr class="${r.success ? "success" : "failure"}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : `Failed: ${escapeHtml(r.error || "")}`}</td></tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+    }
+    $("interrupted-send-details").innerHTML = html;
+}
+
+function downloadInterruptedCsv() {
+    const results = state.interrupted.flatMap(s => s.results);
+    if (results.length > 0) saveCsv(results, "mergemail365-interrupted.csv");
+}
+
+function dismissInterrupted() {
+    return dispatch({ type: "dismissInterrupted" });
+}
+
+function saveCsv(results, fileName) {
     let csv = "email,success,status_code,error\n";
-    for (const r of state.sendResults) {
+    for (const r of results) {
         csv += `"${sanitizeCsvValue(r.email)}",${r.success},${r.status_code || ""},"${sanitizeCsvValue((r.error || "").replace(/"/g, '""'))}"\n`;
     }
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "mergemail365-results.csv";
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
 }
@@ -1757,6 +1798,8 @@ window.startSend = startSend;
 window.stopSend = stopSend;
 window.downloadCsv = downloadCsv;
 window.newMerge = newMerge;
+window.dismissInterrupted = dismissInterrupted;
+window.downloadInterruptedCsv = downloadInterruptedCsv;
 
 // ---------------------------------------------------------------------------
 // Init

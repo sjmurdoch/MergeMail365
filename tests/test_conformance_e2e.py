@@ -137,6 +137,7 @@ SNAPSHOT_JS = """() => {
             sendConfirm: shown("send-confirm"),
             sendDone: shown("send-done-nav"),
             resultsShown: $("send-result").querySelector("h4") !== null,
+            interrupted: shown("interrupted-send"),
         },
     };
 }"""
@@ -154,6 +155,7 @@ def expected_view(m: dict) -> dict:
             "resultsShown": m["resultsShown"], "btnSendTest": m["btnSendTest"],
             "btnNext4": m["btnNext4"], "btnNext5": m["btnNext5"], "btnDoSend": m["btnDoSend"],
             "doneNav": m["doneNav"], "authShown": m["authShown"],
+            "interruptedShown": m["interruptedShown"],
             "recipientsKnown": m["recipientsVersion"] != -1,
         },
         "guards": {
@@ -174,6 +176,7 @@ def expected_view(m: dict) -> dict:
             "sendConfirm": not m["sendStarted"],
             "sendDone": m["doneNav"],
             "resultsShown": m["resultsShown"],
+            "interrupted": m["interruptedShown"],
         },
     }
 
@@ -373,6 +376,8 @@ def test_browser_conformance(page: Page, e2e_server, e2e_traces: Path, e2e_xlsx:
             for i in range(1, len(trace)):
                 t = trace[i]
                 following = trace[i + 1] if i + 1 < len(trace) else None
+                if t["action"] in ("next2", "startSend") and following is None:
+                    break  # the trace ends before the response it needs
                 actions = " ".join(x["action"] for x in trace[1:i + 1])
                 try:
                     replay.step(trace[i - 1]["s"], t["s"], t["action"], t["picks"], following)

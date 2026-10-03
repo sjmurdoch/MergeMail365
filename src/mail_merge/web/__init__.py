@@ -60,6 +60,7 @@ def main(argv: list[str] | None = None) -> None:
                 logger.error("pywebview is required for --desktop mode. Install with: uv pip install 'mergemail365[desktop]'")
                 sys.exit(1)
 
+    from mail_merge._paths import state_dir
     from mail_merge.web.app import create_app
 
     # Both modes serve the app on a localhost port and open it at the same
@@ -76,6 +77,7 @@ def main(argv: list[str] | None = None) -> None:
         tenant_id=args.tenant_id,
         desktop_mode=desktop,
         host=args.host,
+        send_log_dir=state_dir() / "sends",
     )
 
     url = f"http://{args.host}:{port}/?token={startup_token}"

@@ -31,11 +31,11 @@ actions = ["completeJob", "completeOrphan", "sendNext", "finishSend", "sendWitho
 # server's are JobStore methods (web/jobs.py); the rest have no code of
 # their own. tests/test_spec_coverage.py checks that every action is in
 # exactly one place here or in WizardCore.ACTIONS, and that the methods exist.
-server = { sendNext = "record_sent", finishSend = "run", sendWithoutToken = "run", completeOrphan = "run", completeJob = "run", startSend = "create", sendTestEmail = "create", next4 = "create", stopSend = "request_stop", reload = "active_job_id" }
+server = { sendNext = "record_sent", finishSend = "run", sendWithoutToken = "run", completeOrphan = "run", completeJob = "run", startSend = "create", sendTestEmail = "create", next4 = "create", stopSend = "request_stop", reload = "active_job_id", dismissInterrupted = "dismiss_interrupted", serverRestart = "attach_send_log" }
 # Typing SEND changes no state: render() reads the input (doSendEnabled).
 render = ["typeSend"]
 # The world, not the code: a token running out, the process restarting.
-environment = ["tokenExpires", "serverRestart"]
+environment = ["tokenExpires"]
 
 [abstraction]
 # Non-ghost State fields in spec/wizard.qnt that neither WizardCore.abstractPage
@@ -63,6 +63,8 @@ not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists 
 "html:stopSend()" = { actions = ["stopSend"] }
 "html:downloadCsv()" = { out_of_scope = "Builds a CSV of results already shown; no state change." }
 "html:newMerge()" = { actions = ["newMerge"] }
+"html:dismissInterrupted()" = { actions = ["dismissInterrupted"] }
+"html:downloadInterruptedCsv()" = { out_of_scope = "Builds a CSV of the interrupted sends already shown; no state change." }
 "html:window.location.reload()" = { actions = ["reload"] }
 
 # --- static/app.js listeners ---
@@ -113,6 +115,7 @@ not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists 
 "route:GET /api/config" = { actions = ["reload"] }
 "route:POST /api/state" = { out_of_scope = "Stores the step and flags for display; on reload the page returns to step 1 and resets the flags whatever was stored." }
 "route:POST /api/reset" = { actions = ["newMerge"] }
+"route:POST /api/interrupted/dismiss" = { actions = ["dismissInterrupted"] }
 "route:POST /api/upload-spreadsheet" = { actions = ["upload"] }
 "route:POST /api/change-sheet" = { actions = ["upload"] }
 "route:POST /api/get-recipients" = { actions = ["next2", "previewResponse"] }

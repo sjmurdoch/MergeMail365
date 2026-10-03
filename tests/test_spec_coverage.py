@@ -328,6 +328,7 @@ RENDERED_CONTROLS = [
     "btn-send-test", "btn-retry-test", "btn-next-4", "btn-next-5", "btn-do-send", "btn-back-6",
     "test-result", "verify-result", "signin-callout-4", "signin-callout-6",
     "send-confirm", "send-progress", "send-log", "send-result", "send-nav", "send-done-nav",
+    "interrupted-send",
 ]
 
 

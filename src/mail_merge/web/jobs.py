@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mail_merge.sender import SendResult
+from mail_merge.web.sendlog import SendLog
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,21 @@ class JobStore:
         self.created = 0
         # The latest send job, kept after eviction for abstract().
         self.last_send: Job | None = None
+        # Running sends' results on disk (attach_send_log), and the sends an
+        # earlier process left unfinished, read once at start (R15).
+        self.send_log: SendLog | None = None
+        self.interrupted: list[dict[str, Any]] = []
+
+    def attach_send_log(self, send_log: SendLog) -> None:
+        """Log sends to disk, and read what earlier processes left behind."""
+        self.send_log = send_log
+        self.interrupted = send_log.interrupted() if send_log.directory.exists() else []
+
+    def dismiss_interrupted(self) -> None:
+        """The user has seen the interrupted sends: delete their logs."""
+        if self.send_log is not None:
+            self.send_log.dismiss([s["file"] for s in self.interrupted])
+        self.interrupted = []
 
     def running_send(self) -> Job | None:
         """The send job still in progress, if any.
@@ -140,10 +156,11 @@ class JobStore:
             return True
         return False
 
-    @staticmethod
-    def record_sent(job: Job, _result: SendResult) -> None:
+    def record_sent(self, job: Job, result: SendResult) -> None:
         """Called by the send loop after each email (sendNext)."""
         job.sent += 1
+        if job.mode == "send" and self.send_log is not None:
+            self.send_log.record(job.id, result)
 
     def active_job_id(self, session_job_id: str | None) -> str | None:
         """The job a reloaded page reconnects to: any running send, else the
@@ -164,6 +181,9 @@ class JobStore:
         handler.setFormatter(logging.Formatter("%(message)s"))
         mm_logger = logging.getLogger("mail_merge")
         mm_logger.addHandler(handler)
+        send_log = self.send_log if job.mode == "send" else None
+        if send_log is not None:
+            send_log.start(job.id)
         try:
             if runner is None:
                 from mail_merge.api import send_merge
@@ -191,6 +211,9 @@ class JobStore:
             job.status = JobStatus.FAILED
             job.events.put({"type": "error", "data": {"message": str(exc)}})
         finally:
+            # The send ended in this process: its results are in memory now.
+            if send_log is not None:
+                send_log.finish(job.id)
             mm_logger.removeHandler(handler)
             job.events.put(None)  # Sentinel
 
@@ -204,7 +227,7 @@ class JobStore:
 
     def abstract(self, session_job_id: str | None) -> dict[str, Any]:
         """The model's server fields (spec/wizard.qnt State): sessionJob,
-        sendJob and nextJobId, with job ids as creation order."""
+        sendJob, nextJobId and sendLog, with job ids as creation order."""
         session_job = self.get(session_job_id)
         send = self.last_send
         return {
@@ -220,4 +243,7 @@ class JobStore:
                 "status": _MODEL_STATUS[send.status],
             }],
             "nextJobId": self.created,
+            # Interrupted sends by emails sent (their job ids belong to an
+            # earlier process).
+            "sendLog": sorted(len(s["results"]) for s in self.interrupted),
         }

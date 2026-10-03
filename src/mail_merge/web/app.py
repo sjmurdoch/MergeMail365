@@ -31,6 +31,7 @@ from flask import (
 from mail_merge.config import load_config
 from mail_merge.sender import SendResult
 from mail_merge.web.jobs import FINISHED_STATUSES, JobStore
+from mail_merge.web.sendlog import SendLog
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,7 @@ def create_app(
     tenant_id: str = "",
     desktop_mode: bool = False,
     host: str = "localhost",
+    send_log_dir: Path | None = None,
 ) -> Flask:
     app = Flask(
         __name__,
@@ -269,6 +271,12 @@ def create_app(
     # Use a stable secret key based on the startup token so that restarting
     # the server doesn't invalidate the user's session.
     app.secret_key = hashlib.sha256(startup_token.encode()).hexdigest()
+
+    # Keep running sends' results on disk, and report the sends an earlier
+    # process didn't finish (spec/requirements.md, R15). Only the
+    # mergemail365-web entry point passes a directory.
+    if send_log_dir is not None:
+        _job_store.attach_send_log(SendLog(send_log_dir))
     
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -530,7 +538,17 @@ def create_app(
             "test_passed": session.get("test_passed", False),
             "verify_passed": session.get("verify_passed", False),
             "active_job_id": active_job_id,
+            # Sends an earlier process didn't finish, until dismissed.
+            "interrupted_sends": [
+                {"started": s["started"], "results": s["results"]} for s in _job_store.interrupted
+            ],
         })
+
+    @app.route("/api/interrupted/dismiss", methods=["POST"])
+    def api_dismiss_interrupted() -> Response:
+        """The user has seen the interrupted sends: delete their logs."""
+        _job_store.dismiss_interrupted()
+        return jsonify({"success": True})
 
     @app.route("/api/state", methods=["POST"])
     def api_save_state() -> Response:

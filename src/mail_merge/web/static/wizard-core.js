@@ -49,6 +49,10 @@
             // authShown): the token cache may have changed since.
             signedIn: false,
 
+            // Sends an earlier server process didn't finish, from
+            // /api/config: [{ started, results }] (the model's sendLog).
+            interrupted: [],
+
             // Background job tracking
             currentJobId: null,
             sendResults: null,
@@ -87,6 +91,7 @@
             contentVersion: s.contentVersion + 1,
             nextRequestId: s.nextRequestId,
             signedIn: s.signedIn,
+            interrupted: s.interrupted,
         });
     }
 
@@ -235,8 +240,11 @@
      *  finished but not yet shown, takes the page straight to step 6. */
     function configLoaded(s0, event) {
         const config = event.config;
-        const s = Object.assign({}, s0, { testPassed: false, verifyPassed: false });
+        const s = Object.assign({}, s0, {
+            testPassed: false, verifyPassed: false, interrupted: config.interrupted_sends || [],
+        });
         const effects = [];
+        if (s.interrupted.length > 0) effects.push({ type: "showInterrupted" });
         if (config.spreadsheet) {
             s.spreadsheetData = config.spreadsheet;
             effects.push({ type: "showSpreadsheet" });
@@ -259,6 +267,14 @@
         return {
             state: Object.assign({}, s0, newMergeState(s0)),
             effects: [{ type: "resetServer" }, { type: "clearForm" }],
+        };
+    }
+
+    /** "Dismiss" on the interrupted-send report: the server deletes the logs. */
+    function dismissInterrupted(s0) {
+        return {
+            state: Object.assign({}, s0, { interrupted: [] }),
+            effects: [{ type: "postDismissInterrupted" }],
         };
     }
 
@@ -387,7 +403,7 @@
     }
 
     const REDUCERS = {
-        goTo, back, previewResponse, authStatus, configLoaded, newMerge,
+        goTo, back, previewResponse, authStatus, configLoaded, newMerge, dismissInterrupted,
         contentChanged, spreadsheetLoaded,
         sendTestEmail, jobStarted, jobCompleted,
         startSend, startSendResponse, stopSend, sendCompleted, sendResults, sendError,
@@ -413,6 +429,7 @@
         next5: { type: "goTo", to: 6 },
         back6: { type: "back", to: 4 },
         newMerge: { type: "newMerge" },
+        dismissInterrupted: { type: "dismissInterrupted" },
         reload: { type: "configLoaded" },
         upload: { type: "spreadsheetLoaded" },
         edit: { type: "contentChanged" },
@@ -463,6 +480,11 @@
         return !s.sendStarted;
     }
 
+    /** The report of sends an earlier process didn't finish is shown. */
+    function interruptedShown(s) {
+        return s.interrupted.length > 0;
+    }
+
     /** Which part of step 6 is shown: "confirm", "progress" or "done". */
     function sendPanel(s) {
         if (!s.sendStarted) return "confirm";
@@ -510,6 +532,7 @@
             sendReq: ofKind("send").length,
             stopQueued: ofKind("send").some(r => Boolean(r.stopQueued)),
             authShown: s.signedIn,
+            interruptedShown: interruptedShown(s),
         };
     }
 
@@ -534,6 +557,7 @@
         doSendEnabled,
         back6Enabled,
         sendPanel,
+        interruptedShown,
         abstractPage,
     };
 
