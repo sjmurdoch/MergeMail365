@@ -2,7 +2,7 @@
 
 ## Current status (2026-10-03)
 
-Steps 1, 2, 2b and 2c are done. Step 3 (reducer) is next, then steps 4 and 5. Nothing is in progress.
+Steps 1, 2, 2b and 2c are done, and so is a second round of web UI modelling (bugs 10–15, see "Round 2: awaits, failed sends and restarts"). Step 3 (reducer) is next, then steps 4 and 5. Nothing is in progress.
 
 ### Bugs fixed
 
@@ -18,7 +18,14 @@ All nine were found by the model or while modelling, reproduced by tests that fa
 | 4 | Reload after a finished job hangs on "Sending…" | `b56e713` | `test_reload_after_test_email_stays_off_send_step`, `test_reload_after_send_shows_results`, `test_events_end_for_finished_job_on_reconnect` |
 | 7 | "Stop sending" does nothing: `job.stop_requested` is set but never read | `5c0c4de` | `test_stop_ends_send_early`, `TestShouldStop` (sender, API) |
 | 8 | A signed-out user reaches step 4 (and 6) with no way to sign in there, and the send buttons stay enabled | step 2c commit | `TestSignInGate` (`test_web_e2e_workflow.py`) |
-| 9 | A signed-out web job falls into the CLI device-code flow and blocks | step 2c commit | `test_test_email_when_signed_out_fails_at_once` (the inverted characterisation test), `test_send_when_token_lost_fails_at_once`, `TestAcquireTokenSilent` |
+| 9 | A signed-out web job falls into the CLI device-code flow and blocks | `b491f78` | `test_test_email_when_signed_out_fails_at_once` (the inverted characterisation test), `test_send_when_token_lost_fails_at_once`, `TestAcquireTokenSilent` |
+| 10 | Back, an edit or a re-upload while the recipient preview loads is overridden: the page jumps to step 3 with a list for the old content | `5aa1f52` | `test_back_while_preview_loads_stays_on_step1`, `test_edit_while_preview_loads_stays_on_step2` |
+| 11 | A reload before the start-job response arrives leaves the send running unseen (the session cookie naming it never arrived) | `5aa1f52` | `test_config_resumes_running_send_the_session_does_not_name`, `test_second_send_refused_while_one_runs` |
+| 12 | "Stop sending" pressed before the start-job response goes to the dry run's job | `5aa1f52` | `test_stop_before_start_response_reaches_the_send` |
+| 13 | A send that fails part-way keeps no results; the page shows only the error | `5aa1f52` | `test_failed_send_keeps_emails_already_sent`, `test_failed_send_lists_emails_already_sent`, `TestSendAborted` |
+| 14 | A second send starts with the first send's progress text | `5aa1f52` | `test_second_send_starts_with_fresh_progress` |
+| 15 | New merge keeps the BCC To address | `5aa1f52` | `test_new_merge_clears_bcc_to` |
+| — | The preview ignores non-ASCII placeholder names that the email substitutes (not a model bug: a regex difference) | `8bfb88c` | `test_render_template_matches_server` |
 
 Playwright regressions are in `tests/test_web_e2e_workflow.py`; Flask ones in `tests/test_web.py` (`TestJobs`).
 
@@ -26,7 +33,8 @@ Playwright regressions are in `tests/test_web_e2e_workflow.py`; Flask ones in `t
 
 | Bug | Found by | Status | Plan step |
 |---|---|---|---|
-| A send that fails part-way (for example the token is lost after the first email) keeps no results: the page shows only the error, not which emails went out | Modelling the token provider in step 2c (`spec/requirements.md`, R9; witness `partialFailedSend`) | Confirmed by reading code (`_run_job` only stores results when `send_merge()` returns); no test yet | Not planned yet |
+| A server restart (app quit or crash) mid-send loses the record of which emails went out | Round 2 model (`spec/requirements.md`, R15; witness `restartLostSend`) | By design of the in-memory job store; needs a send log on disk | Not planned yet |
+| CLI: Ctrl-C or an error mid-send writes no CSV, so `--resume` re-sends emails already sent | Commit-history review (2026-10-03), reproduced with a script | Not modelled (the model covers the web UI only); `SendAborted` now carries the partial results, so the CLI could write them | Not planned yet |
 
 Possible link, unverified: the 0.4.1 changelog entry describes a Windows report that "sending a test email sometimes did nothing for several minutes until the user clicked Back". A test email waiting in the device-code flow (silent token acquisition failing, so the job blocks) would look like that. Bug 9 is now fixed; if the report recurs, the stall logs will show whether it was something else.
 
@@ -36,9 +44,9 @@ Decided: steps 4 and 6 can be entered signed out, because they offer sign-in the
 
 ### Next actions
 
-1. Decide whether to fix R9 (keep partial results when a send fails) before step 3.
-2. Step 3: reducer.
-3. Consider splitting the job model into `spec/jobs.qnt`: `wizard.qnt` is now about 600 lines.
+1. Step 3: reducer.
+2. Consider splitting the job model into `spec/jobs.qnt`: `wizard.qnt` is now about 950 lines.
+3. Decide whether to persist send results (R15) and fix CLI resume after an interrupted run.
 
 ### Resuming: how to run the model
 
@@ -186,6 +194,40 @@ Model checking (Apalache, 16 steps, on a 4-core cloud container; about 3 to 8 mi
 `noUntestedSend` needed 16 steps before; starting signed out costs a `signIn` step, so its counterexample now needs 17.
 
 Found while modelling, not fixed: a send that fails part-way keeps no results (R9).
+
+## Round 2: awaits, failed sends and restarts
+
+A review of the commit history for bug classes the model could catch but didn't found five that apply to the web UI:
+
+1. **Clicks during an `await`.** The model treated every handler as atomic. `goToStep(3)` awaits `loadPreview()` and then sets the step wherever the page is; past instance `d8ea08c` (overlapping sign-in polls).
+2. **Landing on a step whose entry action didn't run.** `canProgress` skipped step 5; past instances `c15715b`, `4f20d61`.
+3. **What the page shows differs from what is sent.** The single `version` hid it; past instances `ea56ba1`, `a120b43`.
+4. **New merge leaving state behind.** Hidden by `version + 1`; past instances `4f20d61`, `1cdad8c`, `4f1b9bb`.
+5. **Server or session state disappearing.** The model assumed the session and job registry live forever; past instance `f21dea4`.
+
+Changes to the model:
+
+- `ROUND` replaces `FIXED`: `buggy` (0), `partial` (1, the code before this round) and `fixed` (2). Round 2 bugs are checked against `partial`, because the round 1 bugs in `buggy` can mask them: there, a reload before the start-job response reattaches the page to the finished dry run, so the unseen send never shows.
+- Awaiting handlers whose answer changes the page are split into request and response actions: `next2`/`previewResponse` and `startSend`/`startSendResponse`. Splitting `startSend` also exposed bug 12 (Stop during the wait).
+- New state: `recipientsVersion`, `previewGen`, `verifyShown`, `resultsShown`, `progressJob`, `bccToMerge` (with ghost `mergeId`), the pending requests, and `serverRestart`.
+- New invariants `noStepJump`, `previewHonest`, `runningSendVisible`, `noConcurrentSends`, `failedSendReported`, `progressHonest`, `newMergeClears`; `canProgress` now covers step 5, `stopHonoured` covers an early Stop, and `sendScreenNotStuck` allows a pending start-job response. 21 invariants, 23 scenarios.
+- Mapping the model's `edit` back to the code showed the filter-chip handler changed the filter text without calling `onTemplateChange()`; it does now.
+- New requirements R11–R16 in `spec/requirements.md`.
+
+Not modelled: out-of-order `/auth/status` answers (R16; harmless since bug 9's fix), a second tab (the server now refuses a second concurrent send), and session expiry (a 24-hour sliding window).
+
+Model checking (Apalache, 16 steps), `partial`, per invariant:
+
+| Invariant | Result | Shortest trace found |
+|---|---|---|
+| `noStepJump` | violated | `init upload next1 next2 back2 previewResponse` |
+| `previewHonest` | violated | `init upload next1 next2 edit previewResponse` |
+| `runningSendVisible` | violated | `init signIn upload next1 next2 previewResponse next3 sendTestEmail complete next4 complete next5 typeSend startSend reload` |
+| `noConcurrentSends` | holds at 16 | needs bug 11 and then a full second test and dry run |
+| `failedSendReported` | violated | `init upload next1 next2 previewResponse next3 signIn sendTestEmail complete next4 complete next5 typeSend startSend sendNext finishSend startSendResponse` |
+| `progressHonest` | holds at 16 | needs two sends; scenario test only |
+
+The remaining `partial` checks and `spec/check.sh --all fixed` were still running when this was written. All 23 scenario tests pass in all three variants, and 5,000 random traces of 30 steps found no violation in `fixed`.
 
 ## Tooling
 
