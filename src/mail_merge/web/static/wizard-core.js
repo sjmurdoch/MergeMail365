@@ -174,7 +174,10 @@
             if (to === 4) effects.push({ type: "enterTest" });
             if (to === 5) {
                 if (!s.testPassed) return stay();
-                effects.push({ type: "startVerify" });
+                // Entering step 5 starts the dry run.
+                const { patch, id } = startRequest(s, "verify");
+                Object.assign(s, patch, { verifyPassed: false, verifyResult: null });
+                effects.push({ type: "startJob", mode: "dry_run", id });
             }
             if (to === 6) {
                 if (!s.verifyPassed) return stay();
@@ -259,7 +262,134 @@
         };
     }
 
-    const REDUCERS = { goTo, back, previewResponse, authStatus, configLoaded, newMerge };
+    // --- Content. ---
+
+    /** Any edit to what would be sent (compose fields, options, send mode):
+     *  the content version moves on and a pending preview is stale. */
+    function contentChanged(s0) {
+        return {
+            state: Object.assign({}, s0, dropRequests(s0, ["preview"]), {
+                contentVersion: s0.contentVersion + 1,
+            }),
+            effects: [],
+        };
+    }
+
+    /** A spreadsheet was uploaded or another sheet chosen. */
+    function spreadsheetLoaded(s0, event) {
+        const s = contentChanged(s0).state;
+        s.spreadsheetData = event.data;
+        return { state: s, effects: [] };
+    }
+
+    // --- Step 4 and 5 jobs. ---
+
+    /** "Send test email". `addressOk`: a test address was entered. */
+    function sendTestEmail(s0, event) {
+        if (!event.addressOk) {
+            return {
+                state: Object.assign({}, s0),
+                effects: [{ type: "alert", message: "Please enter a test email address." }],
+            };
+        }
+        const { patch, id } = startRequest(s0, "test");
+        const s = Object.assign({}, s0, patch, {
+            testPassed: false, testRunning: true, testFailed: false, testResult: null,
+        });
+        return { state: s, effects: [{ type: "startJob", mode: "test_email", id }] };
+    }
+
+    /** The start-job response named the job for request `id`. */
+    function jobStarted(s0, event) {
+        const s = Object.assign({}, s0);
+        if (isCurrent(s0, event.id)) s.currentJobId = event.jobId;
+        return { state: s, effects: [] };
+    }
+
+    /** A test email or dry run ended (`ok`), or couldn't start. Ignored if
+     *  its request is no longer current (spec/wizard.qnt completeJob). */
+    function jobCompleted(s0, event) {
+        const request = s0.requests[event.id];
+        if (!isCurrent(s0, event.id)) return { state: Object.assign({}, s0), effects: [] };
+        const s = Object.assign({}, s0, finishRequest(s0, event.id));
+        const result = { success: event.ok, message: event.message };
+        if (request.kind === "test") {
+            Object.assign(s, {
+                testRunning: false, testFailed: !event.ok, testPassed: event.ok, testResult: result,
+            });
+            // A test that failed for want of a token shows the sign-in callout.
+            return { state: s, effects: [event.ok ? { type: "saveState" } : { type: "checkAuth" }] };
+        }
+        Object.assign(s, { verifyPassed: event.ok, verifyResult: result });
+        return { state: s, effects: event.ok ? [{ type: "saveState" }] : [] };
+    }
+
+    // --- Step 6: the send. ---
+
+    /** "Send emails": the sending screen, and a start-job request. Until the
+     *  response names the job, Stop is queued on the request. */
+    function startSend(s0) {
+        const { patch, id } = startRequest(s0, "send");
+        const s = Object.assign({}, s0, patch, {
+            sendStarted: true, sendOutcome: null, currentJobId: null,
+        });
+        return { state: s, effects: [{ type: "startSendJob", id }] };
+    }
+
+    /** The start-job response for the send: the job id, or an error. */
+    function startSendResponse(s0, event) {
+        const stopQueued = Boolean(s0.requests[event.id]?.stopQueued);
+        const s = Object.assign({}, s0, finishRequest(s0, event.id));
+        if (event.error) {
+            s.sendOutcome = "error";
+            return { state: s, effects: [{ type: "showSendError", message: event.error }] };
+        }
+        s.currentJobId = event.jobId;
+        const effects = [{ type: "streamSend", jobId: event.jobId }];
+        if (stopQueued) effects.unshift({ type: "postStop", jobId: event.jobId });
+        return { state: s, effects };
+    }
+
+    /** "Stop sending" (spec/wizard.qnt stopSend, stopHonoured). */
+    function stopSend(s0) {
+        const s = Object.assign({}, s0);
+        if (s0.currentJobId) return { state: s, effects: [{ type: "postStop", jobId: s0.currentJobId }] };
+        const id = pendingRequest(s0, "send");
+        if (id === null) return { state: s, effects: [] };
+        return { state: Object.assign(s, updateRequest(s0, id, { stopQueued: true })), effects: [] };
+    }
+
+    /** The send job ended. A send that completed, stopped, or failed after
+     *  some emails went out lists them (failedSendReported). */
+    function sendCompleted(s0, event) {
+        const r = event.result;
+        const listed = r.status === "completed" || r.status === "stopped"
+            || (Array.isArray(r.results) && r.results.length > 0);
+        if (listed) return { state: Object.assign({}, s0), effects: [{ type: "fetchResults", jobId: event.jobId }] };
+        return sendError(s0, { message: r.error || "Send failed" });
+    }
+
+    /** The send's results arrived (`data` is the /status body). */
+    function sendResults(s0, event) {
+        const s = Object.assign({}, s0, {
+            sendOutcome: "results", sendResults: event.data.results || [],
+        });
+        return { state: s, effects: [{ type: "showResults", data: event.data }] };
+    }
+
+    function sendError(s0, event) {
+        return {
+            state: Object.assign({}, s0, { sendOutcome: "error" }),
+            effects: [{ type: "showSendError", message: event.message }],
+        };
+    }
+
+    const REDUCERS = {
+        goTo, back, previewResponse, authStatus, configLoaded, newMerge,
+        contentChanged, spreadsheetLoaded,
+        sendTestEmail, jobStarted, jobCompleted,
+        startSend, startSendResponse, stopSend, sendCompleted, sendResults, sendError,
+    };
 
     function reduce(s, event) {
         const reducer = REDUCERS[event.type];
@@ -282,6 +412,16 @@
         back6: { type: "back", to: 4 },
         newMerge: { type: "newMerge" },
         reload: { type: "configLoaded" },
+        upload: { type: "spreadsheetLoaded" },
+        edit: { type: "contentChanged" },
+        sendTestEmail: { type: "sendTestEmail" },
+        completeJob: { type: "jobCompleted" },
+        startSend: { type: "startSend" },
+        startSendResponse: { type: "startSendResponse" },
+        stopSend: { type: "stopSend" },
+        finishSend: { type: "sendCompleted" },
+        signIn: { type: "authStatus" },
+        signOut: { type: "authStatus" },
     };
 
     // --- Selectors. s.signedIn is what the page last fetched from

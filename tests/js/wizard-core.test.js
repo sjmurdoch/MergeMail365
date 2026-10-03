@@ -192,8 +192,8 @@ test("a preview response after Back or an edit is dropped (noStepJump, previewHo
     const back = C.reduce(r.state, C.ACTIONS.back2);
     const late = C.reduce(back.state, { type: "previewResponse", id, ok: true });
     assert.equal(late.state.currentStep, 1);
-    // An edit drops the request, as dropPreview() does in the shell.
-    const edited = Object.assign({}, r.state, C.dropRequests(r.state, ["preview"]));
+    // An edit drops the request.
+    const edited = C.reduce(r.state, C.ACTIONS.edit).state;
     const stale = C.reduce(edited, { type: "previewResponse", id, ok: true });
     assert.equal(stale.state.currentStep, 2);
 });
@@ -209,7 +209,9 @@ test("next3 enters the test step; next4 and next5 need the checks to have passed
     assert.equal(C.reduce(at(4), C.ACTIONS.next4).state.currentStep, 4);
     const r4 = C.reduce(at(4, { testPassed: true }), C.ACTIONS.next4);
     assert.equal(r4.state.currentStep, 5);
-    assert.deepEqual(r4.effects, [{ type: "startVerify" }]);
+    assert.equal(r4.effects.length, 1);
+    assert.deepEqual(r4.effects[0], { type: "startJob", mode: "dry_run", id: r4.effects[0].id });
+    assert.equal(C.pendingRequest(r4.state, "verify"), r4.effects[0].id);
     assert.equal(C.reduce(at(5), C.ACTIONS.next5).state.currentStep, 5);
     const r5 = C.reduce(at(5, { verifyPassed: true }), C.ACTIONS.next5);
     assert.equal(r5.state.currentStep, 6);
@@ -307,4 +309,133 @@ test("newMerge returns to step 1, resets the server and clears the form", () => 
     assert.equal(r.state.currentStep, 1);
     assert.equal(r.state.sendStarted, false);
     assert.deepEqual(r.effects, [{ type: "resetServer" }, { type: "clearForm" }]);
+});
+
+// --- reduce(): content changes ---
+
+test("an edit moves the content version on; an upload also replaces the data", () => {
+    const s = C.initialState();
+    const edited = C.reduce(s, C.ACTIONS.edit).state;
+    assert.equal(edited.contentVersion, s.contentVersion + 1);
+    const data = { columns: ["email"], rows: [] };
+    const uploaded = C.reduce(edited, Object.assign({ data }, C.ACTIONS.upload)).state;
+    assert.equal(uploaded.spreadsheetData, data);
+    assert.equal(uploaded.contentVersion, edited.contentVersion + 1);
+});
+
+// --- reduce(): test email and dry run ---
+
+function startTest(s) {
+    const r = C.reduce(s, Object.assign({ addressOk: true }, C.ACTIONS.sendTestEmail));
+    return { state: r.state, effects: r.effects, id: r.effects[0].id };
+}
+
+test("sendTestEmail needs an address", () => {
+    const r = C.reduce(at(4), { type: "sendTestEmail", addressOk: false });
+    assert.equal(r.state.testRunning, false);
+    assert.equal(r.effects[0].type, "alert");
+});
+
+test("a test email that completes passes the step; a failure checks sign-in", () => {
+    const t = startTest(at(4));
+    assert.equal(t.state.testRunning, true);
+    assert.deepEqual(t.effects, [{ type: "startJob", mode: "test_email", id: t.id }]);
+    assert.equal(C.sendTestEnabled(signed(t.state, true)), false);
+
+    const ok = C.reduce(t.state, { type: "jobCompleted", id: t.id, ok: true, message: "sent" });
+    assert.equal(ok.state.testPassed, true);
+    assert.equal(ok.state.testRunning, false);
+    assert.deepEqual(ok.state.testResult, { success: true, message: "sent" });
+    assert.deepEqual(ok.effects, [{ type: "saveState" }]);
+
+    const failed = C.reduce(t.state, { type: "jobCompleted", id: t.id, ok: false, message: "no" });
+    assert.equal(failed.state.testPassed, false);
+    assert.equal(C.retryVisible(failed.state), true);
+    assert.deepEqual(failed.effects, [{ type: "checkAuth" }]);
+});
+
+test("a stale test completion is ignored (model: completeJob, stale jobs)", () => {
+    const first = startTest(at(4));
+    const second = startTest(first.state);
+    const late = C.reduce(second.state, { type: "jobCompleted", id: first.id, ok: true, message: "" });
+    assert.equal(late.state.testPassed, false);
+    assert.equal(late.state.testRunning, true);
+    // Going back to compose makes the running test stale too.
+    const back3 = C.reduce(first.state, { type: "back", to: 3, accepted: true });
+    const back = C.reduce(back3.state, C.ACTIONS.back3);
+    const after = C.reduce(back.state, { type: "jobCompleted", id: first.id, ok: true, message: "" });
+    assert.equal(after.state.testPassed, false);
+});
+
+test("jobStarted records the job id only for a current request", () => {
+    const t = startTest(at(4));
+    assert.equal(C.reduce(t.state, { type: "jobStarted", id: t.id, jobId: "j" }).state.currentJobId, "j");
+    assert.equal(C.reduce(t.state, { type: "jobStarted", id: 999, jobId: "j" }).state.currentJobId, null);
+});
+
+test("a dry run that completes passes step 5", () => {
+    const r = C.reduce(at(4, { testPassed: true }), C.ACTIONS.next4);
+    const id = r.effects[0].id;
+    const done = C.reduce(r.state, { type: "jobCompleted", id, ok: true, message: "ready" });
+    assert.equal(done.state.verifyPassed, true);
+    assert.equal(C.nextEnabled(done.state, 5), true);
+    const failed = C.reduce(r.state, { type: "jobCompleted", id, ok: false, message: "bad" });
+    assert.equal(failed.state.verifyPassed, false);
+    assert.deepEqual(failed.state.verifyResult, { success: false, message: "bad" });
+});
+
+// --- reduce(): the send ---
+
+test("startSend shows progress and waits for the job id", () => {
+    const r = C.reduce(at(6, { verifyPassed: true }), C.ACTIONS.startSend);
+    assert.equal(C.sendPanel(r.state), "progress");
+    assert.equal(r.state.currentJobId, null);
+    assert.equal(C.back6Enabled(r.state), false);
+    assert.equal(r.effects[0].type, "startSendJob");
+    const resp = C.reduce(r.state, { type: "startSendResponse", id: r.effects[0].id, jobId: "s" });
+    assert.equal(resp.state.currentJobId, "s");
+    assert.deepEqual(resp.effects, [{ type: "streamSend", jobId: "s" }]);
+});
+
+test("Stop before the job id is known is sent once it is (model: stopHonoured)", () => {
+    const r = C.reduce(at(6), C.ACTIONS.startSend);
+    const stopped = C.reduce(r.state, C.ACTIONS.stopSend);
+    assert.deepEqual(stopped.effects, []);
+    const resp = C.reduce(stopped.state, { type: "startSendResponse", id: r.effects[0].id, jobId: "s" });
+    assert.deepEqual(resp.effects, [{ type: "postStop", jobId: "s" }, { type: "streamSend", jobId: "s" }]);
+    assert.deepEqual(C.reduce(resp.state, C.ACTIONS.stopSend).effects, [{ type: "postStop", jobId: "s" }]);
+});
+
+test("a send that can't start shows the error", () => {
+    const r = C.reduce(at(6), C.ACTIONS.startSend);
+    const resp = C.reduce(r.state, { type: "startSendResponse", id: r.effects[0].id, error: "busy" });
+    assert.equal(C.sendPanel(resp.state), "done");
+    assert.deepEqual(resp.effects, [{ type: "showSendError", message: "busy" }]);
+});
+
+test("a send lists its results if any email went out (model: failedSendReported)", () => {
+    const s = at(6, { sendStarted: true, currentJobId: "s" });
+    const cases = [
+        [{ status: "completed" }, "fetchResults"],
+        [{ status: "stopped" }, "fetchResults"],
+        [{ status: "failed", error: "x", results: [{}] }, "fetchResults"],
+        [{ status: "failed", error: "x", results: [] }, "showSendError"],
+    ];
+    for (const [result, effect] of cases) {
+        const r = C.reduce(s, Object.assign({ jobId: "s", result }, C.ACTIONS.finishSend));
+        assert.equal(r.effects[0].type, effect);
+    }
+    const listed = C.reduce(s, { type: "sendResults", data: { results: [{ email: "a" }] } });
+    assert.equal(C.sendPanel(listed.state), "done");
+    assert.deepEqual(listed.state.sendResults, [{ email: "a" }]);
+});
+
+test("every event is reachable from a model action or is a shell-only step", () => {
+    const fromActions = new Set(Object.values(C.ACTIONS).map(a => a.type));
+    // Shell-only: the job id arriving, and the send's results or error being
+    // fetched after finishSend; none changes the model's state.
+    const shellOnly = new Set(["jobStarted", "sendResults", "sendError"]);
+    for (const e of C.EVENTS) {
+        assert.ok(fromActions.has(e) || shellOnly.has(e), e);
+    }
 });

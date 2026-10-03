@@ -98,11 +98,6 @@ function finishRequest(id) {
     Object.assign(state, WizardCore.finishRequest(state, id));
 }
 
-// Navigation, edits and new data make a pending recipient preview stale.
-function dropPreview() {
-    Object.assign(state, WizardCore.dropRequests(state, ["preview"]));
-}
-
 function toggle(id, visible) {
     if (visible) show(id); else hide(id);
 }
@@ -237,8 +232,14 @@ async function runEffect(effect) {
         case "enterTest":
             checkAuthForStep4();
             break;
-        case "startVerify":
-            startVerify();
+        case "startJob":
+            await runJob(effect.mode, effect.id);
+            break;
+        case "saveState":
+            saveState();
+            break;
+        case "checkAuth":
+            checkAuthStatus();
             break;
         case "prepareSend":
             prepareSend();
@@ -251,6 +252,24 @@ async function runEffect(effect) {
             break;
         case "showSpreadsheet":
             showRestoredSpreadsheet();
+            break;
+        case "startSendJob":
+            await startSendJob(effect.id);
+            break;
+        case "postStop":
+            await postStop(effect.jobId);
+            break;
+        case "streamSend":
+            streamSend(effect.jobId);
+            break;
+        case "fetchResults":
+            await fetchResults(effect.jobId);
+            break;
+        case "showResults":
+            showResults(effect.data);
+            break;
+        case "showSendError":
+            showSendError(effect.message);
             break;
         case "reconnectSend":
             reconnectSend(effect.jobId);
@@ -362,8 +381,7 @@ function validateCompose() {
 
 function setSendMode(mode) {
     state.sendMode = mode;
-    dropPreview();
-    state.contentVersion++;
+    dispatch({ type: "contentChanged" });
     if (mode === "individual") {
         $("mode-individual").classList.add("active-mode");
         $("mode-individual").classList.remove("outline");
@@ -473,7 +491,7 @@ function showRestoredSpreadsheet() {
 // The "reconnectSend" effect: follow a send started before the reload.
 function reconnectSend(jobId) {
     window.addEventListener("beforeunload", beforeUnloadWarn);
-    streamEvents(jobId, "send-log", (result) => onSendComplete(jobId, result), showSendProgress);
+    streamSend(jobId);
 }
 
 // Check auth status
@@ -689,9 +707,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
             alert(data.error || "Upload failed");
             return;
         }
-        state.spreadsheetData = data;
-        dropPreview();
-        state.contentVersion++;
+        dispatch({ type: "spreadsheetLoaded", data });
         show("spreadsheet-info");
         renderSpreadsheetSummary(data);
         $("btn-next-1").disabled = false;
@@ -722,9 +738,7 @@ $("sheet-select").addEventListener("change", async () => {
             alert(data.error || "Failed to change sheet");
             return;
         }
-        state.spreadsheetData = data;
-        dropPreview();
-        state.contentVersion++;
+        dispatch({ type: "spreadsheetLoaded", data });
         renderSpreadsheetSummary(data);
         buildPreviewTable(data.columns, data.rows, data.total_rows);
         showFilterChips(data.columns);
@@ -935,8 +949,7 @@ function activateHtmlEditor() {
 // Real-time placeholder and HTML validation
 let validationTimer = null;
 function onTemplateChange() {
-    dropPreview();
-    state.contentVersion++;
+    dispatch({ type: "contentChanged" });
     clearTimeout(validationTimer);
     validationTimer = setTimeout(() => {
         validatePlaceholders();
@@ -1278,125 +1291,65 @@ function updateTestPreview() {
 
 $("test-email-input").addEventListener("input", updateTestPreview);
 
-async function sendTestEmail() {
-    const testAddr = $("test-email-input").value.trim();
-    if (!testAddr) {
-        alert("Please enter a test email address.");
-        return;
-    }
+function sendTestEmail() {
+    return dispatch({ type: "sendTestEmail", addressOk: Boolean($("test-email-input").value.trim()) });
+}
 
-    state.testPassed = false;
-    const id = beginRequest("test");
+// The "startJob" effect: start a test email or dry run for request `id` and
+// report its end as a jobCompleted event. Returns once the job has started;
+// the stream runs on.
+async function runJob(mode, id) {
     const isCurrent = () => requestIsCurrent(id);
+    const logPanel = mode === "test_email" ? "test-log" : "verify-log";
+    if (mode === "test_email") {
+        show("test-log");
+    } else {
+        const recipients = getRecipients();
+        $("verify-count").textContent = recipients ? recipients.length : "?";
+    }
+    $(logPanel).innerHTML = "";
     saveState();
 
-    state.testRunning = true;
-    state.testFailed = false;
-    state.testResult = null;
-    render();
-    show("test-log");
-    $("test-log").innerHTML = "";
-
-    const form = buildJobFormData("test_email");
-    form.set("test_email", testAddr);
+    const form = buildJobFormData(mode);
+    if (mode === "test_email") form.set("test_email", $("test-email-input").value.trim());
+    const completed = (ok, message) => dispatch({ type: "jobCompleted", id, ok, message });
 
     try {
         const resp = await apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } });
         const data = await resp.json();
         if (!isCurrent()) return;
         if (!resp.ok) {
-            finishRequest(id);
-            showTestResult(false, data.error || "Failed to start job");
+            await completed(false, data.error || (mode === "test_email" ? "Failed to start job" : "Verification failed"));
             return;
         }
-        state.currentJobId = data.job_id;
-        streamEvents(data.job_id, "test-log", (result) => {
-            finishRequest(id);
-            if (result.status === "completed") {
-                state.testPassed = true;
-                saveState();
-                showTestResult(true, "Test email sent successfully!");
+        await dispatch({ type: "jobStarted", id, jobId: data.job_id });
+        streamEvents(data.job_id, logPanel, (result) => {
+            const ok = result.status === "completed";
+            if (mode === "test_email") {
+                completed(ok, ok ? "Test email sent successfully!" : categoriseError(result.error || "Test email failed"));
             } else {
-                const errMsg = categoriseError(result.error || "Test email failed");
-                showTestResult(false, errMsg);
+                completed(ok, ok ? dryRunSummary() : result.error || "Verification failed");
             }
         }, null, isCurrent);
     } catch (e) {
-        if (isCurrent()) {
-            finishRequest(id);
-            showTestResult(false, `Error: ${e.message}`);
-        }
+        if (isCurrent()) await completed(false, `Error: ${e.message}`);
     }
 }
 
-function showTestResult(success, msg) {
-    state.testRunning = false;
-    state.testFailed = !success;
-    state.testResult = { success, message: msg };
-    render();
-    // A test that failed for want of a token shows the sign-in callout.
-    if (!success) checkAuthStatus();
-}
-
-// ---------------------------------------------------------------------------
-// Step 5: Verify (Dry Run)
-// ---------------------------------------------------------------------------
-function startVerify() {
-    const recipients = getRecipients();
-    $("verify-count").textContent = recipients ? recipients.length : "?";
-    $("verify-log").innerHTML = "";
-    state.verifyResult = null;
-    state.verifyPassed = false;
-    render();
-    const id = beginRequest("verify");
-    const isCurrent = () => requestIsCurrent(id);
-    saveState();
-
-    const form = buildJobFormData("dry_run");
-
-    apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } })
-        .then(r => r.json())
-        .then(data => {
-            if (!isCurrent()) return;
-            if (data.error) {
-                finishRequest(id);
-                showVerifyResult(false, data.error);
-                return;
-            }
-            state.currentJobId = data.job_id;
-            streamEvents(data.job_id, "verify-log", (result) => {
-                finishRequest(id);
-                if (result.status === "completed") {
-                    state.verifyPassed = true;
-                    saveState();
-                    const recs = getRecipients();
-                    const n = recs ? recs.length : "?";
-                    const estSec = recs ? recs.length * 2 : "?";
-                    let msg = `${n} emails ready to send. Estimated time: ~${estSec} seconds (2-second delay between sends).`;
-                    // Token expiry check
-                    if (_auth.tokenExpiresAt && recs) {
-                        const estEndMs = Date.now() + recs.length * 2000;
-                        if (estEndMs > _auth.tokenExpiresAt.getTime()) {
-                            msg += "\n\u26a0\ufe0f Warning: Your authentication token may expire before sending completes. Consider signing in again before proceeding.";
-                        }
-                    }
-                    showVerifyResult(true, msg);
-                } else {
-                    showVerifyResult(false, result.error || "Verification failed");
-                }
-            }, null, isCurrent);
-        })
-        .catch(e => {
-            if (isCurrent()) {
-                finishRequest(id);
-                showVerifyResult(false, `Error: ${e.message}`);
-            }
-        });
-}
-
-function showVerifyResult(success, msg) {
-    state.verifyResult = { success, message: msg };
-    render();
+// What a passed dry run reports: the count, the time it will take, and a
+// warning if the token may expire before the send ends.
+function dryRunSummary() {
+    const recs = getRecipients();
+    const n = recs ? recs.length : "?";
+    const estSec = recs ? recs.length * 2 : "?";
+    let msg = `${n} emails ready to send. Estimated time: ~${estSec} seconds (2-second delay between sends).`;
+    if (_auth.tokenExpiresAt && recs) {
+        const estEndMs = Date.now() + recs.length * 2000;
+        if (estEndMs > _auth.tokenExpiresAt.getTime()) {
+            msg += "\n\u26a0\ufe0f Warning: Your authentication token may expire before sending completes. Consider signing in again before proceeding.";
+        }
+    }
+    return msg;
 }
 
 // ---------------------------------------------------------------------------
@@ -1434,40 +1387,33 @@ function prepareSend() {
 
 $("send-confirm-input").addEventListener("input", render);
 
-async function startSend() {
-    state.sendStarted = true;
-    state.sendOutcome = null;
-    // Until the response names the send's job, Stop is queued on the request
-    // rather than sent to the previous (dry-run) job.
-    state.currentJobId = null;
-    const id = beginRequest("send");
+function startSend() {
+    return dispatch({ type: "startSend" });
+}
+
+// The "startSendJob" effect: start the send for request `id`.
+async function startSendJob(id) {
     $("send-log").innerHTML = "";
     $("send-progress-text").textContent = "Sending...";
     $("send-progress-bar").value = 0;
-    render();
-
-    // beforeunload warning
     window.addEventListener("beforeunload", beforeUnloadWarn);
-
     const form = buildJobFormData("send");
-
     try {
         const resp = await apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } });
         const data = await resp.json();
-        const stopQueued = Boolean(state.requests[id]?.stopQueued);
-        finishRequest(id);
         if (!resp.ok) {
-            showSendResult(false, data.error || "Failed to start send");
+            await dispatch({ type: "startSendResponse", id, error: data.error || "Failed to start send" });
             return;
         }
-        state.currentJobId = data.job_id;
-        if (stopQueued) stopSend();
-        streamEvents(data.job_id, "send-log", (result) => onSendComplete(data.job_id, result), showSendProgress);
+        await dispatch({ type: "startSendResponse", id, jobId: data.job_id });
     } catch (e) {
-        finishRequest(id);
-        window.removeEventListener("beforeunload", beforeUnloadWarn);
-        showSendResult(false, `Error: ${e.message}`);
+        await dispatch({ type: "startSendResponse", id, error: `Error: ${e.message}` });
     }
+}
+
+// The "streamSend" effect: follow the send's log until it ends.
+function streamSend(jobId) {
+    streamEvents(jobId, "send-log", (result) => dispatch({ type: "sendCompleted", jobId, result }), showSendProgress);
 }
 
 function showSendProgress(current, total) {
@@ -1476,74 +1422,66 @@ function showSendProgress(current, total) {
     $("send-progress-text").textContent = `Sending ${current} of ${total}...`;
 }
 
-// A send that failed part-way still lists the emails that went out
-// (spec/wizard.qnt, failedSendReported).
-function onSendComplete(jobId, result) {
-    window.removeEventListener("beforeunload", beforeUnloadWarn);
-    if (result.status === "completed" || result.status === "stopped"
-        || (result.results && result.results.length > 0)) {
-        fetchAndShowSendResults(jobId);
-    } else {
-        showSendResult(false, result.error || "Send failed");
-    }
-}
-
 function beforeUnloadWarn(e) {
     e.preventDefault();
     e.returnValue = "";
 }
 
-async function stopSend() {
-    if (!state.currentJobId) {
-        const id = WizardCore.pendingRequest(state, "send");
-        if (id !== null) Object.assign(state, WizardCore.updateRequest(state, id, { stopQueued: true }));
-        return;
-    }
-    await apiFetch(`/api/job/${state.currentJobId}/stop`, {
+function stopSend() {
+    return dispatch({ type: "stopSend" });
+}
+
+// The "postStop" effect.
+async function postStop(jobId) {
+    await apiFetch(`/api/job/${jobId}/stop`, {
         method: "POST",
         headers: { "X-CSRF-Token": CSRF_TOKEN },
     });
 }
 
-async function fetchAndShowSendResults(jobId) {
+// The "fetchResults" effect.
+async function fetchResults(jobId) {
     try {
         const resp = await apiFetch(`/api/job/${jobId}/status`);
         const data = await resp.json();
-        state.sendResults = data.results || [];
-        const summary = data.summary || {};
-        state.sendOutcome = "results";
-        render();
-
-        let html = `<h4>Results</h4>`;
-        if (data.status === "stopped") {
-            html += `<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`;
-        } else if (data.status === "failed") {
-            html += `<div class="callout callout-danger">Sending failed: ${escapeHtml(data.error || "unknown error")}. Recipients not listed below were not sent an email.</div>`;
-        }
-        html += `<p><strong>Total:</strong> ${summary.total || 0} | `;
-        html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
-        html += `<span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`;
-
-        if (state.sendResults.length > 0) {
-            html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>`;
-            for (const r of state.sendResults) {
-                const cls = r.success ? "success" : "failure";
-                html += `<tr class="${cls}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${escapeHtml(r.error || "")}</td></tr>`;
-            }
-            html += `</tbody></table>`;
-        }
-
-        $("send-result").innerHTML = html;
+        await dispatch({ type: "sendResults", data });
     } catch (e) {
-        showSendResult(false, `Error fetching results: ${e.message}`);
+        await dispatch({ type: "sendError", message: `Error fetching results: ${e.message}` });
     }
 }
 
-function showSendResult(success, msg) {
-    state.sendOutcome = "error";
-    render();
-    $("send-result").innerHTML = `<div class="callout ${success ? "callout-info" : "callout-danger"}">${escapeHtml(msg)}</div>`;
+// The "showResults" effect: list the send's results. A send that was
+// stopped or failed part-way still lists the emails that went out
+// (spec/wizard.qnt, failedSendReported).
+function showResults(data) {
     window.removeEventListener("beforeunload", beforeUnloadWarn);
+    const summary = data.summary || {};
+    let html = `<h4>Results</h4>`;
+    if (data.status === "stopped") {
+        html += `<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`;
+    } else if (data.status === "failed") {
+        html += `<div class="callout callout-danger">Sending failed: ${escapeHtml(data.error || "unknown error")}. Recipients not listed below were not sent an email.</div>`;
+    }
+    html += `<p><strong>Total:</strong> ${summary.total || 0} | `;
+    html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
+    html += `<span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`;
+
+    if (state.sendResults.length > 0) {
+        html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>`;
+        for (const r of state.sendResults) {
+            const cls = r.success ? "success" : "failure";
+            html += `<tr class="${cls}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${escapeHtml(r.error || "")}</td></tr>`;
+        }
+        html += `</tbody></table>`;
+    }
+
+    $("send-result").innerHTML = html;
+}
+
+// The "showSendError" effect.
+function showSendError(message) {
+    window.removeEventListener("beforeunload", beforeUnloadWarn);
+    $("send-result").innerHTML = `<div class="callout callout-danger">${escapeHtml(message)}</div>`;
 }
 
 function sanitizeCsvValue(val) {
