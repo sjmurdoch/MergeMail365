@@ -114,6 +114,13 @@ function getRecipients() { return state.getRecipients(); }
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+// Mirrors template.PLACEHOLDER_RE. Python's \w matches letters and digits
+// in any script, JavaScript's only ASCII ones, so the classes are spelled
+// out with the u flag: otherwise {{Prénom}} is substituted in the email but
+// not in the preview, and isn't checked against the columns.
+const PLACEHOLDER_SRC = String.raw`\{\{([\p{L}\p{N}_][\p{L}\p{N}_ ]*[\p{L}\p{N}_]|[\p{L}\p{N}_])\}\}`;
+function placeholderRe(flags = "") { return new RegExp(PLACEHOLDER_SRC, `u${flags}`); }
+
 function $(id) { return document.getElementById(id); }
 function hide(el) { if (typeof el === "string") el = $(el); el.classList.add("hidden"); }
 function show(el) { if (typeof el === "string") el = $(el); el.classList.remove("hidden"); }
@@ -295,7 +302,7 @@ function validateCompose() {
         alert("BCC mode requires a To: address.");
         return false;
     }
-    if (state.sendMode === "bcc" && /\{\{(\w[\w ]*\w|\w)\}\}/.test(subject + body)) {
+    if (state.sendMode === "bcc" && placeholderRe().test(subject + body)) {
         alert("BCC blast mode does not support {{placeholders}} in the subject or body. All recipients receive the same message.");
         return false;
     }
@@ -334,7 +341,7 @@ function setSendMode(mode) {
 function checkBccPlaceholders() {
     const subject = $("subject-input").value;
     const body = $("body-input").value;
-    const has = /\{\{\w+\}\}/.test(subject + body);
+    const has = placeholderRe().test(subject + body);
     if (has) {
         show("bcc-placeholder-warn");
     } else {
@@ -982,7 +989,7 @@ function validatePlaceholders() {
     const subject = $("subject-input").value;
     const body = $("body-input").value;
     const combined = subject + body;
-    const used = [...combined.matchAll(/\{\{(\w[\w ]*\w|\w)\}\}/g)].map(m => m[1]);
+    const used = [...combined.matchAll(placeholderRe("g"))].map(m => m[1]);
     const colsLower = state.spreadsheetData.columns.map(c => c.toLowerCase());
     const bad = used.filter(p => !colsLower.includes(p.toLowerCase()));
     const el = $("placeholder-errors");
@@ -1198,7 +1205,7 @@ function renderTemplate(template, data) {
     for (const [k, v] of Object.entries(data)) {
         lowerData[k.toLowerCase()] = v;
     }
-    return template.replace(/\{\{(\w[\w ]*\w|\w)\}\}/g, (match, key) => {
+    return template.replace(placeholderRe("g"), (match, key) => {
         return lowerData[key.toLowerCase()] !== undefined ? lowerData[key.toLowerCase()] : match;
     });
 }

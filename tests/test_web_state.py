@@ -815,6 +815,22 @@ class TestClientTemplateRendering:
         }""")
         assert result == "Hello {{unknown}}"
 
+    @pytest.mark.parametrize("template", [
+        "Bonjour {{Prénom}}",
+        "{{Straße}} {{名前}} {{Ονομα}} {{ID_٣}}",
+        "{{first name}} {{a}} {{x_1}}",
+        "{{ spaced }} {{bad-name}} {{}} {{é}}",
+        "{{Prénom}}, {{prénom}}, {{PRÉNOM}}",
+    ])
+    def test_render_template_matches_server(self, authenticated_page: Page, template: str):
+        """The preview substitutes exactly what template.render() does."""
+        from mail_merge.template import render
+
+        row = {"Prénom": "Zoé", "Straße": "S", "名前": "N", "Ονομα": "O", "ID_٣": "3",
+               "first name": "F", "a": "A", "x_1": "X", "é": "E", "spaced": "no", "bad-name": "no"}
+        js = authenticated_page.evaluate("([t, r]) => renderTemplate(t, r)", [template, row])
+        assert js == render(template, row)
+
 
 # ---------------------------------------------------------------------------
 # buildJobFormData
