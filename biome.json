@@ -1,7 +1,7 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
 	"files": {
-		"includes": ["src/mail_merge/web/static/app.js"]
+		"includes": ["src/mail_merge/web/static/app.js", "src/mail_merge/web/static/wizard-core.js"]
 	},
 	"linter": {
 		"enabled": true,
@@ -13,6 +13,6 @@
 		"enabled": false
 	},
 	"javascript": {
-		"globals": ["CSRF_TOKEN"]
+		"globals": ["CSRF_TOKEN", "WizardCore"]
 	}
 }

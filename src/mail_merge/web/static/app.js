@@ -3,40 +3,9 @@
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-const state = {
-    // Wizard navigation
-    currentStep: 1,
-
-    // Spreadsheet data: { columns, rows, sheets, file_name, total_rows }
-    spreadsheetData: null,
-
-    // Preview navigation index
-    previewIndex: 0,
-
-    // "individual" | "bcc"
-    sendMode: "individual",
-
-    // Step gate flags
-    testPassed: false,
-    verifyPassed: false,
-    sendStarted: false,
-
-    // Background job tracking
-    currentJobId: null,
-    // Generation counters for test and dry-run jobs. Starting a job or
-    // resetting results bumps the counter; a job whose stamp no longer
-    // matches is stale and its completion is ignored (spec/wizard.qnt).
-    testGen: 0,
-    verifyGen: 0,
-    // Bumped by any navigation or edit, so a recipient preview that arrives
-    // after the user has moved on or changed the content is dropped
-    // (spec/wizard.qnt, noStepJump and previewHonest).
-    previewGen: 0,
-    // "Stop sending" pressed before the start-job response gave the send's
-    // job id; sent once the id is known (spec/wizard.qnt, stopHonoured).
-    stopQueued: false,
-    sendResults: null,
-
+// Workflow fields and their reset rules live in wizard-core.js; the page
+// adds what only it needs (the editor, the email wrapper, auto-save).
+const state = Object.assign(WizardCore.initialState(), {
     // Dirty flag for localStorage auto-save
     formDirty: false,
 
@@ -53,35 +22,18 @@ const state = {
 
     /** Reset downstream state when compose/data changes */
     resetTestAndVerify() {
-        this.testPassed = false;
-        this.verifyPassed = false;
-        this.testGen++;
-        this.verifyGen++;
-        $("btn-send-test").disabled = !_auth.isSignedIn;
-        $("btn-send-test").removeAttribute("aria-busy");
-        $("btn-next-4").disabled = true;
-        $("btn-next-5").disabled = true;
+        Object.assign(this, WizardCore.resetTestAndVerify(this));
         $("test-log").innerHTML = "";
         hide("test-log");
-        hide("test-result");
         $("verify-log").innerHTML = "";
-        hide("verify-result");
+        render();
     },
 
     /** Full reset for "New merge" */
     resetAll() {
-        this.spreadsheetData = null;
-        this.sendResults = null;
-        this.testPassed = false;
-        this.verifyPassed = false;
-        this.testGen++;
-        this.verifyGen++;
-        this.sendStarted = false;
-        this.currentJobId = null;
-        this.previewIndex = 0;
-        this.currentStep = 1;
+        Object.assign(this, WizardCore.newMergeState(this));
     },
-};
+});
 
 // Expose on window so E2E tests can set flags via page.evaluate()
 window.state = state;
@@ -128,6 +80,61 @@ function escapeHtml(s) {
     const d = document.createElement("div");
     d.textContent = s;
     return d.innerHTML;
+}
+
+function toggle(id, visible) {
+    if (visible) show(id); else hide(id);
+}
+
+function renderResult(id, result) {
+    const el = $(id);
+    toggle(el, result !== null);
+    if (result !== null) {
+        el.className = result.success ? "callout callout-info" : "callout callout-danger";
+        el.textContent = result.message;
+    }
+}
+
+// The only code that enables the step 4-6 buttons or shows the parts of
+// those steps; it reads only WizardCore selectors (named after the pure defs
+// in spec/wizard.qnt). Call it after any change to state or _auth.
+function render() {
+    const C = WizardCore;
+    const auth = { signedIn: _auth.isSignedIn };
+
+    // Step 4
+    $("btn-send-test").disabled = !C.sendTestEnabled(state, auth);
+    if (state.testRunning) $("btn-send-test").setAttribute("aria-busy", "true");
+    else $("btn-send-test").removeAttribute("aria-busy");
+    toggle("btn-retry-test", C.retryVisible(state));
+    $("btn-retry-test").disabled = !C.sendTestEnabled(state, auth);
+    $("btn-next-4").disabled = !C.nextEnabled(state, 4);
+    renderResult("test-result", state.testResult);
+
+    // Step 5
+    $("btn-next-5").disabled = !C.nextEnabled(state, 5);
+    renderResult("verify-result", state.verifyResult);
+
+    // The test email and the send go out from the signed-in account, so
+    // steps 4 and 6 offer sign-in while the page shows signed out.
+    const offered = C.signInOffered(state, auth);
+    toggle("signin-callout-4", offered && state.currentStep === 4);
+    toggle("signin-callout-6", offered && state.currentStep === 6);
+    // In browser mode, signing in leaves the page and comes back to step 1.
+    for (const el of document.querySelectorAll(".signin-reload-note")) {
+        toggle(el, !_auth.desktopMode);
+    }
+
+    // Step 6
+    const panel = C.sendPanel(state);
+    toggle("send-confirm", panel === "confirm");
+    toggle("send-progress", panel === "progress");
+    toggle("send-log", state.sendStarted);
+    toggle("send-result", panel === "done");
+    toggle("send-nav", panel !== "done");
+    toggle("send-done-nav", panel === "done");
+    $("btn-back-6").disabled = !C.back6Enabled(state);
+    $("btn-do-send").disabled = !C.doSendEnabled(state, auth, sendConfirmed());
 }
 
 function updateStepUI(n) {
@@ -212,6 +219,7 @@ async function goToStep(n) {
     state.currentStep = n;
     saveState();
     updateStepUI(n);
+    render();
 }
 
 function resetTestAndVerify() {
@@ -320,6 +328,7 @@ function validateCompose() {
 function setSendMode(mode) {
     state.sendMode = mode;
     state.previewGen++;
+    state.contentVersion++;
     if (mode === "individual") {
         $("mode-individual").classList.add("active-mode");
         $("mode-individual").classList.remove("outline");
@@ -429,14 +438,12 @@ async function loadConfig() {
         if (data.active_job_id) {
             state.currentJobId = data.active_job_id;
             state.sendStarted = true;
+            state.sendOutcome = null;
             // Jump to step 6 (Send) and connect to the existing stream
-            hide("send-confirm");
-            show("send-progress");
-            show("send-log");
-            $("btn-back-6").disabled = true;
             window.addEventListener("beforeunload", beforeUnloadWarn);
             state.currentStep = 6;
             updateStepUI(6);
+            render();
             const jobId = state.currentJobId;
             streamEvents(jobId, "send-log", (result) => onSendComplete(jobId, result), showSendProgress);
         } else if (data.current_step > 1) {
@@ -477,29 +484,8 @@ async function checkAuthStatus() {
             _auth.tokenExpiresAt = null;
         }
         updateSignInButton();
-        updateAuthGates();
+        render();
     } catch (_e) { /* ignore */ }
-}
-
-// The test email and the send go out from the signed-in account. While the
-// page shows signed out, steps 4 and 6 disable their send buttons and offer
-// sign-in on the step itself (spec/wizard.qnt, testNeedsSignIn,
-// sendNeedsSignIn and canProgress).
-function updateAuthGates() {
-    const signedIn = _auth.isSignedIn;
-    for (const id of ["signin-callout-4", "signin-callout-6"]) {
-        if (signedIn) hide(id); else show(id);
-    }
-    // In browser mode, signing in leaves the page and comes back to step 1.
-    for (const el of document.querySelectorAll(".signin-reload-note")) {
-        if (_auth.desktopMode) hide(el); else show(el);
-    }
-    const testBusy = $("btn-send-test").getAttribute("aria-busy") === "true";
-    $("btn-send-test").disabled = testBusy || !signedIn;
-    $("btn-retry-test").disabled = !signedIn;
-    if (!state.sendStarted) {
-        $("btn-do-send").disabled = !signedIn || !sendConfirmed();
-    }
 }
 
 function sendConfirmed() {
@@ -689,6 +675,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         }
         state.spreadsheetData = data;
         state.previewGen++;
+        state.contentVersion++;
         show("spreadsheet-info");
         renderSpreadsheetSummary(data);
         $("btn-next-1").disabled = false;
@@ -721,6 +708,7 @@ $("sheet-select").addEventListener("change", async () => {
         }
         state.spreadsheetData = data;
         state.previewGen++;
+        state.contentVersion++;
         renderSpreadsheetSummary(data);
         buildPreviewTable(data.columns, data.rows, data.total_rows);
         showFilterChips(data.columns);
@@ -932,6 +920,7 @@ function activateHtmlEditor() {
 let validationTimer = null;
 function onTemplateChange() {
     state.previewGen++;
+    state.contentVersion++;
     clearTimeout(validationTimer);
     validationTimer = setTimeout(() => {
         validatePlaceholders();
@@ -1285,13 +1274,12 @@ async function sendTestEmail() {
     const isCurrent = () => gen === state.testGen;
     saveState();
 
-    $("btn-next-4").disabled = true;
-    $("btn-send-test").disabled = true;
-    $("btn-send-test").setAttribute("aria-busy", "true");
-    hide("btn-retry-test");
+    state.testRunning = true;
+    state.testFailed = false;
+    state.testResult = null;
+    render();
     show("test-log");
     $("test-log").innerHTML = "";
-    hide("test-result");
 
     const form = buildJobFormData("test_email");
     form.set("test_email", testAddr);
@@ -1309,12 +1297,10 @@ async function sendTestEmail() {
             if (result.status === "completed") {
                 state.testPassed = true;
                 saveState();
-                $("btn-next-4").disabled = false;
                 showTestResult(true, "Test email sent successfully!");
             } else {
                 const errMsg = categoriseError(result.error || "Test email failed");
                 showTestResult(false, errMsg);
-                show("btn-retry-test");
             }
         }, null, isCurrent);
     } catch (e) {
@@ -1323,14 +1309,12 @@ async function sendTestEmail() {
 }
 
 function showTestResult(success, msg) {
-    $("btn-send-test").disabled = !_auth.isSignedIn;
-    $("btn-send-test").removeAttribute("aria-busy");
+    state.testRunning = false;
+    state.testFailed = !success;
+    state.testResult = { success, message: msg };
+    render();
     // A test that failed for want of a token shows the sign-in callout.
     if (!success) checkAuthStatus();
-    const el = $("test-result");
-    show(el);
-    el.className = success ? "callout callout-info" : "callout callout-danger";
-    el.textContent = msg;
 }
 
 // ---------------------------------------------------------------------------
@@ -1340,9 +1324,9 @@ function startVerify() {
     const recipients = getRecipients();
     $("verify-count").textContent = recipients ? recipients.length : "?";
     $("verify-log").innerHTML = "";
-    hide("verify-result");
-    $("btn-next-5").disabled = true;
+    state.verifyResult = null;
     state.verifyPassed = false;
+    render();
     const gen = ++state.verifyGen;
     const isCurrent = () => gen === state.verifyGen;
     saveState();
@@ -1362,7 +1346,6 @@ function startVerify() {
                 if (result.status === "completed") {
                     state.verifyPassed = true;
                     saveState();
-                    $("btn-next-5").disabled = false;
                     const recs = getRecipients();
                     const n = recs ? recs.length : "?";
                     const estSec = recs ? recs.length * 2 : "?";
@@ -1384,10 +1367,8 @@ function startVerify() {
 }
 
 function showVerifyResult(success, msg) {
-    const el = $("verify-result");
-    show(el);
-    el.className = success ? "callout callout-info" : "callout callout-danger";
-    el.textContent = msg;
+    state.verifyResult = { success, message: msg };
+    render();
 }
 
 // ---------------------------------------------------------------------------
@@ -1417,36 +1398,25 @@ function prepareSend() {
     }
     $("send-confirm-details").innerHTML = details;
 
-    show("send-confirm");
-    hide("send-progress");
-    hide("send-log");
-    hide("send-result");
-    show("send-nav");
-    hide("send-done-nav");
+    state.sendOutcome = null;
     $("send-confirm-input").value = "";
-    $("btn-do-send").disabled = true;
-    // startSend() disables Back; re-enable it for the next merge.
-    $("btn-back-6").disabled = false;
+    render();
     checkAuthStatus();
 }
 
-$("send-confirm-input").addEventListener("input", () => {
-    $("btn-do-send").disabled = !_auth.isSignedIn || !sendConfirmed();
-});
+$("send-confirm-input").addEventListener("input", render);
 
 async function startSend() {
     state.sendStarted = true;
+    state.sendOutcome = null;
     // Until the response names the send's job, Stop is queued rather than
     // sent to the previous (dry-run) job.
     state.currentJobId = null;
     state.stopQueued = false;
-    hide("send-confirm");
-    show("send-progress");
-    show("send-log");
     $("send-log").innerHTML = "";
     $("send-progress-text").textContent = "Sending...";
     $("send-progress-bar").value = 0;
-    $("btn-back-6").disabled = true;
+    render();
 
     // beforeunload warning
     window.addEventListener("beforeunload", beforeUnloadWarn);
@@ -1512,11 +1482,8 @@ async function fetchAndShowSendResults(jobId) {
         const data = await resp.json();
         state.sendResults = data.results || [];
         const summary = data.summary || {};
-
-        hide("send-progress");
-        show("send-result");
-        hide("send-nav");
-        show("send-done-nav");
+        state.sendOutcome = "results";
+        render();
 
         let html = `<h4>Results</h4>`;
         if (data.status === "stopped") {
@@ -1544,10 +1511,8 @@ async function fetchAndShowSendResults(jobId) {
 }
 
 function showSendResult(success, msg) {
-    hide("send-progress");
-    show("send-result");
-    hide("send-nav");
-    show("send-done-nav");
+    state.sendOutcome = "error";
+    render();
     $("send-result").innerHTML = `<div class="callout ${success ? "callout-info" : "callout-danger"}">${escapeHtml(msg)}</div>`;
     window.removeEventListener("beforeunload", beforeUnloadWarn);
 }
@@ -1630,28 +1595,17 @@ function newMerge() {
     $("test-log").innerHTML = "";
     hide("test-log");
     $("test-result").innerHTML = "";
-    hide("test-result");
-    $("btn-next-4").disabled = true;
-    hide("btn-retry-test");
 
     // Clear Step 5 (Verify)
     $("verify-log").innerHTML = "";
     hide("verify-log");
     $("verify-result").innerHTML = "";
-    hide("verify-result");
-    $("btn-next-5").disabled = true;
 
     // Clear Step 6 (Send)
     $("send-confirm-input").value = "";
     $("send-log").innerHTML = "";
-    hide("send-log");
     $("send-result").innerHTML = "";
-    hide("send-result");
     $("send-progress-bar").value = 0;
-    show("send-confirm");
-    hide("send-progress");
-    show("send-nav");
-    hide("send-done-nav");
 
     // Clear localStorage
     try {

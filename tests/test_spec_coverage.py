@@ -237,3 +237,32 @@ class TestRequirements:
         for req, names in self._checked_by().items():
             stray = names - all_invariants() - witnesses
             assert not stray, f"{req}: {sorted(stray)} are neither in allInvariants nor listed as witnesses"
+
+
+# Controls whose `disabled` state or visibility only render() may set; it
+# derives them from WizardCore selectors named after the model's pure defs.
+RENDERED_CONTROLS = [
+    "btn-send-test", "btn-retry-test", "btn-next-4", "btn-next-5", "btn-do-send", "btn-back-6",
+    "test-result", "verify-result", "signin-callout-4", "signin-callout-6",
+    "send-confirm", "send-progress", "send-log", "send-result", "send-nav", "send-done-nav",
+]
+
+
+class TestRenderOwnsControls:
+    def test_only_render_sets_rendered_controls(self):
+        text = APP_JS.read_text(encoding="utf-8")
+        start = text.index("function render() {")
+        end = text.index("\n}\n", start)
+        outside = text[:start] + text[end:]
+        offenders = []
+        for control in RENDERED_CONTROLS:
+            q = re.escape(control)
+            pattern = (
+                rf'\$\("{q}"\)\.(disabled\s*=|setAttribute\("aria-busy"|removeAttribute\("aria-busy")'
+                rf'|\b(show|hide|toggle)\("{q}"'
+            )
+            offenders += [control for _ in re.finditer(pattern, outside)]
+        assert not offenders, (
+            "Set these through state and render() (spec/wizard.qnt selectors), "
+            f"not directly: {sorted(set(offenders))}"
+        )

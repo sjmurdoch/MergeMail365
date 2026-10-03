@@ -56,4 +56,4 @@ jobs:
           version: 2.5.14
 
       - name: Lint app.js
-        run: biome lint src/mail_merge/web/static/app.js
+        run: biome lint src/mail_merge/web/static/app.js src/mail_merge/web/static/wizard-core.js
