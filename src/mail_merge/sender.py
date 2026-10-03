@@ -183,6 +183,7 @@ def send_bcc_blast(
     dry_run: bool = False,
     opts: MessageOptions | None = None,
     should_stop: Callable[[], bool] | None = None,
+    on_result: Callable[[SendResult], None] | None = None,
 ) -> list[SendResult]:
     """Send a single subject/body to all emails via BCC, in batches of up to 499.
 
@@ -190,7 +191,8 @@ def send_bcc_blast(
     Returns one SendResult per recipient email: when a batch succeeds or
     fails, every recipient in that batch receives the same result.
     If ``should_stop`` returns ``True`` before a batch, no further batches
-    are sent and only the results so far are returned.
+    are sent and only the results so far are returned. ``on_result`` is
+    called with each recipient's result as it is recorded.
     """
     if opts is None:
         opts = MessageOptions()
@@ -207,10 +209,14 @@ def send_bcc_blast(
         label = f"batch {i + 1}/{total} ({len(batch)} recipients)"
         if dry_run:
             logger.info("🔄 DRY RUN %s | Subject: %s", label, subject)
-            results.extend(
+            batch_results = [
                 SendResult(email=addr, success=True, status_code=None)
                 for addr in batch
-            )
+            ]
+            results.extend(batch_results)
+            if on_result is not None:
+                for r in batch_results:
+                    on_result(r)
             continue
         if get_token is None:
             raise RuntimeError("get_token is required when not in dry-run mode")
@@ -222,7 +228,7 @@ def send_bcc_blast(
             result = send_one(get_token, to, subject, body, opts=batch_opts)
         except Exception as exc:
             raise SendAborted(str(exc), results) from exc
-        results.extend(
+        batch_results = [
             SendResult(
                 email=addr,
                 success=result.success,
@@ -231,7 +237,11 @@ def send_bcc_blast(
                 throttled=result.throttled,
             )
             for addr in batch
-        )
+        ]
+        results.extend(batch_results)
+        if on_result is not None:
+            for r in batch_results:
+                on_result(r)
     return results
 
 
@@ -246,6 +256,7 @@ def send_all(
     delay: float = 0.0,
     opts: MessageOptions | None = None,
     should_stop: Callable[[], bool] | None = None,
+    on_result: Callable[[SendResult], None] | None = None,
 ) -> list[SendResult]:
     """Send personalised emails to all recipients.
 
@@ -254,7 +265,7 @@ def send_all(
     in the ``To:`` header (e.g. ``"Alice <alice@example.com>"``).
     ``should_stop`` is checked before each recipient; once it returns
     ``True``, no further emails are sent and only the results so far are
-    returned.
+    returned. ``on_result`` is called with each result as it is recorded.
     """
     from mail_merge.template import render
 
@@ -279,6 +290,8 @@ def send_all(
             )
             logger.debug("Body:\n%s", rendered_body)
             results.append(SendResult(email=to.address, success=True, status_code=None))
+            if on_result is not None:
+                on_result(results[-1])
         else:
             if get_token is None:
                 raise RuntimeError("get_token is required when not in dry-run mode")
@@ -290,6 +303,8 @@ def send_all(
             except Exception as exc:
                 raise SendAborted(str(exc), results) from exc
             results.append(result)
+            if on_result is not None:
+                on_result(result)
             if not result.success:
                 logger.error("❌ Failed to send to %s: %s", to.address, result.error)
 

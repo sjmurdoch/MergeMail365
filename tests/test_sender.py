@@ -644,3 +644,29 @@ class TestSendAborted:
                                EmailAddress(address="to@x.com"), "Hi", "Body",
                                opts=MessageOptions(cc=cc))
         assert [r.email for r in exc_info.value.results] == ["a@x.com"]
+
+
+class TestOnResult:
+    """on_result reports each result as the loop records it (the web job's sent count)."""
+
+    @responses.activate
+    def test_send_all_reports_each_email(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        seen: list[str] = []
+        recipients = [{"email": "a@example.com"}, {"email": "b@example.com"}]
+        send_all(lambda: "tok", recipients, "email", "Hi", "Body", on_result=lambda r: seen.append(r.email))
+        assert seen == ["a@example.com", "b@example.com"]
+
+    def test_dry_run_reports_too(self):
+        seen: list[str] = []
+        send_all(None, [{"email": "a@example.com"}], "email", "Hi", "Body", dry_run=True,
+                 on_result=lambda r: seen.append(r.email))
+        assert seen == ["a@example.com"]
+
+    @responses.activate
+    def test_bcc_blast_reports_each_recipient(self):
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        seen: list[str] = []
+        send_bcc_blast(lambda: "tok", ["a@x.com", "b@x.com"], EmailAddress(address="to@x.com"),
+                       "Hi", "Body", on_result=lambda r: seen.append(r.email))
+        assert seen == ["a@x.com", "b@x.com"]

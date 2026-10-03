@@ -1,7 +1,6 @@
 """Flask application for MergeMail365 web UI."""
 
 import atexit
-import enum
 import hashlib
 import json
 import logging
@@ -12,9 +11,6 @@ import secrets
 import shutil
 import tempfile
 import threading
-import time
-import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -34,6 +30,7 @@ from flask import (
 
 from mail_merge.config import load_config
 from mail_merge.sender import SendResult
+from mail_merge.web.jobs import FINISHED_STATUSES, JobStore
 
 logger = logging.getLogger(__name__)
 
@@ -66,66 +63,11 @@ _STRIP_DOC_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 
-class JobStatus(enum.Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    STOPPED = "stopped"
-
-
-FINISHED_STATUSES = (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.STOPPED)
-
-
-@dataclass
-class Job:
-    id: str
-    mode: str = ""  # "dry_run", "test_email" or "send"
-    status: JobStatus = JobStatus.PENDING
-    events: queue.Queue[dict[str, Any] | None] = field(default_factory=queue.Queue)
-    results: list[SendResult] | None = None
-    error: str | None = None
-    stop_requested: bool = False
-    # Set when the send loop saw stop_requested and stopped early.
-    stopped_early: bool = False
-
-
-class JobLogHandler(logging.Handler):
-    """Captures mail_merge logger output into a job's event queue."""
-
-    def __init__(self, job: Job) -> None:
-        super().__init__()
-        self.job = job
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            self.job.events.put({
-                "type": "log",
-                "data": {
-                    "message": self.format(record),
-                    "level": record.levelname,
-                    "timestamp": time.strftime("%H:%M:%S", time.localtime(record.created)),
-                },
-            })
-        except Exception:
-            pass
-
-
-# In-memory job store (single job at a time)
-_jobs: dict[str, Job] = {}
-_jobs_lock = threading.Lock()
-
-
-def _running_send_job() -> Job | None:
-    """The send job still in progress, if any.
-
-    The app has one user, so this is checked across sessions: a page whose
-    start-job response never arrived has no job id in its session cookie.
-    """
-    for job in _jobs.values():
-        if job.mode == "send" and job.status not in FINISHED_STATUSES:
-            return job
-    return None
+# The job lifecycle lives in web/jobs.py. One store per process: the app
+# has one user. _jobs and _running_send_job stay importable for tests.
+_job_store = JobStore()
+_jobs = _job_store.jobs
+_running_send_job = _job_store.running_send
 
 # Track temp directories for cleanup
 _temp_dirs: list[str] = []
@@ -551,14 +493,7 @@ def create_app(
         # A running send is resumed even if the session doesn't name it: a
         # reload before the start-job response arrived never got the cookie
         # (spec/wizard.qnt, runningSendVisible).
-        active_job_id = None
-        job_id = session.get("job_id")
-        active_job = _jobs.get(job_id) if job_id else None
-        running_send = _running_send_job()
-        if running_send:
-            active_job_id = running_send.id
-        elif active_job and active_job.mode == "send":
-            active_job_id = job_id
+        active_job_id = _job_store.active_job_id(session.get("job_id"))
 
         fixed_cid = app.config["FIXED_CLIENT_ID"]
         fixed_tid = app.config["FIXED_TENANT_ID"]
@@ -923,75 +858,13 @@ def create_app(
 
             kwargs["token_provider"] = _make_token_provider(client_id, tenant_id)
 
-        with _jobs_lock:
-            # Checked again here: two requests can pass the early check.
-            if mode == "send" and _running_send_job():
-                return jsonify({"error": "A send is already in progress"}), 409  # type: ignore[return-value]
-
-            # Evict completed/failed jobs before creating a new one
-            for jid in list(_jobs):
-                if _jobs[jid].status in FINISHED_STATUSES:
-                    del _jobs[jid]
-
-            # Create and start job
-            job = Job(id=str(uuid.uuid4()), mode=mode)
-            _jobs[job.id] = job
-
-        # The send loop checks this before each email (spec/wizard.qnt,
-        # stopHonoured). api_job_stop sets stop_requested from another thread.
-        def _should_stop() -> bool:
-            if job.stop_requested:
-                job.stopped_early = True
-                return True
-            return False
-
-        kwargs["should_stop"] = _should_stop
-
-        def _run_job() -> None:
-            job.status = JobStatus.RUNNING
-            logger.debug("Job %s started (mode=%r)", job.id, mode)
-            handler = JobLogHandler(job)
-            handler.setLevel(logging.INFO)
-            handler.setFormatter(logging.Formatter("%(message)s"))
-            mm_logger = logging.getLogger("mail_merge")
-            mm_logger.addHandler(handler)
-            try:
-                from mail_merge.api import send_merge
-                results = send_merge(**kwargs)
-                job.results = results
-                if job.stopped_early:
-                    job.status = JobStatus.STOPPED
-                    job.events.put({
-                        "type": "stopped",
-                        "data": {"message": "Job stopped"},
-                    })
-                else:
-                    job.status = JobStatus.COMPLETED
-                    job.events.put({
-                        "type": "completed",
-                        "data": {"message": "Job completed"},
-                    })
-            except Exception as exc:
-                logger.debug("send_merge job failed", exc_info=True)
-                from mail_merge.sender import SendAborted
-                if isinstance(exc, SendAborted):
-                    # Keep the emails that went out before the error
-                    # (spec/wizard.qnt, failedSendReported).
-                    job.results = exc.results
-                job.error = str(exc)
-                job.status = JobStatus.FAILED
-                job.events.put({
-                    "type": "error",
-                    "data": {"message": str(exc)},
-                })
-            finally:
-                mm_logger.removeHandler(handler)
-                job.events.put(None)  # Sentinel
-
-        thread = threading.Thread(
-            target=_run_job, name=f"job-{job.id[:8]}", daemon=True,
-        )
-        thread.start()
+        # Checked again here: two requests can pass the early check.
+        job = _job_store.create(mode)
+        if job is None:
+            return jsonify({"error": "A send is already in progress"}), 409  # type: ignore[return-value]
+        # The job's runner adds should_stop (checked before each email,
+        # stopHonoured) and on_result (counts emails sent).
+        _job_store.start(job, kwargs)
 
         session["job_id"] = job.id
         return jsonify({"job_id": job.id})
@@ -1054,10 +927,8 @@ def create_app(
 
     @app.route("/api/job/<job_id>/stop", methods=["POST"])
     def api_job_stop(job_id: str) -> Response:
-        job = _jobs.get(job_id)
-        if not job:
+        if not _job_store.request_stop(job_id):
             return jsonify({"error": "Job not found"}), 404  # type: ignore[return-value]
-        job.stop_requested = True
         return jsonify({"message": "Stop requested"})
 
     # ----- Diagnostics -----
