@@ -227,7 +227,39 @@
         return { state: s, effects: [{ type: "showAuth", status: event.status }] };
     }
 
-    const REDUCERS = { goTo, back, previewResponse, authStatus };
+    /** /api/config answered on page load (the model's reload). Test and
+     *  dry-run passes never survive a reload; a send still running, or
+     *  finished but not yet shown, takes the page straight to step 6. */
+    function configLoaded(s0, event) {
+        const config = event.config;
+        const s = Object.assign({}, s0, { testPassed: false, verifyPassed: false });
+        const effects = [];
+        if (config.spreadsheet) {
+            s.spreadsheetData = config.spreadsheet;
+            effects.push({ type: "showSpreadsheet" });
+        }
+        if (config.active_job_id) {
+            Object.assign(s, {
+                currentJobId: config.active_job_id,
+                sendStarted: true,
+                sendOutcome: null,
+                currentStep: 6,
+            });
+            effects.push({ type: "reconnectSend", jobId: config.active_job_id });
+        }
+        return { state: s, effects };
+    }
+
+    /** "New merge": everything back to step 1, the server's session data
+     *  and temp files cleared, and every form field emptied. */
+    function newMerge(s0) {
+        return {
+            state: Object.assign({}, s0, newMergeState(s0)),
+            effects: [{ type: "resetServer" }, { type: "clearForm" }],
+        };
+    }
+
+    const REDUCERS = { goTo, back, previewResponse, authStatus, configLoaded, newMerge };
 
     function reduce(s, event) {
         const reducer = REDUCERS[event.type];
@@ -248,6 +280,8 @@
         back5: { type: "back", to: 4 },
         next5: { type: "goTo", to: 6 },
         back6: { type: "back", to: 4 },
+        newMerge: { type: "newMerge" },
+        reload: { type: "configLoaded" },
     };
 
     // --- Selectors. s.signedIn is what the page last fetched from

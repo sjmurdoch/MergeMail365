@@ -214,6 +214,9 @@ async function dispatch(event) {
     updateStepUI(state.currentStep);
     render();
     for (const effect of effects) await runEffect(effect);
+    // Effects can change inputs the selectors read (clearForm empties the
+    // SEND confirmation).
+    if (effects.length > 0) render();
 }
 
 async function runEffect(effect) {
@@ -245,6 +248,19 @@ async function runEffect(effect) {
             break;
         case "showAuth":
             showAuth(effect.status);
+            break;
+        case "showSpreadsheet":
+            showRestoredSpreadsheet();
+            break;
+        case "reconnectSend":
+            reconnectSend(effect.jobId);
+            break;
+        case "resetServer":
+            // Clean up server-side temp files and session state
+            apiFetch("/api/reset", { method: "POST" }).catch(() => {});
+            break;
+        case "clearForm":
+            clearForm();
             break;
         default:
             throw new Error(`Unknown effect: ${effect.type}`);
@@ -416,70 +432,48 @@ async function loadConfig() {
             state.emailWrapper = data.email_wrapper;
         }
 
-        // Restore session spreadsheet if it exists
-        if (data.spreadsheet) {
-            const s = data.spreadsheet;
-            state.spreadsheetData = s;
-            show("spreadsheet-info");
-            renderSpreadsheetSummary(s);
-            populateSheetSelect(s.sheets);
-            if (s.active_sheet) $("sheet-select").value = s.active_sheet;
-            buildPreviewTable(s.columns, s.rows, s.total_rows);
-            showPlaceholderChips(s.columns);
-            showFilterChips(s.columns);
-
-            // Restore saved sheet selection — if it differs from the
-            // server's active sheet, re-fetch the preview for that sheet.
-            const savedSheet = localStorage.getItem("mm_sheet");
-            if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== (s.active_sheet || s.sheets[0])) {
-                $("sheet-select").value = savedSheet;
-                // Trigger a change to re-fetch the sheet's data
-                $("sheet-select").dispatchEvent(new Event("change"));
-            }
-
-            // Restore chosen columns if they match what's in the sheet
-            const savedEmailCol = localStorage.getItem("mm_email_col");
-            if (savedEmailCol && s.columns.includes(savedEmailCol)) {
-                $("email-column").value = savedEmailCol;
-            }
-            const savedNameCol = localStorage.getItem("mm_name_col");
-            if (savedNameCol && s.columns.includes(savedNameCol)) {
-                $("name-column").value = savedNameCol;
-            }
-        }
-
-        // Restore wizard state — test and verify results don't survive
-        // a page reload because the server-side job results are transient.
-        // Only trust these flags when reconnecting to an active job.
-        state.testPassed = false;
-        state.verifyPassed = false;
-
-        if (data.active_job_id) {
-            state.currentJobId = data.active_job_id;
-            state.sendStarted = true;
-            state.sendOutcome = null;
-            // Jump to step 6 (Send) and connect to the existing stream
-            window.addEventListener("beforeunload", beforeUnloadWarn);
-            state.currentStep = 6;
-            updateStepUI(6);
-            render();
-            const jobId = state.currentJobId;
-            streamEvents(jobId, "send-log", (result) => onSendComplete(jobId, result), showSendProgress);
-        } else if (data.current_step > 1) {
-            // On reload, we have the spreadsheet in session but not the
-            // filtered recipients list.  We can only safely restore to
-            // step 1 (let the user re-advance) or step 2 (re-run the
-            // preview fetch).  Steps 3+ require loading recipients and
-            // steps 4-6 require test/verify to have actually run in this
-            // page session, so fall back to step 1.
-            if (data.current_step >= 2 && state.spreadsheetData) {
-                // Restore to step 1 — the user can re-advance with one click
-                // since all their inputs are still populated.
-                state.currentStep = 1;
-                updateStepUI(1);
-            }
-        }
+        // The spreadsheet, the passed flags and an active send (WizardCore
+        // configLoaded); the effects fill the page.
+        await dispatch({ type: "configLoaded", config: data });
     } catch (e) { console.error("Error loading config:", e); }
+}
+
+// The "showSpreadsheet" effect: fill step 1 from the restored spreadsheet,
+// then restore the sheet and column choices saved in localStorage.
+function showRestoredSpreadsheet() {
+    const s = state.spreadsheetData;
+    show("spreadsheet-info");
+    renderSpreadsheetSummary(s);
+    populateSheetSelect(s.sheets);
+    if (s.active_sheet) $("sheet-select").value = s.active_sheet;
+    buildPreviewTable(s.columns, s.rows, s.total_rows);
+    showPlaceholderChips(s.columns);
+    showFilterChips(s.columns);
+
+    // Restore saved sheet selection — if it differs from the
+    // server's active sheet, re-fetch the preview for that sheet.
+    const savedSheet = localStorage.getItem("mm_sheet");
+    if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== (s.active_sheet || s.sheets[0])) {
+        $("sheet-select").value = savedSheet;
+        // Trigger a change to re-fetch the sheet's data
+        $("sheet-select").dispatchEvent(new Event("change"));
+    }
+
+    // Restore chosen columns if they match what's in the sheet
+    const savedEmailCol = localStorage.getItem("mm_email_col");
+    if (savedEmailCol && s.columns.includes(savedEmailCol)) {
+        $("email-column").value = savedEmailCol;
+    }
+    const savedNameCol = localStorage.getItem("mm_name_col");
+    if (savedNameCol && s.columns.includes(savedNameCol)) {
+        $("name-column").value = savedNameCol;
+    }
+}
+
+// The "reconnectSend" effect: follow a send started before the reload.
+function reconnectSend(jobId) {
+    window.addEventListener("beforeunload", beforeUnloadWarn);
+    streamEvents(jobId, "send-log", (result) => onSendComplete(jobId, result), showSendProgress);
 }
 
 // Check auth status
@@ -1575,12 +1569,12 @@ function downloadCsv() {
 }
 
 function newMerge() {
-    // Reset all state
-    state.resetAll();
+    return dispatch({ type: "newMerge" });
+}
 
-    // Clean up server-side temp files and session state
-    apiFetch("/api/reset", { method: "POST" }).catch(() => {});
-
+// The "clearForm" effect of New merge: empty every field the previous merge
+// filled in.
+function clearForm() {
     // Clear Step 1 — spreadsheet
     $("spreadsheet-file").value = "";
     hide("spreadsheet-info");
@@ -1651,8 +1645,6 @@ function newMerge() {
         localStorage.removeItem("mm_html");
         localStorage.removeItem("mm_sheet");
     } catch (_e) { /* ignore */ }
-
-    goToStep(1);
 }
 
 // ---------------------------------------------------------------------------

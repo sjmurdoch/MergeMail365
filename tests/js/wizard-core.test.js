@@ -277,3 +277,34 @@ test("an older /auth/status answer arriving last is dropped (R16)", () => {
 test("New merge keeps the sign-in state", () => {
     assert.equal(C.newMergeState(signed(C.initialState(), true)).signedIn, true);
 });
+
+// --- reduce(): reload and New merge ---
+
+test("configLoaded restores the spreadsheet and never the passed checks", () => {
+    const s = Object.assign(C.initialState(), { testPassed: true, verifyPassed: true });
+    const sheet = { columns: ["email"], rows: [], sheets: ["S"] };
+    const r = C.reduce(s, { type: "configLoaded", config: { spreadsheet: sheet, active_job_id: null } });
+    assert.equal(r.state.spreadsheetData, sheet);
+    assert.equal(r.state.testPassed, false);
+    assert.equal(r.state.verifyPassed, false);
+    assert.equal(r.state.currentStep, 1);
+    assert.deepEqual(r.effects, [{ type: "showSpreadsheet" }]);
+});
+
+test("configLoaded with an active send goes to the sending screen and reconnects", () => {
+    const r = C.reduce(C.initialState(), { type: "configLoaded", config: { active_job_id: "job-1" } });
+    assert.equal(r.state.currentStep, 6);
+    assert.equal(r.state.sendStarted, true);
+    assert.equal(r.state.sendOutcome, null);
+    assert.equal(r.state.currentJobId, "job-1");
+    assert.equal(C.sendPanel(r.state), "progress");
+    assert.deepEqual(r.effects, [{ type: "reconnectSend", jobId: "job-1" }]);
+});
+
+test("newMerge returns to step 1, resets the server and clears the form", () => {
+    const s = Object.assign(C.initialState(), { currentStep: 6, sendStarted: true, sendOutcome: "results" });
+    const r = C.reduce(s, C.ACTIONS.newMerge);
+    assert.equal(r.state.currentStep, 1);
+    assert.equal(r.state.sendStarted, false);
+    assert.deepEqual(r.effects, [{ type: "resetServer" }, { type: "clearForm" }]);
+});
