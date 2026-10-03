@@ -37,6 +37,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Web UI: a second send started with the first send's progress text until its first email went out.
 - Web UI: "New merge" kept the BCC "To" address from the previous merge.
 - Web UI: placeholders for column names with non-English letters, such as `{{Prénom}}`, were filled in the sent email but shown unfilled in the preview, and weren't checked against the spreadsheet's columns. The preview now treats them like the email does.
+- Web UI: occasionally, if the page was slow to load, the HTML editor didn't work properly: switching to HTML didn't show the message already typed, and clicking a column-name chip didn't insert the placeholder into the editor. The editor now works however quickly the page loads.
 
 ### Changed
 
