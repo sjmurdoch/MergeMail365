@@ -135,3 +135,338 @@ def test_client_replay_catches_mutant(traces, tmp_path, name, old, new):
     mutant.write_text(source.replace(old, new), encoding="utf-8")
     result = replay_client(traces, mutant)
     assert result.returncode != 0, f"the client replay did not notice mutant {name}"
+
+
+# ---------------------------------------------------------------------------
+# Server tier
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+import queue  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+from typing import Any  # noqa: E402
+
+TOTAL = 3  # spec/wizard.qnt TOTAL: emails in a send
+
+
+def decode(v: Any) -> Any:
+    """ITF JSON to plain Python values (as in tests/js/conformance.test.js)."""
+    if isinstance(v, list):
+        return [decode(x) for x in v]
+    if not isinstance(v, dict):
+        return v
+    if "#bigint" in v:
+        return int(v["#bigint"])
+    for key in ("#set", "#tup", "#map"):
+        if key in v:
+            return [decode(x) for x in v[key]]
+    if set(v) == {"tag", "value"}:
+        value = decode(v["value"])
+        return v["tag"] if value == [] else {"tag": v["tag"], "value": value}
+    return {k: decode(x) for k, x in v.items()}
+
+
+def load_trace(path: Path) -> list[dict]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    s_var = next(v for v in raw["vars"] if v.endswith("::s"))
+    states = []
+    for st in raw["states"]:
+        picks = decode(st["mbt::nondetPicks"])
+        states.append({
+            "s": decode(st[s_var]),
+            "action": st["mbt::actionTaken"],
+            # decode() turns None (a variant without payload) into "None".
+            "picks": {k: p["value"] for k, p in picks.items() if isinstance(p, dict) and p["tag"] == "Some"},
+        })
+    return states
+
+
+class Handle:
+    """One job's fake send_merge() call, driven one command at a time."""
+
+    def __init__(self, mode: str) -> None:
+        self.mode = mode
+        self.commands: queue.Queue[str] = queue.Queue()
+        self.acks: queue.Queue[None] = queue.Queue()
+
+
+class FakeSendMerge:
+    """send_merge() for the server tier. Test emails and dry runs wait for
+    "ok" or "fail"; a send waits for "next" before each step of its loop, in
+    which the real should_stop, token provider and on_result decide what
+    happens, or "fail" (the Graph API failing the send)."""
+
+    def __init__(self) -> None:
+        self.started: queue.Queue[Handle] = queue.Queue()
+
+    def __call__(self, **kw: Any) -> list[Any]:
+        from mail_merge.sender import SendAborted, SendResult
+
+        mode = "test_email" if kw.get("test_email") else "send" if kw.get("send") else "dry_run"
+        h = Handle(mode)
+        self.started.put(h)
+        if mode != "send":
+            if h.commands.get(timeout=60) != "ok":
+                raise RuntimeError("job failed")
+            if mode == "test_email":
+                kw["token_provider"]()
+            return []
+        results: list[Any] = []
+        while True:
+            if h.commands.get(timeout=60) != "next":
+                raise SendAborted("send failed", results)
+            # As in sender.send_all: Stop is checked before each email, so
+            # once the last has gone the loop ends without asking.
+            if len(results) == TOTAL or kw["should_stop"]():
+                return results
+            try:
+                kw["token_provider"]()
+            except Exception as exc:
+                raise SendAborted(str(exc), results) from exc
+            results.append(SendResult(email=f"r{len(results)}@example.com", success=True, status_code=202))
+            kw["on_result"](results[-1])
+            h.acks.put(None)
+
+
+class ServerReplay:
+    """Replays the server's side of a trace through the Flask routes."""
+
+    def __init__(self, monkeypatch, xlsx: Path) -> None:
+        import mail_merge.web.app as web_app
+        from mail_merge.auth import NotSignedInError
+
+        self.web_app = web_app
+        self.monkeypatch = monkeypatch
+        self.xlsx = xlsx
+        self.fake = FakeSendMerge()
+        self.signed_in = False
+        monkeypatch.setattr("mail_merge.api.send_merge", self.fake)
+
+        def silent(_cid: str, _tid: str) -> str:
+            if not self.signed_in:
+                raise NotSignedInError("Not signed in")
+            return "token"
+
+        monkeypatch.setattr("mail_merge.auth.acquire_token_silent", silent)
+        self.handles: list[Handle] = []
+        self.restart()
+
+    def restart(self) -> None:
+        """A fresh process: new job store, new app, no session."""
+        from mail_merge.web.app import create_app
+        from mail_merge.web.jobs import JobStore
+
+        for h in self.handles:
+            h.commands.put("die")
+        store = JobStore()
+        self.monkeypatch.setattr(self.web_app, "_job_store", store)
+        self.monkeypatch.setattr(self.web_app, "_jobs", store.jobs)
+        self.monkeypatch.setattr(self.web_app, "_running_send_job", store.running_send)
+        self.store = store
+        app = create_app(startup_token="t", port=5050)
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+        assert self.client.get("/?token=t").status_code == 302
+        self.client.get("/")
+        with self.client.session_transaction() as sess:
+            sess["client_id"] = "test-client-id"
+            self.csrf = sess["csrf_token"]
+        self.jobs: dict[int, tuple[str, Handle]] = {}  # model id -> (job id, handle)
+        self.offset = 0
+
+    def post(self, url: str, **kw: Any):
+        return self.client.post(url, headers={"X-CSRF-Token": self.csrf}, **kw)
+
+    def session_job(self) -> str | None:
+        with self.client.session_transaction() as sess:
+            return sess.get("job_id")
+
+    def set_session_job(self, job_id: str | None) -> None:
+        with self.client.session_transaction() as sess:
+            if job_id is None:
+                sess.pop("job_id", None)
+            else:
+                sess["job_id"] = job_id
+
+    def upload(self) -> None:
+        with self.xlsx.open("rb") as f:
+            resp = self.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "r.xlsx")},
+                             content_type="multipart/form-data")
+        assert resp.status_code == 200, resp.get_json()
+
+    def start_job(self, model_id: int, mode: str) -> None:
+        resp = self.post("/api/start-job", data={
+            "mode": mode, "email_column": "email", "subject": "Hi", "body": "Hello",
+            "test_email": "me@example.com" if mode == "test_email" else "",
+        })
+        assert resp.status_code == 200, resp.get_json()
+        handle = self.fake.started.get(timeout=5)
+        self.handles.append(handle)
+        self.jobs[model_id] = (resp.get_json()["job_id"], handle)
+
+    def command(self, model_id: int, cmd: str) -> None:
+        """Send a command to a job's runner and wait until it has acted."""
+        job_id, handle = self.jobs[model_id]
+        job = self.store.jobs.get(job_id)
+        handle.commands.put(cmd)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if not handle.acks.empty():
+                handle.acks.get()
+                return
+            if job is None or job.status.value in ("completed", "failed", "stopped"):
+                return
+            time.sleep(0.001)
+        raise AssertionError(f"job {model_id} did not act on {cmd!r}")
+
+    def step(self, m: dict, nxt: dict, action: str, picks: dict) -> None:
+        self.signed_in = nxt["signedIn"]
+        if action == "serverRestart":
+            self.restart()
+            self.offset = nxt["nextJobId"]
+            return
+        if nxt["nextJobId"] > m["nextJobId"]:
+            new = [sj["kind"] for sj in nxt["sessionJob"] if sj["id"] == m["nextJobId"]]
+            mode = "send" if action == "startSend" else {"Test": "test_email", "Verify": "dry_run"}[new[0]]
+            before = self.session_job()
+            self.start_job(m["nextJobId"], mode)
+            if mode == "send":
+                # The session cookie naming the send arrives with the
+                # response: startSendResponse.
+                self.set_session_job(before)
+        if action == "upload":
+            self.upload()
+        elif action == "newMerge":
+            assert self.post("/api/reset").status_code == 200
+        elif action == "startSendResponse":
+            self.set_session_job(self.jobs[picks["id"]][0])
+        elif action in ("completeJob", "completeOrphan"):
+            model_id = picks["j"]["id"] if action == "completeJob" else picks["sj"]["id"]
+            ok = picks.get("ok", True)
+            self.command(model_id, "ok" if ok else "fail")
+        elif action in ("sendNext", "sendWithoutToken"):
+            self.command(picks["j"]["id"], "next")
+        elif action == "finishSend":
+            self.command(picks["j"]["id"], "fail" if picks["failed"] else "next")
+        elif action in ("reload", "signIn") and (action == "reload" or not picks["desktop"]):
+            self.check_reload(nxt)
+        # Stop: the page posts it (stopSend, or startSendResponse for a
+        # queued Stop; the client tier checks when).
+        for j in nxt["sendJob"]:
+            before = next((x for x in m["sendJob"] if x["id"] == j["id"]), None)
+            if j["stopRequested"] and not (before and before["stopRequested"]) and j["id"] in self.jobs:
+                assert self.post(f"/api/job/{self.jobs[j['id']][0]}/stop").status_code == 200
+
+    def check_reload(self, nxt: dict) -> None:
+        """/api/config names the send the reloaded model page reconnects to."""
+        active = self.client.get("/api/config").get_json()["active_job_id"]
+        if not (nxt["step"] == 6 and nxt["sendStarted"]):
+            assert active is None, "config reports an active job the model doesn't reconnect to"
+            return
+        assert active is not None, "the model reconnects to a send that config doesn't report"
+        listening = [p["id"] for p in nxt["pending"] if p["handler"] == "Send"]
+        if listening:
+            assert active == self.jobs[listening[0]][0]
+
+    def compare(self, m: dict, where: str) -> None:
+        session_job = self.session_job()
+        actual = self.store.abstract(session_job)
+        shift = self.offset
+        # Creating a job evicts finished ones, so the session can name a
+        # finished job the store no longer holds; the model keeps it as done.
+        # /api/config treats both alike (only a send is reconnected, and the
+        # model's single page can't start a job while its finished send is
+        # still the session's).
+        evicted = session_job is not None and session_job not in self.store.jobs
+        expected = {
+            "sessionJob": [{**sj, "id": sj["id"] - shift} for sj in m["sessionJob"]
+                           if not (evicted and sj["done"])],
+            "sendJob": [
+                {"id": j["id"] - shift, "sent": j["sent"], "stopRequested": j["stopRequested"],
+                 "status": j["status"]}
+                # The model keeps the previous process's send (marked Killed if
+                # it was running); a restarted server has no record of it.
+                for j in m["sendJob"] if j["id"] >= shift
+            ],
+            "nextJobId": m["nextJobId"] - shift,
+        }
+        assert actual == expected, where
+
+
+@pytest.fixture
+def conformance_xlsx(tmp_path) -> Path:
+    import openpyxl
+
+    path = tmp_path / "r.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["email"])
+    for i in range(TOTAL):
+        ws.append([f"r{i}@example.com"])
+    wb.save(path)
+    return path
+
+
+def replay_server(traces: Path, monkeypatch, xlsx: Path) -> None:
+    files = sorted(traces.glob("*.itf.json"))
+    assert files
+    for path in files:
+        trace = load_trace(path)
+        replay = ServerReplay(monkeypatch, xlsx)
+        replay.compare(trace[0]["s"], f"{path.name} init")
+        for i in range(1, len(trace)):
+            actions = " ".join(t["action"] for t in trace[1:i + 1])
+            where = f"{path.name} step {i} ({actions})"
+            replay.step(trace[i - 1]["s"], trace[i]["s"], trace[i]["action"], trace[i]["picks"])
+            replay.compare(trace[i]["s"], where)
+        replay.restart()  # release the runners still waiting
+
+
+def test_server_conformance(traces, monkeypatch, conformance_xlsx):
+    replay_server(traces, monkeypatch, conformance_xlsx)
+
+
+def _ignore_stop(job):
+    return False
+
+
+def _count_nothing(job, result):
+    pass
+
+
+def _session_job_only(self, session_job_id):
+    job = self.get(session_job_id)
+    return job.id if job and job.mode == "send" else None
+
+
+def _any_session_job(self, session_job_id):
+    running = self.running_send()
+    if running:
+        return running.id
+    job = self.get(session_job_id)
+    return job.id if job else None
+
+
+def _stop_without_flag(self, job_id):
+    return job_id in self.jobs
+
+
+# Bugs seeded into JobStore, each of which the server replay must notice.
+SERVER_MUTANTS = {
+    "stop-ignored": ("should_stop", staticmethod(_ignore_stop)),
+    "sent-not-counted": ("record_sent", staticmethod(_count_nothing)),
+    "reload-misses-unnamed-send": ("active_job_id", _session_job_only),
+    "reload-resumes-dry-run": ("active_job_id", _any_session_job),
+    "stop-not-recorded": ("request_stop", _stop_without_flag),
+}
+
+
+@pytest.mark.parametrize("name", list(SERVER_MUTANTS))
+def test_server_replay_catches_mutant(traces, monkeypatch, conformance_xlsx, name):
+    from mail_merge.web.jobs import JobStore
+
+    attr, replacement = SERVER_MUTANTS[name]
+    monkeypatch.setattr(JobStore, attr, replacement)
+    with pytest.raises(AssertionError):
+        replay_server(traces, monkeypatch, conformance_xlsx)
