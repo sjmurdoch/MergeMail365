@@ -1390,3 +1390,97 @@ class TestWrapHtmlForEmail:
             html=False,
         )
         assert len(results) == 2
+
+
+class TestInterruptedSend:
+    """An interrupted send leaves an output CSV that --resume can use, so
+    the emails that went out are not sent again (docs/quint-model-plan.md,
+    "CLI resume after an interrupted run")."""
+
+    @pytest.fixture
+    def auth(self, monkeypatch):
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda client_id, tenant_id="common": "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
+
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        """Replaces send_one; records who was sent to. Set `fail_on` to an
+        address to make sending to it raise."""
+
+        class Sent(list):
+            fail_on: str | None = None
+
+        record = Sent()
+
+        def fake_send_one(get_token, to, subject, body, opts=None):
+            if to.address == record.fail_on:
+                raise RuntimeError("connection lost")
+            record.append(to.address)
+            return SendResult(email=to.address, success=True, status_code=202)
+
+        monkeypatch.setattr("mail_merge.sender.send_one", fake_send_one)
+        return record
+
+    def _send(self, sample_xlsx, body_template_file, output, delay=0):
+        return send_merge(
+            spreadsheet=sample_xlsx, body=body_template_file, subject="Hello {{name}}",
+            email_column="email", client_id="fake-client-id", send=True, confirm=False,
+            output=output, delay=delay,
+        )
+
+    def test_error_part_way_keeps_sent_in_output(self, sample_xlsx, body_template_file, tmp_path, auth, sent):
+        from mail_merge.report import read_csv
+        from mail_merge.sender import SendAborted
+
+        output = tmp_path / "report.csv"
+        sent.fail_on = "bob@example.com"
+        with pytest.raises(SendAborted):
+            self._send(sample_xlsx, body_template_file, output)
+        assert [(r.email, r.success) for r in read_csv(output)] == [("alice@example.com", True)]
+
+        sent.fail_on = None
+        self._send(sample_xlsx, body_template_file, output)
+        assert sent == ["alice@example.com", "bob@example.com"]  # Alice once
+
+    def test_ctrl_c_between_emails_keeps_sent_in_output(
+        self, sample_xlsx, body_template_file, tmp_path, auth, sent, monkeypatch,
+    ):
+        from mail_merge.report import read_csv
+
+        def interrupt(_seconds):
+            raise KeyboardInterrupt
+
+        output = tmp_path / "report.csv"
+        with monkeypatch.context() as m:
+            m.setattr("mail_merge.sender.time.sleep", interrupt)
+            with pytest.raises(KeyboardInterrupt):
+                self._send(sample_xlsx, body_template_file, output, delay=1)
+        assert [(r.email, r.success) for r in read_csv(output)] == [("alice@example.com", True)]
+
+        self._send(sample_xlsx, body_template_file, output)
+        assert sent == ["alice@example.com", "bob@example.com"]
+
+    def test_interrupted_resume_keeps_earlier_results(
+        self, sample_xlsx, body_template_file, tmp_path, auth, sent,
+    ):
+        from mail_merge.report import read_csv
+        from mail_merge.sender import SendAborted
+
+        output = tmp_path / "report.csv"
+        write_csv([SendResult(email="alice@example.com", success=True, status_code=202)], output)
+        sent.fail_on = "bob@example.com"
+        with pytest.raises(SendAborted):
+            self._send(sample_xlsx, body_template_file, output)
+        assert [(r.email, r.success) for r in read_csv(output)] == [("alice@example.com", True)]
+
+    def test_completed_send_output_has_one_row_per_recipient(
+        self, sample_xlsx, body_template_file, tmp_path, auth, sent,
+    ):
+        from mail_merge.report import read_csv
+
+        output = tmp_path / "report.csv"
+        write_csv([SendResult(email="bob@example.com", success=False, status_code=500, error="x")], output)
+        self._send(sample_xlsx, body_template_file, output)
+        assert sorted((r.email, r.success) for r in read_csv(output)) == [
+            ("alice@example.com", True), ("bob@example.com", True),
+        ]

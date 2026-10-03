@@ -23,7 +23,7 @@ from mail_merge.sender import (
     send_bcc_blast,
     send_one,
 )
-from mail_merge.report import print_summary, read_csv, write_csv
+from mail_merge.report import append_csv, print_summary, read_csv, write_csv
 
 logger = logging.getLogger(__name__)
 
@@ -633,6 +633,18 @@ def send_merge(
         )
         return [result]
 
+    # --- Output CSV, written as the send goes ---
+    # An interrupted run (Ctrl-C, an error, a crash) then leaves a CSV that
+    # --resume can use, so the emails that went out are not sent again.
+    record = on_result
+    if send and output:
+        write_csv(previous_results, output, quiet=True)
+
+        def record(result: SendResult) -> None:
+            append_csv(result, output)
+            if on_result is not None:
+                on_result(result)
+
     # --- Send emails ---
     if bcc_blast:
         assert blast_to is not None
@@ -646,7 +658,7 @@ def send_merge(
             dry_run=not send,
             opts=msg_opts,
             should_stop=should_stop,
-            on_result=on_result,
+            on_result=record,
         )
     else:
         results = send_all(
@@ -660,7 +672,7 @@ def send_merge(
             delay=delay,
             opts=msg_opts,
             should_stop=should_stop,
-            on_result=on_result,
+            on_result=record,
         )
 
     # --- Merge with previous results when resuming ---

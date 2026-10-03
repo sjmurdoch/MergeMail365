@@ -49,14 +49,26 @@ def print_summary(results: list[SendResult]) -> None:
                 logger.warning("Failed: %s [%s] %s", r.email, r.status_code, r.error)
 
 
-def write_csv(results: list[SendResult], path: str | Path) -> None:
+def _row(r: SendResult) -> list[object]:
+    return [_sanitize_csv(r.email), r.success, r.status_code or "", _sanitize_csv(r.error)]
+
+
+def write_csv(results: list[SendResult], path: str | Path, *, quiet: bool = False) -> None:
     path = Path(path)
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["email", "success", "status_code", "error"])
         for r in results:
-            writer.writerow([_sanitize_csv(r.email), r.success, r.status_code or "", _sanitize_csv(r.error)])
-    logger.info("Report written to %s", path)
+            writer.writerow(_row(r))
+    if not quiet:
+        logger.info("Report written to %s", path)
+
+
+def append_csv(result: SendResult, path: str | Path) -> None:
+    """Add one result to a CSV written by write_csv(), closing the file
+    again so the row is on disk if the process is interrupted."""
+    with Path(path).open("a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(_row(result))
 
 
 def read_csv(path: str | Path) -> list[SendResult]:
