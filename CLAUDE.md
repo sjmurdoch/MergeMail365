@@ -83,7 +83,8 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 **Key files:**
 - `web/__init__.py` — entry point: port discovery, startup token, browser launch
 - `web/app.py` — Flask app factory and all routes. Pure helper functions (`_validate_html_body`, `_partition_emails`, `_validated_recipient_count`) are at module level; only routes and session-dependent helpers live inside `create_app()`. The routes are thin adapters over `_job_store` (`_jobs` and `_running_send_job` are aliases kept for tests).
-- `web/jobs.py` — the job lifecycle with no Flask: `JobStatus`, `Job` (including `sent`, the emails recorded so far, and `seq`, its creation order), `JobLogHandler`, and `JobStore`: `create()` (evicts finished jobs, refuses a second running send), `run()`/`start()` (drives `send_merge()`, or an injected runner, passing `should_stop` and `on_result`), `request_stop()`, `active_job_id()` (what a reloaded page reconnects to) and `abstract()` (the model's server fields).
+- `web/jobs.py` — the job lifecycle with no Flask: `JobStatus`, `Job` (including `sent`, the emails recorded so far, and `seq`, its creation order), `JobLogHandler`, and `JobStore`: `create()` (evicts finished jobs, refuses a second running send), `run()`/`start()` (drives `send_merge()`, or an injected runner, passing `should_stop` and `on_result`), `request_stop()`, `active_job_id()` (what a reloaded page reconnects to) and `abstract()` (the model's server fields). With a `SendLog` attached (`attach_send_log()`), a running send's results also go to disk and `interrupted` holds the sends an earlier process left unfinished; `dismiss_interrupted()` deletes them.
+- `web/sendlog.py` — `SendLog`: one JSON-lines file per running send under `_paths.state_dir()/sends` (directory 0700, files 0600, since they hold addresses), deleted when the send ends in this process; files left over are interrupted sends (R15). Only `mergemail365-web`'s entry point passes `send_log_dir` to `create_app()`, so tests and other callers never write there.
 - `web/templates/index.html` — single Jinja2 template with all 6 wizard steps
 - `web/static/wizard-core.js` — the wizard's workflow state (`initialState()`, reset rules), `reduce(state, event) → { state, effects }` and selectors, with no DOM or `fetch`. Every change to workflow state is an event: navigation (`goTo`, `back`, `previewResponse`), content (`contentChanged`, `spreadsheetLoaded`), steps 4 and 5 (`sendTestEmail`, `jobStarted`, `jobCompleted`), step 6 (`startSend`, `startSendResponse`, `stopSend`, `sendCompleted`, `sendResults`, `sendError`), sign-in status (`authStatus`), page load (`configLoaded`, from `/api/config`) and New merge (`newMerge`). `WizardCore.ACTIONS` maps each model action that the page carries out onto its event; `abstractPage(state)` returns the page's part of the model's state, with the model's field names, for conformance testing. In `app.js`, `dispatch(event)` applies an event, re-renders and runs the effects it returns (fetches, the SSE stream and DOM content: `startJob`, `startSendJob`, `postStop`, `streamSend`, `fetchResults`, `showResults`, `showSendError`, `fetchPreview`, `checkAuth`, `saveState`, …); the click handlers (`goToStep()`, `confirmGoBack()`, `sendTestEmail()`, `startSend()`, `stopSend()`) only gather what lives in the DOM and dispatch. Loaded as a classic script before `app.js` (`window.WizardCore`) and with `require()` by the Node tests in `tests/js/`. Selector names follow the model's pure defs (`sendTestEnabled`, `doSendEnabled`, `signInOffered`).
 - `web/static/app.js` — wizard navigation, SSE streaming, client-side template preview. Wizard state centralised in `state` object (`window.state`, built from `WizardCore.initialState()`), auth state in `_auth`. `render()` is the only code that sets the step 4–6 buttons' `disabled` state and which parts of steps 4–6 are shown; it reads only `WizardCore` selectors, and handlers change `state` and call `render()` (`tests/test_spec_coverage.py` enforces this for the controls in `RENDERED_CONTROLS`).
@@ -121,6 +122,7 @@ The web interface lives under `src/mail_merge/web/` and is installed as `mergema
 | `/api/job/<id>/status` | GET | Job status + results (poll fallback) |
 | `/api/job/<id>/stop` | POST | Stop a send before its next email |
 | `/api/log-path` | GET | Log file path + exists flag (for troubleshooting) |
+| `/api/interrupted/dismiss` | POST | Delete the logs of sends an earlier process didn't finish |
 
 **Design plan:** `docs/web-ui-plan.md` contains the full design document with implementation status, security assessment, and deferred features.
 
@@ -134,7 +136,7 @@ State lives in three tiers, each with different lifetimes and sync characteristi
 
 **Tier 3 — Flask session (cookie-based, survives reload):** Auth state (`authenticated`, `ms_authenticated`, `client_id`, `tenant_id`, `auth_flow`, `csrf_token`), spreadsheet metadata (`spreadsheet_path`, `spreadsheet_tmp_dir`, `spreadsheet_info` — columns/sheets/total_rows/file_name but not row data, which would exceed the 4 KB cookie limit), and wizard progress (`current_step`, `test_passed`, `verify_passed`, `job_id`). The MSAL token cache is a separate file on disk shared with CLI auth.
 
-**Tier 4 — Server memory (ephemeral, lost on restart):** `_jobs` dict holds active/completed `Job` objects with their event queues and results. These are not persisted — server restart loses all job state.
+**Tier 4 — Server memory (ephemeral, lost on restart):** `_jobs` dict holds active/completed `Job` objects with their event queues and results. These are not persisted — server restart loses all job state. Exception: a running send's results are also logged to disk (`web/sendlog.py`), so after a quit or crash the next start reports which emails went out (step 1, `#interrupted-send`, until dismissed).
 
 **Tier 5 — Temp files on disk:** Uploaded spreadsheet saved to a `tempfile.mkdtemp()` directory, tracked by `spreadsheet_tmp_dir` in the session. Cleaned up on re-upload, reset, or process exit (`atexit`).
 
@@ -161,7 +163,7 @@ The tiers sync at specific moments, not continuously:
 | Filtered recipient list | No | Only in JS memory; must re-run `/api/get-recipients` |
 | Test/verify passed flags | No | Session has them, but JS always resets to `false` on load (by design — results are transient) |
 | Active send job | Yes | `session["job_id"]` + `_jobs` dict; JS reconnects to SSE stream |
-| Send results | No | In-memory `Job.results`, lost if not fetched before server restart |
+| Send results | Partly | In-memory `Job.results`, lost on server restart once the send has finished; a send the process didn't finish is reported on the next start from its log on disk |
 | Filters, CC/BCC, reply-to, importance, attachments | No | DOM-only, not persisted |
 
 #### Dependency graph: what invalidates what

@@ -26,15 +26,14 @@ All nine were found by the model or while modelling, reproduced by tests that fa
 | 14 | A second send starts with the first send's progress text | `5aa1f52` | `test_second_send_starts_with_fresh_progress` |
 | 15 | New merge keeps the BCC To address | `5aa1f52` | `test_new_merge_clears_bcc_to` |
 | 16 | CLI: Ctrl-C or an error mid-send writes no CSV, so `--resume` re-sends emails already sent (found in the commit-history review, not by the model) | `6b1f480` | `TestInterruptedSend` (`test_api.py`) |
+| 17 | A server restart (app quit or crash) mid-send loses the record of which emails went out (R15) | `0471986` | `TestSendLog` (`test_web_jobs.py`), `TestInterruptedSends` (`test_web.py`), `TestInterruptedSend` (`test_web_e2e_workflow.py`); model `restartMidSendTest`, invariants `restartReported`, `interruptedVisible` |
 | — | The preview ignores non-ASCII placeholder names that the email substitutes (not a model bug: a regex difference) | `8bfb88c` | `test_render_template_matches_server` |
 
 Playwright regressions are in `tests/test_web_e2e_workflow.py`; Flask ones in `tests/test_web.py` (`TestJobs`).
 
 ### Bugs remaining
 
-| Bug | Found by | Status | Plan step |
-|---|---|---|---|
-| A server restart (app quit or crash) mid-send loses the record of which emails went out | Round 2 model (`spec/requirements.md`, R15; witness `restartLostSend`) | By design of the in-memory job store; needs a send log on disk | Not planned yet |
+None known (bugs 16 and 17, the last two, were fixed in step 5).
 
 Possible link, unverified: the 0.4.1 changelog entry describes a Windows report that "sending a test email sometimes did nothing for several minutes until the user clicked Back". A test email waiting in the device-code flow (silent token acquisition failing, so the job blocks) would look like that. Bug 9 is now fixed; if the report recurs, the stall logs will show whether it was something else.
 
@@ -46,7 +45,7 @@ Decided: steps 4 and 6 can be entered signed out, because they offer sign-in the
 
 1. Step 3: re-architect the web UI so the model maps onto it (client core with one event per model action, `render()` from selectors, request ids, a server `JobStore`, abstraction functions), and split the spec into modules. Revised plan below.
 2. Step 4: conformance, replaying `quint run --mbt` traces in client, server and end-to-end tiers.
-3. Decide whether to persist send results (R15) (step 5). CLI resume after an interrupted run is fixed (bug 16).
+3. Step 5: CLI resume after an interrupted run (bug 16) and a send the app didn't finish (bug 17, R15) are fixed; the remaining candidates are listed under step 5.
 
 ### Resuming: how to run the model
 
@@ -452,7 +451,7 @@ Revised 2026-10-03 for the richer model. Conformance runs against `fixed` only.
 
 Candidates, roughly in order of risk:
 
-- Persisting send results so a restart mid-send can report what went out (R15). The CLI resume bug after an interrupted run is fixed without modelling the CLI (bug 16): the output CSV is now written as the send goes.
+- ~~Persisting send results so a restart mid-send can report what went out (R15)~~: done (bug 17). A running send logs its results to disk; the next start reports a send it didn't finish until dismissed. The model keeps the log across `serverRestart` (`sendLog`), and the conformance tiers replay restarts against it. The CLI resume bug after an interrupted run is fixed without modelling the CLI (bug 16): the output CSV is now written as the send goes.
 - Out-of-order `/auth/status` answers (R16): falls out of step 3's request ids, then needs only invariants.
 - A second tab: two pages sharing one session and job store.
 - Session expiry (24-hour sliding window) and a lost session cookie.
