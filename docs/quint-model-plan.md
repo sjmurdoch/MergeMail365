@@ -404,6 +404,7 @@ Revised 2026-10-03, after steps 2b, 2c and round 2 made the model much richer th
   - The generation counters stay in the model. In `fixed` they behave as the code's request ids (a bumped counter is a dropped request); the new `isCurrentJob` def says so, and `abstractPage` reports the current requests rather than counter values. Replacing them with request-id sets would change every scenario for no change in what is checked.
   - The `btn*` fields stay too, as the record of bugs 5, 6 and 14 in `buggy` and `partial`. The new invariant `buttonsDerived` (R17) checks that in `fixed` they equal the functions of state that the code's selectors compute.
   - The module split (`page.qnt`, `server.qnt`) was not done: the model's actions read and write client and server fields together (a start-job request creates the job and the page's pending request in one step), so a split would mostly move cross-module references around. Revisit if conformance (step 4) wants the server tier to import the server half alone.
+  - `spec/check.sh --all fixed` holds with 22 invariants (Apalache, 16 steps, about 1 h 43 min on 4 cores).
 
 Exit criteria: every model action is an event (checked by the coverage test); `abstractPage` and `abstract_server` cover every non-ghost model field; nothing outside `render()` writes `disabled` or visibility (a grep check in the coverage test); all existing tests pass.
 
