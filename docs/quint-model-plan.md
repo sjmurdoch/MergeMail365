@@ -2,11 +2,11 @@
 
 ## Current status (2026-10-03)
 
-Steps 1 and 2 are done. Steps 2b (coverage inventory and server-side job model) and 2c (requirements list, auth model, dead-end checks) are next, in that order, then steps 3–5. Nothing is in progress and the working tree was clean at the end of the session.
+Steps 1, 2, 2b and 2c are done. Step 3 (reducer) is next, then steps 4 and 5. Nothing is in progress.
 
 ### Bugs fixed
 
-All six were found by the model, reproduced in the real UI by tests that failed before the fix, and fixed. Details under "Bugs found".
+All nine were found by the model or while modelling, reproduced by tests that failed before the fix, and fixed. Details under "Bugs found".
 
 | # | Bug | Fix commit | Regression tests |
 |---|---|---|---|
@@ -16,6 +16,9 @@ All six were found by the model, reproduced in the real UI by tests that failed 
 | 6 | Back on step 6 stays disabled after New merge | `f58faca` | `test_back_enabled_on_step6_after_new_merge` |
 | 3 | Reload after a test email or dry run jumps to the Send step | `b56e713` | `test_reload_during_test_email_stays_off_send_step`, `test_config_does_not_resume_test_or_dry_run` |
 | 4 | Reload after a finished job hangs on "Sending…" | `b56e713` | `test_reload_after_test_email_stays_off_send_step`, `test_reload_after_send_shows_results`, `test_events_end_for_finished_job_on_reconnect` |
+| 7 | "Stop sending" does nothing: `job.stop_requested` is set but never read | `5c0c4de` | `test_stop_ends_send_early`, `TestShouldStop` (sender, API) |
+| 8 | A signed-out user reaches step 4 (and 6) with no way to sign in there, and the send buttons stay enabled | step 2c commit | `TestSignInGate` (`test_web_e2e_workflow.py`) |
+| 9 | A signed-out web job falls into the CLI device-code flow and blocks | step 2c commit | `test_test_email_when_signed_out_fails_at_once` (the inverted characterisation test), `test_send_when_token_lost_fails_at_once`, `TestAcquireTokenSilent` |
 
 Playwright regressions are in `tests/test_web_e2e_workflow.py`; Flask ones in `tests/test_web.py` (`TestJobs`).
 
@@ -23,19 +26,19 @@ Playwright regressions are in `tests/test_web_e2e_workflow.py`; Flask ones in `t
 
 | Bug | Found by | Status | Plan step |
 |---|---|---|---|
-| "Stop sending" does nothing: `job.stop_requested` is set but never read | Reading code while fixing | Confirmed by reading code; no test yet | 2b |
-| A signed-out user can go on to the Test step (and Send) | User report | Confirmed by reading code; no test yet | 2c |
-| A signed-out web job falls into the CLI device-code flow and blocks | Checking the report above | Confirmed by `test_test_email_when_signed_out_waits_in_device_flow` (characterisation test, asserts current behaviour; invert when fixed) | 2c |
+| A send that fails part-way (for example the token is lost after the first email) keeps no results: the page shows only the error, not which emails went out | Modelling the token provider in step 2c (`spec/requirements.md`, R9; witness `partialFailedSend`) | Confirmed by reading code (`_run_job` only stores results when `send_merge()` returns); no test yet | Not planned yet |
 
-Possible link, unverified: the 0.4.1 changelog entry describes a Windows report that "sending a test email sometimes did nothing for several minutes until the user clicked Back". A test email waiting in the device-code flow (silent token acquisition failing, so the job blocks) would look like that. Worth checking against the stall logs when step 2c fixes the token provider.
+Possible link, unverified: the 0.4.1 changelog entry describes a Windows report that "sending a test email sometimes did nothing for several minutes until the user clicked Back". A test email waiting in the device-code flow (silent token acquisition failing, so the job blocks) would look like that. Bug 9 is now fixed; if the report recurs, the stall logs will show whether it was something else.
 
 Decided, not a bug: the test email and dry run are enforced in the browser only (2026-10-02).
 
+Decided: steps 4 and 6 can be entered signed out, because they offer sign-in themselves (`spec/requirements.md`, R2). This replaces the planned `step4NeedsSignIn`.
+
 ### Next actions
 
-1. Step 2b: `spec/coverage.toml` + `tests/test_spec_coverage.py`; source-cite every action in `spec/wizard.qnt`; model the send loop and Stop; confirm `buggy` violates `stopHonoured`; fix Stop.
-2. Step 2c: `spec/requirements.md`; model auth and the token provider; `step4NeedsSignIn`, `noInteractiveAuthInJob`, `canProgress`; witnesses; fix the sign-in gate and the token provider, invert the characterisation test.
-3. Consider splitting the job model into `spec/jobs.qnt` once 2b makes `wizard.qnt` large.
+1. Decide whether to fix R9 (keep partial results when a send fails) before step 3.
+2. Step 3: reducer.
+3. Consider splitting the job model into `spec/jobs.qnt`: `wizard.qnt` is now about 600 lines.
 
 ### Resuming: how to run the model
 
@@ -47,16 +50,25 @@ npx -y @informalsystems/quint@0.32.0 typecheck spec/wizard.qnt
 npx -y @informalsystems/quint@0.32.0 test spec/wizard.qnt --main=buggy --max-samples=1 --backend=typescript
 npx -y @informalsystems/quint@0.32.0 test spec/wizard.qnt --main=fixed --max-samples=1 --backend=typescript
 
-# Bounded model checking (Apalache, needs Java); each variant takes about 4 minutes.
+# Bounded model checking (Apalache, needs Java); several minutes per invariant.
 # check.sh takes a single executable, so install Quint into a directory first.
 npm install --prefix "$TMPDIR/quint" @informalsystems/quint@0.32.0
 JAVA_HOME=/opt/homebrew/opt/openjdk PATH="/opt/homebrew/opt/openjdk/bin:$PATH" \
   spec/check.sh --quint "$TMPDIR/quint/node_modules/.bin/quint" buggy
 ```
 
-Expected results: `buggy` violates `noUntestedSend`, `next4Honest`, `buttonsMatchFlags`, `sendScreenHonest`, `sendScreenNotStuck` and holds the rest at 16 steps; `fixed` holds all eight; all eight scenario tests pass in both variants.
+`spec/check.sh --all fixed` checks `allInvariants` in one run, which takes about as long as a single invariant; use it to confirm `fixed`, and the per-invariant run for `buggy`, where each violation needs its own trace.
 
-Running under the Claude Code sandbox needs these workarounds:
+Expected results: `fixed` holds every invariant; `buggy` violates `next4Honest` and the invariants its scenario tests replay (see "Steps 2b and 2c results"). All 15 scenario tests pass in both variants.
+
+Running in a Claude Code cloud container (Linux, 4 cores, Java 21 and Node 22 preinstalled) needed:
+
+- uv: the preinstalled uv (0.8.17) can't parse `exclude-newer = "7 days"` and silently re-resolved `uv.lock`, pulling Werkzeug 3.1.9, which fails two attachment tests. Install the version CI pins (`pip install --user uv==0.12.18`) and use `uv sync --locked --all-extras`.
+- Playwright: the container's Chromium is older than the one pytest-playwright 1.63 expects, and `playwright install` is not allowed. Linking the expected headless-shell path to it works: `ln -s /opt/pw-browsers/chromium-1194/chrome-linux/chrome /opt/pw-browsers/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`. One paste test was timing-sensitive under load.
+- Apalache: `quint verify` downloads it into `$QUINT_HOME` without help. To run checks in parallel, start extra servers (`$QUINT_HOME/apalache-dist-0.56.1/apalache/bin/apalache-mc server --port=8823`) and pass `--server-endpoint=localhost:8823` to `quint verify`; `check.sh` always uses the default port. Run checks against a copy of the spec if you are still editing it: each `quint verify` reads the file afresh.
+- Biome: `npm install --prefix <dir> @biomejs/biome@2.5.14` (the CI pin).
+
+Running under the Claude Code sandbox on macOS needed these workarounds:
 
 - npm's default cache had root-owned files and wasn't writable: set `npm_config_cache` to a directory under `$TMPDIR`.
 - Set `QUINT_HOME` under `$TMPDIR`. Quint's own Apalache download produced an empty directory; download `https://github.com/apalache-mc/apalache/releases/download/v0.56.1/apalache.tgz` with curl and unpack it into `$QUINT_HOME/apalache-dist-0.56.1/`.
@@ -91,11 +103,11 @@ Fixes (modelled by the `fixed` variant, where all invariants hold, and implement
 - `prepareSend()` re-enables `btn-back-6`.
 - `Job` records its `mode`; `/api/config` only reports send jobs as active. The SSE stream also ends when the job has finished and its queue is empty, so reconnecting to a finished send (or one whose sentinel an old stream took) shows the results.
 
-Found outside the model while fixing: **"Stop sending" does nothing.** `/api/job/<id>/stop` sets `job.stop_requested`, but neither `send_merge()` nor `sender.py` reads it, so the send runs to completion. Not fixed yet.
+Found outside the model while fixing: **"Stop sending" does nothing** (bug 7). `/api/job/<id>/stop` sets `job.stop_requested`, but neither `send_merge()` nor `sender.py` reads it, so the send runs to completion. Fixed in step 2b.
 
-Reported by the user (2026-10-03): **a signed-out user can go on to the Test step.** `goToStep(4)` only calls `checkAuthForStep4()`, which refreshes the auth display; nothing gates the step, the "Send test email" button or the send on being signed in. Confirmed by reading the code; no regression test yet.
+Reported by the user (2026-10-03): **a signed-out user can go on to the Test step** (bug 8). `goToStep(4)` only calls `checkAuthForStep4()`, which refreshes the auth display; nothing gates the step, the "Send test email" button or the send on being signed in, and the only sign-in button is on step 1. Fixed in step 2c.
 
-Found while checking that report, confirmed by `test_test_email_when_signed_out_waits_in_device_flow` in `tests/test_web.py`: **a signed-out web job falls into the CLI device-code flow.** The job's `token_provider` calls `auth.acquire_token()`, which falls back to `initiate_device_flow()` when the cache has no account. The device-code prompt (URL and code) is posted to the test log and the job thread blocks in `acquire_token_by_device_flow()` until the code is used or expires (Entra device codes typically last 15 minutes), with the job shown as running. A user who notices the code can sign in this way, so it is an undesigned second sign-in path rather than a hard failure. The same applies to a real send. The test characterises current behaviour and should be inverted when this is fixed. Not fixed yet.
+Found while checking that report, confirmed by `test_test_email_when_signed_out_waits_in_device_flow` in `tests/test_web.py`: **a signed-out web job falls into the CLI device-code flow.** The job's `token_provider` calls `auth.acquire_token()`, which falls back to `initiate_device_flow()` when the cache has no account. The device-code prompt (URL and code) is posted to the test log and the job thread blocks in `acquire_token_by_device_flow()` until the code is used or expires (Entra device codes typically last 15 minutes), with the job shown as running. A user who notices the code can sign in this way, so it is an undesigned second sign-in path rather than a hard failure. The same applies to a real send. Bug 9; fixed in step 2c, which inverted the test.
 
 ## Why the model missed "Stop sending", and how the plan closes the gap
 
@@ -127,6 +139,30 @@ Environment notes:
 - Quint's default `run`/`test` backend downloads a Rust evaluator from GitHub; `--backend=typescript` avoids that.
 - `quint verify` downloads Apalache 0.56.1 (released 2026-03-26) into `$QUINT_HOME` (default `~/.quint`). Apalache runs as a gRPC server on local port 8822, so it needs local port binding; under the Claude Code sandbox that requires `sandbox.network.allowLocalBinding: true`. The Apalache launcher's `mktemp -t` uses the macOS per-user temp folder, which the sandbox also blocks.
 - Homebrew's OpenJDK must come before `/usr/bin` on `PATH` (or set `JAVA_HOME`); `/usr/bin/java` is Apple's stub.
+
+## Steps 2b and 2c results
+
+Model (`spec/wizard.qnt`, now about 700 lines; still one module):
+
+- **Send loop and Stop.** A send is a `SendJob` record (`sent`, `stopRequested`, `status`) over `TOTAL = 3` recipients. `sendNext` is one loop iteration, `finishSend` the job thread ending, `stopSend` the button. Ghosts `sentAfterStop` and `stopEarly`. Invariants `stopHonoured` and `stoppedReported`. `buggy` transcribes the loop as it was (no stop check, and the job can only end as Completed or Failed).
+- **Auth.** `signedIn` (the token cache) is separate from `authShown` (what the page last fetched), so the model can express a stale display. Actions `signIn(desktop)` (browser mode reloads the page), `signOut`, `tokenExpires` (any time, including mid-step and mid-send), `sendWithoutToken`; test-job completion consults `signedIn`. Ghost `interactiveAuthInJob`. Invariants `testNeedsSignIn`, `sendNeedsSignIn`, `noInteractiveAuthInJob` and `canProgress`. The guards `signInOffered`, `sendTestEnabled` and `doSendEnabled` are shared by the actions and the invariants, so the dead-end check can't drift from them. Sign-in polling (`signInPending`) is folded into `signIn`: only the successful outcome is modelled, because a failed or cancelled sign-in leaves the state unchanged.
+- **Code-faithful actions.** Every action in `step` has a comment naming the code it transcribes; `tests/test_spec_coverage.py` fails without one.
+- **Coverage inventory.** `spec/coverage.toml` lists all 70 entry points (inline handlers, listeners, EventSource callbacks, timers, routes), each mapped to actions or excluded with a reason. The test also fails on a listener the extractor can't key, a stale entry, an unknown action, or an action in `step` that no entry point or `[environment]` entry reaches.
+- **Requirements.** `spec/requirements.md`, R1 to R10; the test checks every named check exists, every invariant has a requirement, and `check.sh` runs every invariant.
+- **Scenarios.** 15 in each variant, including one (`remainingActionsTest`) that reaches the actions no other scenario takes, as the vacuity check. `completeOrphan` is only reachable in `fixed`, because the buggy reload reattaches every unfinished job.
+- **Witnesses** (`quint run --witnesses`, random simulation, 5,000 traces of 25 steps): `staleSignIn` 180, `orphanJob` 88, `partialFailedSend` 0 (reached by a scenario instead). See `spec/requirements.md`.
+
+Deviations from the plan:
+
+- `step4NeedsSignIn` was dropped: steps 4 and 6 offer sign-in themselves instead of refusing entry (R2).
+- `progressMonotone` was not added (R10): the progress bar is display only and a reload legitimately resets it.
+- `stopHonoured` is `sentAfterStop == 0`, stricter than the planned `<= 1`: `sendNext` is atomic, so an email already being sent when Stop is pressed counts as sent before it.
+- The Stop liveness property (`--temporal`) was not tried; `stoppedReported` and the scenario tests cover the stop path, and `sendScreenNotStuck` covers the page.
+- The plan's `canProgress` counted "go back" as a fixing action, which would make it hold trivially wherever Back is enabled. It now requires that steps 4 and 6 can be finished from the step itself; a failed dry run on step 5 is fixed upstream by design.
+
+Model checking (Apalache, 16 steps, on a 4-core cloud container; much slower than the earlier Mac runs, about 5 to 8 minutes per invariant): `buggy` violates `next4Honest` in 12 steps (`init signIn upload next1 next2 next3 sendTestEmail back4 back3 edit next2 complete next3`). `noUntestedSend` now holds in `buggy` at 16 steps, because starting signed out costs a `signIn` step and its counterexample needs 17. The remaining `buggy` invariants and `--all fixed` were still running when this was written.
+
+Found while modelling, not fixed: a send that fails part-way keeps no results (R9).
 
 ## Tooling
 
@@ -172,6 +208,8 @@ Done.
 
 ### Step 2b — Coverage inventory and server-side job model
 
+Done; see "Steps 2b and 2c results" for what was built and where it departs from this plan.
+
 Goal: every user-reachable control and server route is either modelled or deliberately excluded, and the server's job lifecycle is modelled at the granularity the UI depends on.
 
 **Coverage inventory (reason 1).**
@@ -201,6 +239,8 @@ Goal: every user-reachable control and server route is either modelled or delibe
 Then fix Stop: pass a stop check (e.g. a `should_stop` callable) from the job into `send_merge()` and the sender loops, set `JobStatus.STOPPED`, and add a Flask test (start a multi-recipient send with a gated `send_one`, stop, assert fewer than all were sent and status is `stopped`) plus a scenario test in the spec.
 
 ### Step 2c — Requirements list, auth model and dead-end checks
+
+Done; see "Steps 2b and 2c results" for what was built and where it departs from this plan.
 
 Goal: invariants come from written requirements, including "can this step succeed?", not only from honesty properties, and auth is modelled. Brought forward from step 5.
 
