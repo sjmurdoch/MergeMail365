@@ -44,30 +44,27 @@
 
             // Background job tracking
             currentJobId: null,
-            // Generation counters for test and dry-run jobs. Starting a job or
-            // resetting results bumps the counter; a job whose stamp no longer
-            // matches is stale and its completion is ignored (spec/wizard.qnt).
-            testGen: 0,
-            verifyGen: 0,
-            // Bumped by any navigation or edit, so a recipient preview that
-            // arrives after the user has moved on or changed the content is
-            // dropped (spec/wizard.qnt, noStepJump and previewHonest).
-            previewGen: 0,
-            // "Stop sending" pressed before the start-job response gave the
-            // send's job id; sent once the id is known (spec/wizard.qnt,
-            // stopHonoured).
-            stopQueued: false,
             sendResults: null,
+
+            // What the page is waiting for, by request id: { kind,
+            // contentVersion } plus, for a send, stopQueued (Stop pressed
+            // before the start-job response named the job). A response or job
+            // completion whose request is no longer here is stale and is
+            // dropped: a new request of the same kind, going back, an edit
+            // or New merge removes the old one (spec/wizard.qnt: stale
+            // completions, noStepJump, previewHonest, stopHonoured).
+            requests: {},
+            nextRequestId: 1,
         };
     }
 
-    /** Fields to change when the test and dry-run results stop applying. */
+    /** Fields to change when the test and dry-run results stop applying.
+     *  Test emails and dry runs still running become stale. */
     function resetTestAndVerify(s) {
         return {
             testPassed: false,
             verifyPassed: false,
-            testGen: s.testGen + 1,
-            verifyGen: s.verifyGen + 1,
+            requests: dropRequests(s, ["test", "verify"]).requests,
             // Let the user start a fresh test even if an old one is running.
             testRunning: false,
             testFailed: false,
@@ -76,15 +73,61 @@
         };
     }
 
-    /** The state after "New merge". Counters keep counting so stale jobs and
-     *  responses from the previous merge stay stale. */
+    /** The state after "New merge". Counters keep counting, so nothing from
+     *  the previous merge can match the new one. */
     function newMergeState(s) {
         return Object.assign(initialState(), {
             contentVersion: s.contentVersion + 1,
-            testGen: s.testGen + 1,
-            verifyGen: s.verifyGen + 1,
-            previewGen: s.previewGen + 1,
+            nextRequestId: s.nextRequestId,
         });
+    }
+
+    // --- Requests. Each returns the fields to change. ---
+
+    /** Start waiting for a request of `kind` ("test", "verify", "preview" or
+     *  "send"). A new test, dry run or preview replaces the previous one of
+     *  its kind, which becomes stale. Returns { patch, id }. */
+    function startRequest(s, kind) {
+        const id = s.nextRequestId;
+        const requests = {};
+        for (const [key, r] of Object.entries(s.requests)) {
+            if (r.kind !== kind || kind === "send") requests[key] = r;
+        }
+        requests[id] = { kind, contentVersion: s.contentVersion };
+        return { patch: { requests, nextRequestId: id + 1 }, id };
+    }
+
+    /** Whether a response or completion for request `id` still applies. */
+    function isCurrent(s, id) {
+        return Object.hasOwn(s.requests, id);
+    }
+
+    function updateRequest(s, id, fields) {
+        if (!isCurrent(s, id)) return {};
+        return { requests: Object.assign({}, s.requests, { [id]: Object.assign({}, s.requests[id], fields) }) };
+    }
+
+    function finishRequest(s, id) {
+        const requests = Object.assign({}, s.requests);
+        delete requests[id];
+        return { requests };
+    }
+
+    /** Make every request of these kinds stale. */
+    function dropRequests(s, kinds) {
+        const requests = {};
+        for (const [key, r] of Object.entries(s.requests)) {
+            if (!kinds.includes(r.kind)) requests[key] = r;
+        }
+        return { requests };
+    }
+
+    /** The id of a pending request of `kind`, or null. */
+    function pendingRequest(s, kind) {
+        for (const [key, r] of Object.entries(s.requests)) {
+            if (r.kind === kind) return Number(key);
+        }
+        return null;
     }
 
     // --- Selectors. `auth` is { signedIn }, what the page last fetched from
@@ -134,6 +177,12 @@
         initialState,
         resetTestAndVerify,
         newMergeState,
+        startRequest,
+        isCurrent,
+        updateRequest,
+        finishRequest,
+        dropRequests,
+        pendingRequest,
         sendTestEnabled,
         retryVisible,
         nextEnabled,

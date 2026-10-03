@@ -82,6 +82,27 @@ function escapeHtml(s) {
     return d.innerHTML;
 }
 
+// Requests the page waits for (WizardCore.startRequest): a response or job
+// completion is applied only while its request is current.
+function beginRequest(kind) {
+    const { patch, id } = WizardCore.startRequest(state, kind);
+    Object.assign(state, patch);
+    return id;
+}
+
+function requestIsCurrent(id) {
+    return WizardCore.isCurrent(state, id);
+}
+
+function finishRequest(id) {
+    Object.assign(state, WizardCore.finishRequest(state, id));
+}
+
+// Navigation, edits and new data make a pending recipient preview stale.
+function dropPreview() {
+    Object.assign(state, WizardCore.dropRequests(state, ["preview"]));
+}
+
 function toggle(id, visible) {
     if (visible) show(id); else hide(id);
 }
@@ -182,7 +203,7 @@ function apiFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 async function goToStep(n) {
     console.log("Navigating to step", n, "from", state.currentStep);
-    const gen = ++state.previewGen;
+    dropPreview();
     // Only perform validation/trigger side-effects when advancing forward
     if (n > state.currentStep) {
         // Step 1 → 2: need a spreadsheet uploaded
@@ -193,9 +214,11 @@ async function goToStep(n) {
         // Step 2 → 3: validate compose fields, load recipient preview
         if (n === 3 && state.currentStep === 2) {
             if (!validateCompose()) return;
+            const id = beginRequest("preview");
             const previewOk = await loadPreview(
-                () => gen === state.previewGen && state.currentStep === 2,
+                () => requestIsCurrent(id) && state.currentStep === 2,
             );
+            finishRequest(id);
             if (!previewOk) return;
         }
         // Step 3 → 4: pre-fill test email
@@ -327,7 +350,7 @@ function validateCompose() {
 
 function setSendMode(mode) {
     state.sendMode = mode;
-    state.previewGen++;
+    dropPreview();
     state.contentVersion++;
     if (mode === "individual") {
         $("mode-individual").classList.add("active-mode");
@@ -674,7 +697,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
             return;
         }
         state.spreadsheetData = data;
-        state.previewGen++;
+        dropPreview();
         state.contentVersion++;
         show("spreadsheet-info");
         renderSpreadsheetSummary(data);
@@ -707,7 +730,7 @@ $("sheet-select").addEventListener("change", async () => {
             return;
         }
         state.spreadsheetData = data;
-        state.previewGen++;
+        dropPreview();
         state.contentVersion++;
         renderSpreadsheetSummary(data);
         buildPreviewTable(data.columns, data.rows, data.total_rows);
@@ -919,7 +942,7 @@ function activateHtmlEditor() {
 // Real-time placeholder and HTML validation
 let validationTimer = null;
 function onTemplateChange() {
-    state.previewGen++;
+    dropPreview();
     state.contentVersion++;
     clearTimeout(validationTimer);
     validationTimer = setTimeout(() => {
@@ -1270,8 +1293,8 @@ async function sendTestEmail() {
     }
 
     state.testPassed = false;
-    const gen = ++state.testGen;
-    const isCurrent = () => gen === state.testGen;
+    const id = beginRequest("test");
+    const isCurrent = () => requestIsCurrent(id);
     saveState();
 
     state.testRunning = true;
@@ -1289,11 +1312,13 @@ async function sendTestEmail() {
         const data = await resp.json();
         if (!isCurrent()) return;
         if (!resp.ok) {
+            finishRequest(id);
             showTestResult(false, data.error || "Failed to start job");
             return;
         }
         state.currentJobId = data.job_id;
         streamEvents(data.job_id, "test-log", (result) => {
+            finishRequest(id);
             if (result.status === "completed") {
                 state.testPassed = true;
                 saveState();
@@ -1304,7 +1329,10 @@ async function sendTestEmail() {
             }
         }, null, isCurrent);
     } catch (e) {
-        if (isCurrent()) showTestResult(false, `Error: ${e.message}`);
+        if (isCurrent()) {
+            finishRequest(id);
+            showTestResult(false, `Error: ${e.message}`);
+        }
     }
 }
 
@@ -1327,8 +1355,8 @@ function startVerify() {
     state.verifyResult = null;
     state.verifyPassed = false;
     render();
-    const gen = ++state.verifyGen;
-    const isCurrent = () => gen === state.verifyGen;
+    const id = beginRequest("verify");
+    const isCurrent = () => requestIsCurrent(id);
     saveState();
 
     const form = buildJobFormData("dry_run");
@@ -1338,11 +1366,13 @@ function startVerify() {
         .then(data => {
             if (!isCurrent()) return;
             if (data.error) {
+                finishRequest(id);
                 showVerifyResult(false, data.error);
                 return;
             }
             state.currentJobId = data.job_id;
             streamEvents(data.job_id, "verify-log", (result) => {
+                finishRequest(id);
                 if (result.status === "completed") {
                     state.verifyPassed = true;
                     saveState();
@@ -1363,7 +1393,12 @@ function startVerify() {
                 }
             }, null, isCurrent);
         })
-        .catch(e => { if (isCurrent()) showVerifyResult(false, `Error: ${e.message}`); });
+        .catch(e => {
+            if (isCurrent()) {
+                finishRequest(id);
+                showVerifyResult(false, `Error: ${e.message}`);
+            }
+        });
 }
 
 function showVerifyResult(success, msg) {
@@ -1409,10 +1444,10 @@ $("send-confirm-input").addEventListener("input", render);
 async function startSend() {
     state.sendStarted = true;
     state.sendOutcome = null;
-    // Until the response names the send's job, Stop is queued rather than
-    // sent to the previous (dry-run) job.
+    // Until the response names the send's job, Stop is queued on the request
+    // rather than sent to the previous (dry-run) job.
     state.currentJobId = null;
-    state.stopQueued = false;
+    const id = beginRequest("send");
     $("send-log").innerHTML = "";
     $("send-progress-text").textContent = "Sending...";
     $("send-progress-bar").value = 0;
@@ -1426,17 +1461,17 @@ async function startSend() {
     try {
         const resp = await apiFetch("/api/start-job", { method: "POST", body: form, headers: { "X-CSRF-Token": CSRF_TOKEN } });
         const data = await resp.json();
+        const stopQueued = Boolean(state.requests[id]?.stopQueued);
+        finishRequest(id);
         if (!resp.ok) {
             showSendResult(false, data.error || "Failed to start send");
             return;
         }
         state.currentJobId = data.job_id;
-        if (state.stopQueued) {
-            state.stopQueued = false;
-            stopSend();
-        }
+        if (stopQueued) stopSend();
         streamEvents(data.job_id, "send-log", (result) => onSendComplete(data.job_id, result), showSendProgress);
     } catch (e) {
+        finishRequest(id);
         window.removeEventListener("beforeunload", beforeUnloadWarn);
         showSendResult(false, `Error: ${e.message}`);
     }
@@ -1467,7 +1502,8 @@ function beforeUnloadWarn(e) {
 
 async function stopSend() {
     if (!state.currentJobId) {
-        if (state.sendStarted) state.stopQueued = true;
+        const id = WizardCore.pendingRequest(state, "send");
+        if (id !== null) Object.assign(state, WizardCore.updateRequest(state, id, { stopQueued: true }));
         return;
     }
     await apiFetch(`/api/job/${state.currentJobId}/stop`, {

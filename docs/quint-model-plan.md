@@ -391,6 +391,7 @@ Revised 2026-10-03, after steps 2b, 2c and round 2 made the model much richer th
 **Progress.**
 
 - 3.1 done: `web/static/wizard-core.js` holds the workflow state, its reset rules (`resetTestAndVerify`, `newMergeState`) and selectors named after the model's pure defs; `contentVersion` counts content changes; `render()` in `app.js` is the only writer of the step 4–6 buttons and panels (enforced by `TestRenderOwnsControls` in `tests/test_spec_coverage.py`); `tests/js/wizard-core.test.js` runs under `node --test` via `tests/test_wizard_core_js.py`. Deviation: the core is a classic script exposing `window.WizardCore` (and `module.exports` for Node), not an ES module, because the E2E tests drive the page through globals (`state`, `_auth`, `goToStep`, `newMerge`, …) that a module would hide; this also avoids the desktop WebView question until it matters.
+- 3.2 done for requests: `state.requests` (request ids from `WizardCore.startRequest`) replaces `testGen`, `verifyGen`, `previewGen`, `stopQueued` and the generation comparisons, for the test email, dry run, recipient preview and start-job requests. Not yet done: effects as data. Handlers still call `fetch`/`EventSource` themselves; that moves into the shell when `reduce()` arrives with the events of 3.3–3.5.
 
 Exit criteria: every model action is an event (checked by the coverage test); `abstractPage` and `abstract_server` cover every non-ghost model field; nothing outside `render()` writes `disabled` or visibility (a grep check in the coverage test); all existing tests pass.
 

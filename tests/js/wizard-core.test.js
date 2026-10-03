@@ -81,11 +81,16 @@ test("step 6 shows confirm, then progress, then the outcome", () => {
 });
 
 test("resetTestAndVerify clears both checks and makes running jobs stale", () => {
-    const s = Object.assign(C.initialState(), {
+    let s = Object.assign(C.initialState(), {
         testPassed: true, verifyPassed: true, testRunning: true, testFailed: true,
         testResult: { success: true, message: "ok" }, verifyResult: { success: true, message: "ok" },
-        testGen: 3, verifyGen: 5,
     });
+    let r = C.startRequest(s, "test");
+    s = Object.assign(s, r.patch);
+    const testId = r.id;
+    r = C.startRequest(s, "send");
+    s = Object.assign(s, r.patch);
+    const sendId = r.id;
     const after = Object.assign({}, s, C.resetTestAndVerify(s));
     assert.equal(after.testPassed, false);
     assert.equal(after.verifyPassed, false);
@@ -93,22 +98,57 @@ test("resetTestAndVerify clears both checks and makes running jobs stale", () =>
     assert.equal(after.testFailed, false);
     assert.equal(after.testResult, null);
     assert.equal(after.verifyResult, null);
-    assert.equal(after.testGen, 4);
-    assert.equal(after.verifyGen, 6);
+    assert.equal(C.isCurrent(after, testId), false);
+    assert.equal(C.isCurrent(after, sendId), true);
 });
 
-test("New merge resets everything but keeps the counters counting", () => {
-    const s = Object.assign(C.initialState(), {
-        currentStep: 6, sendStarted: true, sendOutcome: "results", testPassed: true,
-        contentVersion: 7, testGen: 2, verifyGen: 2, previewGen: 9,
+test("a new request replaces the previous one of its kind (stale completions)", () => {
+    let s = C.initialState();
+    const first = C.startRequest(s, "test");
+    s = Object.assign(s, first.patch);
+    const preview = C.startRequest(s, "preview");
+    s = Object.assign(s, preview.patch);
+    const second = C.startRequest(s, "test");
+    s = Object.assign(s, second.patch);
+    assert.equal(C.isCurrent(s, first.id), false);
+    assert.equal(C.isCurrent(s, second.id), true);
+    assert.equal(C.isCurrent(s, preview.id), true);
+    assert.notEqual(first.id, second.id);
+    s = Object.assign(s, C.dropRequests(s, ["preview"]));
+    assert.equal(C.isCurrent(s, preview.id), false);
+    s = Object.assign(s, C.finishRequest(s, second.id));
+    assert.equal(C.isCurrent(s, second.id), false);
+});
+
+test("requests record the content version they were made for", () => {
+    const s = Object.assign(C.initialState(), { contentVersion: 4 });
+    const { patch, id } = C.startRequest(s, "verify");
+    assert.equal(patch.requests[id].contentVersion, 4);
+});
+
+test("a Stop pressed before the start-job response is kept on the send request", () => {
+    let s = C.initialState();
+    assert.equal(C.pendingRequest(s, "send"), null);
+    const { patch, id } = C.startRequest(s, "send");
+    s = Object.assign(s, patch);
+    assert.equal(C.pendingRequest(s, "send"), id);
+    s = Object.assign(s, C.updateRequest(s, id, { stopQueued: true }));
+    assert.equal(s.requests[id].stopQueued, true);
+    assert.deepEqual(C.updateRequest(s, 999, { stopQueued: true }), {});
+});
+
+test("New merge resets everything, drops requests and keeps ids counting", () => {
+    let s = Object.assign(C.initialState(), {
+        currentStep: 6, sendStarted: true, sendOutcome: "results", testPassed: true, contentVersion: 7,
     });
+    const { patch, id } = C.startRequest(s, "test");
+    s = Object.assign(s, patch);
     const after = C.newMergeState(s);
     assert.equal(after.currentStep, 1);
     assert.equal(after.sendStarted, false);
     assert.equal(after.sendOutcome, null);
     assert.equal(after.testPassed, false);
     assert.ok(after.contentVersion > s.contentVersion);
-    assert.ok(after.testGen > s.testGen);
-    assert.ok(after.verifyGen > s.verifyGen);
-    assert.ok(after.previewGen > s.previewGen);
+    assert.equal(C.isCurrent(after, id), false);
+    assert.ok(C.startRequest(after, "test").id > id);
 });
