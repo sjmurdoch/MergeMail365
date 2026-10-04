@@ -1,6 +1,3 @@
-- Don't allow progress if not signed in
-- Validate user flow state machine
-
 ## Open issues from the Quint model work
 
 Left over when the plan in `archive/quint-model-plan.md` was closed (2026-10-03). The model (`spec/wizard.qnt`) covers one page, one session and one server process at a time; the first three items would extend it.
