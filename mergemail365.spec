@@ -29,6 +29,10 @@ FIXED_TENANT_ID = os.environ.get("MERGEMAIL365_TENANT_ID", "")
 src_dir = os.path.join("src", "mail_merge")
 web_dir = os.path.join(src_dir, "web")
 
+# App icons, generated from assets/icon.svg by scripts/make_icons.py
+icon_icns = os.path.join("assets", "MergeMail365.icns")
+icon_ico = os.path.join("assets", "MergeMail365.ico")
+
 # Package metadata, so the log can record which versions are bundled
 # (mail_merge.diagnostics.log_environment).  pythonnet is Windows-only.
 _metadata = []
@@ -106,6 +110,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,  # No console window in desktop mode
+    icon=icon_ico if sys.platform == "win32" else None,  # macOS: the BUNDLE's
     disable_windowed_traceback=False,
     argv_emulation=True,  # macOS: support dropping files onto the app
     target_arch=None,  # Set to 'universal2' for macOS Intel+ARM builds
@@ -129,7 +134,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="MergeMail365.app",
-        icon=None,
+        icon=icon_icns,
         bundle_identifier="is.murdoch.mergemail365",
         info_plist={
             "CFBundleName": "MergeMail365",

@@ -25,6 +25,10 @@ uv run pytest --cov=mail_merge
 # Type checking
 uv run mypy
 
+# App icons: edit assets/icon.svg, then regenerate the .icns, .ico and favicons
+# (needs macOS for iconutil, and rsvg-convert: brew install librsvg); commit the outputs
+uv run python scripts/make_icons.py
+
 # JS linting (requires Biome — brew install biome; CI pins the version in .github/workflows/test.yml)
 biome lint src/mail_merge/web/static/app.js src/mail_merge/web/static/wizard-core.js
 

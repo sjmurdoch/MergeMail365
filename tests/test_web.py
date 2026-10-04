@@ -217,6 +217,16 @@ class TestAccessControlBothModes:
 
 # ---- Config ----
 
+class TestFavicon:
+    def test_page_links_favicons_that_are_served(self, web_client):
+        page = web_client.get("/").get_data(as_text=True)
+        for name, mime in (("icon.svg", "image/svg+xml"), ("icon-32.png", "image/png")):
+            assert f'href="/static/{name}"' in page
+            resp = web_client.get(f"/static/{name}")
+            assert resp.status_code == 200
+            assert resp.mimetype == mime
+
+
 class TestConfig:
     def test_config_returns_client_tenant(self, web_client):
         resp = web_client.get("/api/config")
