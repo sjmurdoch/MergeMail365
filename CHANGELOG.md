@@ -4,6 +4,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-04
+
 ### Added
 
 - An app icon: a spreadsheet with an envelope in front. The macOS and Windows apps use it, and the web UI shows it as the browser tab's icon.
@@ -98,7 +100,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Tests now fail if they make a real network request, check calls against the real `msal` and `pywebview` APIs, and include contract tests that run real `msal` against mocked Microsoft Entra endpoints.
 - Added browser tests for pasting into the editor, toolbar formatting and links, plus checks for invalid HTML in the web UI.
 
-[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.3.1...v0.4.0
