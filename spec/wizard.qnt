@@ -103,6 +103,8 @@ module wizard {
     untestedSend: bool,
     sentAfterStop: int,           // emails the send loop sent after Stop was pressed
     interactiveAuthInJob: bool,   // a job waited for the device-code flow
+    mailSignedOut: bool,          // a test email or send was started while the page showed signed
+                                  // out, or an email went out without a usable token
     stepJump: bool,               // a response moved the page from a step the user had left
     concurrentSends: bool,        // a send started while another was running
     mergeId: int,                 // counts New merge
@@ -126,7 +128,7 @@ module wizard {
     signedIn: false, authShown: false,
     testedVersions: Set(), verifiedVersions: Set(),
     realSendStarted: false, untestedSend: false, sentAfterStop: 0,
-    interactiveAuthInJob: false,
+    interactiveAuthInJob: false, mailSignedOut: false,
     stepJump: false, concurrentSends: false, mergeId: 0, lostSend: false,
     stopLost: false, stopQueued: false,
   }
@@ -339,6 +341,7 @@ module wizard {
     val g = s.testGen + 1
     act("sendTestEmail", { ...startJob(s, Test, g),
       testGen: g, testPassed: false, btnSendTest: false,
+      mailSignedOut: s.mailSignedOut or not(s.authShown),
       // Bug: btn-next-4 stays enabled while testPassed is false.
       btnNext4: if (FIXED) false else s.btnNext4 }),
   }
@@ -376,7 +379,8 @@ module wizard {
       sendReq: Set(s.nextJobId), nextJobId: s.nextJobId + 1,
       sendJob: Set({ id: s.nextJobId, sent: 0, stopRequested: false, status: Running, stopEarly: false }),
       concurrentSends: s.concurrentSends or s.sendJob.exists(j => j.status == Running),
-      realSendStarted: true, untestedSend: s.untestedSend or not(ok) }),
+      realSendStarted: true, untestedSend: s.untestedSend or not(ok),
+      mailSignedOut: s.mailSignedOut or not(s.authShown) }),
   }
 
   // The start-job response: the session now names the job, and
@@ -500,7 +504,10 @@ module wizard {
       // The "Sending [i/n]" log line updates the progress text if the page
       // is listening to this job.
       progressJob: if (s.pending.exists(p => p.id == j.id and p.handler == Send)) j.id else s.progressJob,
-      sentAfterStop: if (j.stopRequested) s.sentAfterStop + 1 else s.sentAfterStop }),
+      sentAfterStop: if (j.stopRequested) s.sentAfterStop + 1 else s.sentAfterStop,
+      // Unreachable while the guard above holds; kept so that relaxing it
+      // shows up in signedInBeforeMail.
+      mailSignedOut: s.mailSignedOut or not(s.signedIn) }),
   }
 
   // The send job's thread ends: the loop ran out of recipients, stopped
@@ -723,6 +730,13 @@ module wizard {
     (s.step == 6 and not(s.sendStarted))
       implies ((doSendEnabled(s) implies s.authShown) and (s.authShown or signInOffered(s)))
 
+  /// No email is attempted before the user has signed in: a test email or a
+  /// send only starts while the page shows signed in, and each email the
+  /// send loop sends goes out with a usable token. (A token that runs out
+  /// after the click is allowed: the job then fails before its first email,
+  /// see noInteractiveAuthInJob and the staleSignIn witness.)
+  val signedInBeforeMail = not(s.mailSignedOut)
+
   /// No web job ever waits for interactive sign-in input.
   val noInteractiveAuthInJob = not(s.interactiveAuthInJob)
 
@@ -771,7 +785,7 @@ module wizard {
     testNeedsSignIn, sendNeedsSignIn, noInteractiveAuthInJob, canProgress,
     noStepJump, previewHonest, runningSendVisible, noConcurrentSends,
     failedSendReported, progressHonest, newMergeClears, buttonsDerived,
-    restartReported, interruptedVisible,
+    restartReported, interruptedVisible, signedInBeforeMail,
   }
 
   // ---------------------------------------------------------------------
@@ -915,6 +929,24 @@ module wizard {
       .then(sendWithoutToken)
       .expect(bugIff(noInteractiveAuthInJob)
         and (FIXED implies (s.doneNav and s.sendJob.forall(j => j.status == Failed))))
+
+  /// Signed out, a test email can be started on step 4 (bug 8). Fixed: it
+  /// can't be clicked until the user signs in from the step.
+  run mailBeforeSignInTest =
+    init.then(toStep4)
+      .expect(FIXED implies not(sendTestEnabled(s)))
+      .then(if (FIXED) signIn(true).then(sendTestEmail) else sendTestEmail)
+      .expect(bugIff(signedInBeforeMail))
+
+  /// The token runs out after the page last checked it, and the user starts
+  /// the send: allowed, because the page showed signed in, but no email goes
+  /// out (fixed: the job fails at once).
+  run tokenExpiresBeforeSendTest =
+    start.then(toStep4).then(passTestAndVerify(0))
+      .then(next5).then(typeSend).then(tokenExpires).then(send)
+      .then(sendWithoutToken)
+      .expect(signedInBeforeMail and s.sendJob.forall(j => j.sent == 0)
+        and (FIXED implies (allInvariants and s.doneNav)))
 
   /// Vacuity: reaches the actions no other scenario takes, so a guard that
   /// can never be true is caught. completeOrphan is only reachable in fixed:

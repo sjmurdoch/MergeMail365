@@ -36,7 +36,7 @@ The table of all seventeen, with their regression tests, is in the archived plan
 | File | What it is |
 |---|---|
 | `spec/wizard.qnt` | The model: state, actions, invariants, scenarios, and the `conformance` module used to generate test traces |
-| `spec/requirements.md` | The user-facing requirements (R1–R17), each with the invariant that checks it |
+| `spec/requirements.md` | The user-facing requirements (R1–R18), each with the invariant that checks it |
 | `spec/coverage.toml` | Every entry point in the UI and server, mapped to model actions; how each action is implemented; which model fields the abstraction functions leave out |
 | `spec/check.sh` | Runs the Apalache model checker over every invariant |
 | `spec/package.json`, `spec/package-lock.json` | Quint, pinned to 0.32.0 |
@@ -122,7 +122,7 @@ The whole system state is one record, `s`. Its fields fall into six groups:
 | In flight | `pending` (jobs the page is listening to), `previewReq`, `sendReq` | Requests and SSE streams the page is waiting on |
 | Server | `sessionJob`, `sendJob`, `nextJobId`, `sendLog` | `session["job_id"]`, `JobStore`, the send log on disk |
 | Sign-in | `signedIn` (the token cache), `authShown` (what the page last showed) | MSAL cache vs `_auth.isSignedIn` |
-| Ghost | `testedVersions`, `verifiedVersions`, `realSendStarted`, `untestedSend`, `sentAfterStop`, `interactiveAuthInJob`, `stepJump`, `concurrentSends`, `mergeId`, `lostSend`, `stopLost`, `stopQueued` | Nothing in the code: a record of what really happened, for the invariants |
+| Ghost | `testedVersions`, `verifiedVersions`, `realSendStarted`, `untestedSend`, `sentAfterStop`, `interactiveAuthInJob`, `mailSignedOut`, `stepJump`, `concurrentSends`, `mergeId`, `lostSend`, `stopLost`, `stopQueued` | Nothing in the code: a record of what really happened, for the invariants |
 
 Two design points matter.
 
@@ -358,6 +358,7 @@ Keeping the buggy behaviour in the model documents each bug precisely and proves
 | R15 | A restart mid-send records and reports what went out | `restartReported`, `interruptedVisible` |
 | R16 | The sign-in display follows the latest answer | None in the model (holds by construction in the code) |
 | R17 | Buttons on steps 4–6 follow the workflow state alone | `buttonsDerived` |
+| R18 | No email is attempted before the user has signed in | `signedInBeforeMail` |
 
 The headline invariant uses ghost state to say that a real send only goes out for content that was test-sent and dry-run in its current form. `startSend` records whether that was true:
 
