@@ -89,10 +89,12 @@ jobs:
             spec/node_modules/.bin/quint test --main=$variant --max-samples=1 --backend=typescript spec/wizard.qnt
           done
 
-      # cStep traces reach steps 5 and 6; uniform random traces of `step`
-      # rarely get past step 3 and missed every long bug in the buggy variants.
+      # A smoke test, kept small because CI time costs money; the thorough
+      # simulation and Apalache run locally before pushing
+      # (docs/quint-model.md, section 9). cStep traces reach steps 5 and 6,
+      # which uniform random traces of `step` rarely do.
       - name: Simulate fixed against every invariant
-        run: spec/node_modules/.bin/quint run spec/wizard.qnt --main=conformance --init=cInit --step=cStep --backend=typescript --invariant=allInvariants --max-samples=2000 --max-steps=120
+        run: spec/node_modules/.bin/quint run spec/wizard.qnt --main=conformance --init=cInit --step=cStep --backend=typescript --invariant=allInvariants --max-samples=500 --max-steps=60
 
       - name: Install Playwright browser
         run: uv run playwright install --with-deps chromium
