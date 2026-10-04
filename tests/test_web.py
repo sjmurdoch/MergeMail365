@@ -116,6 +116,11 @@ class TestAccessControl:
         resp2 = client.get("/")
         assert resp2.status_code == 403
 
+    def test_index_shows_version(self, web_client):
+        from importlib.metadata import version
+        resp = web_client.get("/")
+        assert f"v{version('mergemail365')}" in resp.get_data(as_text=True)
+
     def test_post_without_csrf_rejected(self, web_client):
         resp = web_client.post("/api/preview-template",
                                json={"subject": "test"},

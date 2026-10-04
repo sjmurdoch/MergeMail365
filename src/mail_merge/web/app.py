@@ -2,6 +2,7 @@
 
 import atexit
 import hashlib
+from importlib.metadata import version
 import json
 import logging
 import os
@@ -356,7 +357,8 @@ def create_app(
     @app.route("/")
     def index() -> str:
         csrf_token = session.get("csrf_token", "")
-        return render_template("index.html", csrf_token=csrf_token)
+        return render_template("index.html", csrf_token=csrf_token,
+                               app_version=version("mergemail365"))
 
     # ----- Auth routes -----
 

@@ -4,6 +4,10 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ## [Unreleased]
 
+### Added
+
+- Web UI: a footer showing the running version, e.g. "MergeMail365 v0.6.0".
+
 ## [0.6.0] — 2026-10-04
 
 ### Added
