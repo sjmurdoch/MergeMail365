@@ -1012,6 +1012,31 @@ class TestSendConfirmation:
         expect(page.locator("#btn-do-send")).to_be_enabled()
 
 
+class TestReportDownload:
+    def test_download_mail_merge_report(self, authenticated_page: Page):
+        """"Download mail merge report" saves the results as a CSV file."""
+        page = authenticated_page
+        page.evaluate("""() => {
+            state.sendResults = [
+                { email: "a@example.com", success: true, status_code: 202, error: null },
+                { email: "=b@example.com", success: false, status_code: 400,
+                  error: 'Bad "request"' },
+            ];
+        }""")
+        # The button (on step 6) calls downloadCsv().
+        assert page.get_attribute("#btn-download-csv", "onclick") == "downloadCsv()"
+        with page.expect_download() as download:
+            page.evaluate("downloadCsv()")
+        assert download.value.suggested_filename == "mergemail365-results.csv"
+        assert Path(download.value.path()).read_text(encoding="utf-8") == (
+            "email,success,status_code,error\n"
+            '"a@example.com",true,202,""\n'
+            '"\t=b@example.com",false,400,"Bad ""request"""\n'
+        )
+        # A download, not a navigation: the wizard is still on screen.
+        expect(page.locator("#step-1")).to_be_visible()
+
+
 class TestSessionTimer:
     def test_session_timer_visible(self, authenticated_page: Page):
         """The session timer becomes visible when remaining time is under 60 min."""

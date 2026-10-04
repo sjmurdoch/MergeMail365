@@ -101,6 +101,7 @@ not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists 
 # --- static/app.js timers ---
 "js:setInterval@fn:onSignInClick" = { actions = ["signIn"] }
 "js:setTimeout@fn:onTemplateChange" = { out_of_scope = "Debounced placeholder and HTML warnings; display only." }
+"js:setTimeout@fn:saveCsv" = { out_of_scope = "Frees a downloaded report's blob URL; no workflow state." }
 "js:setInterval@document:DOMContentLoaded" = { out_of_scope = "Session expiry display and localStorage auto-save; what auto-save keeps is covered by reload." }
 
 # --- web/app.py routes ---

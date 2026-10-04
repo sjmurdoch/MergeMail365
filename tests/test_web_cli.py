@@ -98,6 +98,7 @@ class TestDesktopMode:
         fake = types.ModuleType("webview")
         fake.create_window = create_autospec(webview.create_window)
         fake.start = create_autospec(webview.start)
+        fake.settings = dict(webview.settings)
         monkeypatch.setitem(sys.modules, "webview", fake)
         return fake
 
@@ -158,6 +159,25 @@ class TestDesktopMode:
         assert calls["browser"] == calls["desktop"]
         assert calls["desktop"]["host"] == "127.0.0.1"
         assert calls["desktop"]["port"] == 5057
+
+    def test_desktop_allows_downloads(self, fake_webview, fake_server):
+        """Saving a report is a download; pywebview blocks those by default.
+
+        With downloads off, macOS shows the CSV in place of the app (with no
+        way back) and Windows does nothing; with them on, both ask where to
+        save the file.
+        """
+        assert fake_webview.settings["ALLOW_DOWNLOADS"] is False
+        fake_webview.start.side_effect = lambda: started.append(
+            fake_webview.settings["ALLOW_DOWNLOADS"])
+        started: list[bool] = []
+        with patch("threading.Timer"):
+            main(["--desktop"])
+        assert started == [True]
+
+    def test_pywebview_has_allow_downloads_setting(self):
+        webview = pytest.importorskip("webview")
+        assert "ALLOW_DOWNLOADS" in webview.settings
 
     def test_create_window_accepts_url_string(self):
         """We pass a URL string as ``url``; pywebview must still accept that."""

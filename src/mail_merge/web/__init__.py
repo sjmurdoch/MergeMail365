@@ -92,6 +92,10 @@ def main(argv: list[str] | None = None) -> None:
 
         server = make_server(args.host, port, app, threaded=True)
         threading.Thread(target=server.serve_forever, name="http-server", daemon=True).start()
+        # Saving a report is a download. pywebview blocks those by default:
+        # macOS then shows the CSV in place of the app and Windows does
+        # nothing. Allowed, both ask where to save the file.
+        webview.settings["ALLOW_DOWNLOADS"] = True
         webview.create_window("MergeMail365", url, width=1100, height=800)
         webview.start()
     else:

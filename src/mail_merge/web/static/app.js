@@ -1549,7 +1549,10 @@ function saveCsv(results, fileName) {
     a.href = url;
     a.download = fileName;
     a.click();
-    URL.revokeObjectURL(url);
+    // The desktop app's web view starts the download after this returns
+    // (once pywebview has decided to treat the click as a download), so
+    // revoking at once could leave nothing to save.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function newMerge() {
