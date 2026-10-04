@@ -403,7 +403,7 @@ Three tools check the model, from fast and shallow to slow and exhaustive.
 |---|---|---|---|
 | Scenarios | `quint test --main=<variant>` | 23 hand-written traces, one per bug plus a happy path | Seconds |
 | Simulation | `quint run --step=cStep --invariant=allInvariants` | Thousands of random traces of 120 steps | ~2 min for 2,000 |
-| Bounded model checking | `spec/check.sh [--all] <variant>` | Apalache proves every invariant for every trace up to 16 steps | ~2 h (`--all fixed`, 4 cores) |
+| Bounded model checking | `spec/check.sh [--all] <variant>` | Apalache proves every invariant for every trace up to 16 steps (19 in the deepest run) | ~2 h (`--all fixed`, 4 cores); each extra step about 2½ times as long |
 
 ### Scenarios
 
@@ -433,6 +433,27 @@ The default backend downloads Quint's Rust evaluator from GitHub (outside the lo
 ### Apalache
 
 `spec/check.sh` runs each invariant through `quint verify`, which uses the Apalache model checker. A violation prints the trace of action names that reaches it. Apalache is too slow for every push, so CI runs scenarios and simulation instead; run `spec/check.sh --all fixed` locally whenever `spec/wizard.qnt` changes. It needs Java and a free local port 8822. The last run (after bug 17) found no violation of any of the 24 invariants within 16 steps.
+
+Apalache checks one step at a time, and each step takes about 2½ times as long as the one before. One run of `allInvariants` on `fixed` with `--max-steps=22` on an 8-core, 24 GB Apple Silicon Mac (2026-10-04, with a 12 GB heap, and sharing the CPU with simulations until step 17) finished each step at:
+
+| Step | Elapsed | This step |
+|---|---|---|
+| 14 | 13 min | 7 min |
+| 15 | 28 min | 15 min |
+| 16 | 1 h 2 min | 34 min |
+| 17 | 1 h 55 min | 53 min |
+| 18 | 3 h 33 min | 1 h 38 min |
+| 19 | 7 h 16 min | 3 h 43 min |
+
+Every invariant held up to 19 steps; step 20 had not finished after 11 hours. Running alone, the first 15 steps took 13 minutes. A bound beyond 20 needs a model with shorter routes to the later steps (see `TODO.md`), not more machine time.
+
+For a long run, raise Apalache's heap (its launcher defaults to 4 GB) and keep the machine awake:
+
+```sh
+QUINT=$Q JVM_ARGS=-Xmx12g caffeinate -ims spec/check.sh --all --max-steps 19 fixed
+```
+
+Use the default SMT encoding. With `checker.smt-encoding` set to `arrays` (through `--apalache-config`), Apalache 0.56.1 reported an 8-step counterexample in `fixed` that Quint's evaluator showed to be false.
 
 ## 10. How the implementation is kept matching the model
 
@@ -616,7 +637,7 @@ It takes about 2½ minutes. The cross-platform test jobs skip the conformance te
 
 ### 10.6 What is not guaranteed
 
-- **Bounded, not complete.** Apalache checks traces up to 16 steps; simulation and conformance check random samples. A bug that needs a longer or rarer sequence can be missed.
+- **Bounded, not complete.** Apalache checks traces up to 16 steps (19 in the deepest run); simulation and conformance check random samples. A bug that needs a longer or rarer sequence can be missed.
 - **Only what is modelled.** Everything in [§4](#4-what-the-model-covers)'s out-of-scope table, and the open items in `TODO.md`, is unchecked by the model.
 - **The browser tier doesn't hold responses.** It replays `eStep` traces, where a response always arrives next; the await windows are checked by the client tier and by `test_web_e2e_workflow.py`.
 - **Atomic steps.** One `sendNext` is one email; a crash mid-email is not modelled. The interrupted-send report says so to the user ("except perhaps the one being sent when the app stopped").
