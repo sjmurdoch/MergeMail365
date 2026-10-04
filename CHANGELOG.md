@@ -4,6 +4,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-04
+
 ### Security
 
 - Desktop app (macOS/Windows, and `mergemail365-web --desktop`): the app now requires the per-launch access token and CSRF token, as browser mode does. Since 0.1.0 the desktop app had skipped both, on the mistaken belief that it opened no network port; in fact it was served on a random `127.0.0.1` port that any program on the machine could use to act as the signed-in user, including sending email.
@@ -84,6 +86,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Tests now fail if they make a real network request, check calls against the real `msal` and `pywebview` APIs, and include contract tests that run real `msal` against mocked Microsoft Entra endpoints.
 - Added browser tests for pasting into the editor, toolbar formatting and links, plus checks for invalid HTML in the web UI.
 
-[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.3.1...v0.4.0
