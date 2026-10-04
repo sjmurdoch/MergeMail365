@@ -8,6 +8,10 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 - An app icon: a spreadsheet with an envelope in front. The macOS and Windows apps use it, and the web UI shows it as the browser tab's icon.
 
+### Changed
+
+- Web UI: the box where you type SEND to confirm a send is now empty, instead of showing a greyed-out "SEND" that could look as if it were already filled in.
+
 ### Fixed
 
 - Desktop app: "Download mail merge report" (and "Download CSV" for an interrupted send) now asks where to save the file. On macOS it used to show the report in place of the app, with no way back; on Windows it did nothing.
