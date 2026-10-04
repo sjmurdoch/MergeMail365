@@ -54,8 +54,9 @@ Q=spec/node_modules/.bin/quint
 
 $Q typecheck spec/wizard.qnt
 $Q test --main=fixed --max-samples=1 --backend=typescript spec/wizard.qnt    # scenarios, seconds
-$Q run spec/wizard.qnt --main=fixed --backend=typescript \
-   --invariant=allInvariants --max-samples=2000 --max-steps=20                  # random simulation, ~20 s
+$Q run spec/wizard.qnt --main=conformance --init=cInit --step=cStep \
+   --backend=typescript --invariant=allInvariants \
+   --max-samples=2000 --max-steps=120                                           # random simulation, ~2 min
 
 uv run pytest tests/test_spec_coverage.py tests/test_conformance.py            # static checks + conformance
 uv run pytest tests/test_conformance_e2e.py                                    # browser tier (Chromium)
@@ -401,7 +402,7 @@ Three tools check the model, from fast and shallow to slow and exhaustive.
 | Check | Command | What it does | Time |
 |---|---|---|---|
 | Scenarios | `quint test --main=<variant>` | 23 hand-written traces, one per bug plus a happy path | Seconds |
-| Simulation | `quint run --invariant=allInvariants` | Thousands of random traces | ~20 s for 2,000 |
+| Simulation | `quint run --step=cStep --invariant=allInvariants` | Thousands of random traces of 120 steps | ~2 min for 2,000 |
 | Bounded model checking | `spec/check.sh [--all] <variant>` | Apalache proves every invariant for every trace up to 16 steps | ~2 h (`--all fixed`, 4 cores) |
 
 ### Scenarios
@@ -420,6 +421,14 @@ Each scenario replays one counterexample and asserts that the invariant fails in
 ```
 
 Run them for all three variants: a scenario that passes in `fixed` but also in `buggy` no longer shows the bug.
+
+### Simulation
+
+Simulate with `cStep` from the `conformance` module (see [§10](#10-how-the-implementation-is-kept-matching-the-model)), not the model's own `step`. Uniform random traces of `step` rarely get past step 3, because reloads, restarts and Back keep returning the page to the start. Checked against the long bugs in `buggy` and `partial` that Apalache misses at 16 steps (`noUntestedSend`, `back6Usable`, `stoppedReported`, `noConcurrentSends`, `progressHonest`, `newMergeClears`), 20,000 uniform traces of 60 steps found none of them, while 2,000 `cStep` traces of 120 steps (the CI setting) found every one with each of five seeds. `noConcurrentSends` was the slowest, at about 830 traces.
+
+Simulation does not find bugs that need a long, exact sequence. `next5Honest` in `buggy` (a stale dry run completing after Back, Back, Back, an edit and a new test) was not found in 50,000 `cStep` traces at any `GAP` from 0 to 8; only its scenario and a deep enough Apalache run check it.
+
+The default backend downloads Quint's Rust evaluator from GitHub (outside the lockfile) and is about 7 times as fast; CI uses `--backend=typescript`.
 
 ### Apalache
 
@@ -600,7 +609,7 @@ The client tier found a real divergence when it was first run: after a new uploa
 The `spec` job in `.github/workflows/test.yml` installs the pinned Quint and runs, on every push and pull request:
 
 1. `quint typecheck` and the scenario tests for all three variants;
-2. a 2,000-trace simulation of `fixed` against `allInvariants`;
+2. a simulation of 2,000 `cStep` traces of 120 steps against `allInvariants`;
 3. `test_conformance.py`, `test_conformance_e2e.py`, `test_spec_coverage.py` and the `wizard-core.js` unit tests.
 
 It takes about 2½ minutes. The cross-platform test jobs skip the conformance tests, because Quint isn't installed there. Apalache is not in CI.
