@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from mail_merge.console import RedactingFormatter
 from mail_merge.sender import SendResult
 from mail_merge.web.sendlog import SendLog
 
@@ -83,7 +84,7 @@ class JobLogHandler(logging.Handler):
                 },
             })
         except Exception:
-            pass
+            self.handleError(record)
 
 
 # The model's names for job modes and statuses (spec/wizard.qnt Kind, Status).
@@ -190,7 +191,7 @@ class JobStore:
         logger.debug("Job %s started (mode=%r)", job.id, job.mode)
         handler = JobLogHandler(job)
         handler.setLevel(logging.INFO)
-        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.setFormatter(RedactingFormatter("%(message)s"))
         mm_logger = logging.getLogger("mail_merge")
         mm_logger.addHandler(handler)
         send_log = self.send_log if job.mode == "send" else None

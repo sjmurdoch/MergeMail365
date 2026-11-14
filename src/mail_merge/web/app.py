@@ -80,10 +80,7 @@ def _cleanup_temp_dirs() -> None:
     """Clean up all temp directories on shutdown."""
     with _temp_dirs_lock:
         for d in _temp_dirs:
-            try:
-                shutil.rmtree(d, ignore_errors=True)
-            except Exception:
-                pass
+            shutil.rmtree(d, ignore_errors=True)
         _temp_dirs.clear()
 
 
@@ -234,7 +231,7 @@ def _validated_recipient_count(
 # ---------------------------------------------------------------------------
 
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
-_WILDCARD_HOSTS = frozenset({"", "0.0.0.0", "::"})
+_WILDCARD_HOSTS = frozenset({"", "0.0.0.0", "::"})  # noqa: S104 - names to compare with, not a bind
 
 
 def _allowed_hostnames(bind_host: str) -> frozenset[str] | None:
@@ -445,7 +442,7 @@ def create_app(
                         "token_expires_at": expires.isoformat() if expires else None,
                     })
         except Exception:
-            pass
+            logger.debug("auth status: could not read the token cache", exc_info=True)
         return jsonify({"authenticated": False, "email": None})
 
     @app.route("/auth/logout", methods=["POST"])
@@ -521,7 +518,7 @@ def create_app(
                     )
                     spreadsheet_info = {**spreadsheet_info, "rows": rows}
                 except Exception:
-                    pass
+                    logger.debug("config: could not re-read the uploaded spreadsheet", exc_info=True)
 
         from mail_merge.api import _EMAIL_HTML_HEAD, _EMAIL_HTML_TAIL
 

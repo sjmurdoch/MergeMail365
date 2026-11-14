@@ -1,4 +1,3 @@
-import json
 import logging
 import time
 from collections.abc import Callable
@@ -8,6 +7,11 @@ from importlib.metadata import version
 import requests
 
 logger = logging.getLogger(__name__)
+
+# Passed as `extra` on log records that hold message content. The file
+# handler drops them (console.setup_file_logging), so what users write to
+# their recipients is never in the log file they send when asking for help.
+CONSOLE_ONLY = "console_only"
 
 GRAPH_SEND_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
 MAX_RECIPIENTS_PER_MESSAGE = 500
@@ -103,10 +107,13 @@ def send_one(
     was_throttled = False
     while True:
         try:
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("POST to %s with headers %s and payload: %s",
-                             GRAPH_SEND_URL,
-                             json.dumps(headers, indent=2), json.dumps(payload, indent=2))
+            # Never the headers or the payload: they hold the access token,
+            # the message and the attachments, and the log file is what
+            # users send when asking for help (tests/test_log_secrets.py).
+            logger.debug(
+                "POST sendMail for %s: subject %d chars, body %d chars, %d attachment(s)",
+                to.address, len(subject), len(body), len(opts.attachments or []),
+            )
             resp = requests.post(GRAPH_SEND_URL, json=payload, headers=headers, timeout=30)
         except requests.RequestException as exc:
             retries += 1
@@ -288,7 +295,9 @@ def send_all(
                 "🔄 DRY RUN [%d/%d] To: %s | Subject: %s",
                 i + 1, len(recipients), to.address, rendered_subject,
             )
-            logger.debug("Body:\n%s", rendered_body)
+            # The rendered message is for the terminal (a DEBUG dry run is
+            # how CLI users read what would be sent), never the log file.
+            logger.debug("Body:\n%s", rendered_body, extra={CONSOLE_ONLY: True})
             results.append(SendResult(email=to.address, success=True, status_code=None))
             if on_result is not None:
                 on_result(results[-1])
