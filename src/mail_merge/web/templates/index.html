@@ -174,6 +174,7 @@
             <div id="placeholder-chips" class="hidden">
                 <small>Available placeholders (click to insert):</small>
                 <div class="chip-container" id="chips"></div>
+                <small id="chips-unusable"></small>
             </div>
             <div id="placeholder-errors" class="hidden callout callout-danger"></div>
             <div id="html-warnings" class="hidden callout callout-warning"></div>
@@ -384,6 +385,7 @@
 <script src="{{ url_for('static', filename='trix.js') }}"></script>
 <script src="{{ url_for('static', filename='trix-config.js') }}"></script>
 <script src="{{ url_for('static', filename='safe-html.js') }}"></script>
+<script src="{{ url_for('static', filename='template-core.js') }}"></script>
 <script src="{{ url_for('static', filename='wizard-core.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

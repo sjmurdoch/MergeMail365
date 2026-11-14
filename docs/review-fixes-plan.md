@@ -200,13 +200,38 @@ A can ship alone. B and C are independent of each other. D needs the outcome mat
 
 ## Status
 
-| Phase | State | Notes |
+Updated 2026-11-15. Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
+
+**Where things stand:** phases A and B are complete. Phase C is in progress: C1 and C2 are done; C3, C4 and C5 are next. Phases D, E and F have not been started. Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+
+**Checks at the last commit:** 1038 tests pass (14 skipped: Windows-only), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
+
+### Phase A: urgent fixes — complete
+
+| Step | State | Notes |
 |---|---|---|
-| A1 (F1, G1, G9, R19) | Done | `Job.ok`, `WizardCore.jobSucceeded()`, `send_merge()` raises for a rejected test email; `tests/test_outcomes.py`; model round 3 with `testPassHonest`; `[assumptions]` in `spec/coverage.toml`. Apalache: the three test-email invariants hold in `fixed` and `testPassHonest` and `next4Honest` are violated in `round2` at 12 steps. |
+| A1 (F1, G1, G9, R19) | Done | `Job.ok`, `WizardCore.jobSucceeded()`, `send_merge()` raises for a rejected test email; `tests/test_outcomes.py`; model round 3 with `testPassHonest`; `[assumptions]` in `spec/coverage.toml`. Apalache at 12 steps: `testPassHonest` and `next4Honest` are violated in `round2` and hold in `fixed`. |
 | A2 (F2, F13, G2) | Done | Implemented as a `RedactingFormatter` rather than a filter (a filter would rewrite records the console also prints). The canary tests found two leaks the review had missed: a DEBUG dry run logged every rendered body, and msal's DEBUG records include the OAuth code and PKCE verifier. Ruff added with `LOG`, `G`, `S`. |
 | A3 (F3, G3) | Done | `write_private()`, `open_private_append()`, `private_dir()`; `tests/test_fs_footprint.py`. |
+
+### Phase B: web security hardening — complete
+
+| Step | State | Notes |
+|---|---|---|
 | B1 (F10, G6) | Done | `@public`, `TestRouteTable`, `access` in `spec/coverage.toml`. Changed from the plan: the `127.0.0.1` case is handled in `/auth/login` with a one-time handoff pass to `localhost`, not by redirecting the `/?token=` URL, which would have moved every `127.0.0.1` user (and the browser tests) to another origin on arrival. |
 | B2 (F14, G8) | Done | `web/sessions.py`; `tests/test_web_sessions.py`; cookie-size guard in `tests/conftest.py`. The handoff pass carries the session id, so the upload survives the move to `localhost`. |
 | B3 (F11, G7) | Done | `static/safe-html.js`, `TestHtmlSinks`, `TestNoInlineScript`, the CSP and headers, `tests/test_web_e2e_injection.py`. The injection walk counts elements created from the payload rather than checking whether script ran, because under the policy an injected handler never runs even when escaping is broken. Found on the way: the old `escapeHtml()` did not escape quotes, so a column name containing `"` broke out of the `value` attribute of its `<option>`. |
 | B4 (F12) | Done | `--allow-remote`; `_find_open_port(host=...)`. |
 | B5 | Done | `MAX_CONTENT_LENGTH` with a JSON 413, `_json_object()`, `running_send()` under a re-entrant lock, attachments deleted when their job ends. The `auth_login` error redirect was done with B1. |
+
+### Phase C: what goes into the email — in progress
+
+| Step | State | Notes |
+|---|---|---|
+| C1 (F4, G4) | Done, one test outstanding | New grammar in `template.py` and `static/template-core.js`; 36 shared vectors and 18 chip columns in `tests/data/template_vectors.json`; `tests/test_placeholders_end_to_end.py`. The web UI blocks Next on step 2 for a placeholder naming no column and warns about stray braces. Two decisions made while implementing: character references in an HTML placeholder name are limited to a fixed list (`&amp; &lt; &gt; &quot; &apos; &nbsp;` and numeric ones) so that Python and JavaScript can agree exactly; and a column whose name contains a brace gets no chip and is listed as unusable. Outstanding: a browser test that the step 2 block and the stray-brace warning appear (the logic is covered by Node and Python tests). |
+| C2 (F8) | Done, one test outstanding | Values are escaped in HTML bodies by both renderers; line breaks in a cell become `<br>`, which the plan did not mention. Outstanding: a browser test that the HTML preview shows the escaped value. |
+| C3 (F6) | Not started | Dates, percentages and large integers in cells. |
+| C4 (F7) | Not started | `addresses.py`; validation of CC, BCC, reply-to, the BCC-mode To address and the test address. |
+| C5 (F9, part) | Not started | Numeric option checks; total attachment size; the invalid-input table (G5). |
+
+### Phases D, E, F — not started

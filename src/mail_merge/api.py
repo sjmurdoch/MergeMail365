@@ -13,7 +13,13 @@ from pathlib import Path
 from mail_merge import config as _config
 from mail_merge.config import load_config
 from mail_merge.excel import read_recipients
-from mail_merge.template import extract_placeholders, render, validate_template
+from mail_merge.template import (
+    extract_placeholders,
+    has_stray_braces,
+    render,
+    unusable_columns,
+    validate_template,
+)
 from mail_merge.sender import (
     EmailAddress,
     MAX_RECIPIENTS_PER_MESSAGE,
@@ -482,12 +488,27 @@ def send_merge(
     else:
         columns = list(recipients[0].keys())
         bad_subject = validate_template(subject, columns)
-        bad_body = validate_template(body_template, columns)
+        bad_body = validate_template(body_template, columns, html=html)
         bad = sorted(set(bad_subject + bad_body))
         if bad:
             raise ValueError(
                 f"Unresolvable placeholders: {', '.join(bad)} "
                 f"(available columns: {', '.join(columns)})"
+            )
+        braced = unusable_columns(columns)
+        if braced:
+            logger.warning(
+                "⚠️  Column names containing { or } cannot be used as placeholders: %s",
+                ", ".join(braced),
+            )
+
+    # A "{{" or "}}" left over is probably an unfinished placeholder
+    # ("{{name}"), which would otherwise go out exactly as typed.
+    for label, text in (("subject", subject), ("body", body_template)):
+        if has_stray_braces(text):
+            logger.warning(
+                "⚠️  The %s has a '{{' or '}}' that is not part of a {{placeholder}}; "
+                "it will be sent as written", label,
             )
 
     # --- Validate importance ---
@@ -642,7 +663,7 @@ def send_merge(
 
         sample = recipients[0]
         rendered_subject = render(subject, sample)
-        rendered_body = render(body_template, sample)
+        rendered_body = render(body_template, sample, html=html)
         test_to_name = sample.get(name_column, "").strip() or None if name_column else None
         test_to = EmailAddress(address=test_email, name=test_to_name)
         logger.info(

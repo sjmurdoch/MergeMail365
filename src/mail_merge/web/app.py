@@ -835,14 +835,15 @@ def create_app(
         sample_data = data.get("sample_data", {})
         columns = data.get("columns", [])
 
-        from mail_merge.template import render, validate_template
+        from mail_merge.template import has_stray_braces, render, validate_template
 
+        is_html = bool(data.get("html"))
         bad_subject = validate_template(subject, columns)
-        bad_body = validate_template(body_text, columns)
+        bad_body = validate_template(body_text, columns, html=is_html)
         bad = sorted(set(bad_subject + bad_body))
 
         rendered_subject = render(subject, sample_data)
-        rendered_body = render(body_text, sample_data)
+        rendered_body = render(body_text, sample_data, html=is_html)
 
         html_warnings: list[str] = []
         if data.get("html"):
@@ -854,6 +855,7 @@ def create_app(
             "subject": rendered_subject,
             "body": rendered_body,
             "unresolved_placeholders": bad,
+            "stray_braces": has_stray_braces(subject) or has_stray_braces(body_text),
             "html_warnings": html_warnings,
         })
 

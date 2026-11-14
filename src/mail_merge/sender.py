@@ -288,7 +288,8 @@ def send_all(
         to_name = recipient.get(name_column, "").strip() or None if name_column else None
         to = EmailAddress(address=recipient[email_column], name=to_name)
         rendered_subject = render(subject_template, recipient)
-        rendered_body = render(body_template, recipient)
+        # In an HTML body, cell values are escaped (template.py).
+        rendered_body = render(body_template, recipient, html=opts.html)
 
         if dry_run:
             logger.info(

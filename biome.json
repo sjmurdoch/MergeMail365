@@ -1,7 +1,7 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
 	"files": {
-		"includes": ["src/mail_merge/web/static/app.js", "src/mail_merge/web/static/wizard-core.js", "src/mail_merge/web/static/safe-html.js", "src/mail_merge/web/static/trix-config.js"]
+		"includes": ["src/mail_merge/web/static/app.js", "src/mail_merge/web/static/wizard-core.js", "src/mail_merge/web/static/safe-html.js", "src/mail_merge/web/static/template-core.js", "src/mail_merge/web/static/trix-config.js"]
 	},
 	"linter": {
 		"enabled": true,
@@ -13,6 +13,6 @@
 		"enabled": false
 	},
 	"javascript": {
-		"globals": ["WizardCore", "SafeHtmlLib", "Trix"]
+		"globals": ["WizardCore", "SafeHtmlLib", "TemplateCore", "Trix"]
 	}
 }

@@ -13,6 +13,12 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - `mergemail365-web --host` with an address other computers can reach (`0.0.0.0`, a LAN address or name) is refused unless `--allow-remote` is also given, and then starts with a warning: the connection is plain HTTP, and anyone who learns the access URL can send email as the signed-in account.
 - Log files and the folder they are in are now readable by you only, as is the token cache from the moment it is written (it used to be created readable by others and restricted a moment later). Existing log files are restricted when the app next starts.
 
+### Changed
+
+- **Placeholders accept any column name, and spaces inside the braces.** `{{First-Name}}`, `{{E-mail}}` and `{{Price <GBP>}}` now work; before, a placeholder for a column whose name had punctuation was never filled in, and went out to recipients exactly as typed, with no warning. `{{ name }}` (with spaces inside the braces) is now the column `name`; before, it too was sent as typed. If you relied on either being left alone, note the change.
+- **In an HTML email, values from the spreadsheet are now escaped.** A cell containing `<`, `>` or `&` is shown to the recipient as typed, and line breaks within a cell are kept. Before, the cell's text was inserted as HTML, so `R&D <team>` could lose text or break the layout, and a spreadsheet built from other people's answers (a form, say) let them put their own links or images into your email. If you deliberately keep HTML in cells, it will now be shown as text; put the markup in the body instead.
+- A placeholder that names no column stops the send, as before, and the web UI now says so when you press Next on the Compose step instead of at the test email. A `{{` or `}}` that isn't part of a placeholder (such as `{{name}`) gives a warning, since it is probably a typo and will be sent as written.
+
 ### Fixed
 
 - **A test email that Microsoft rejected was reported as sent.** In the web UI, step 4 showed "Test email sent successfully!" and let you continue even when Microsoft Graph refused the email (for example, a permission error or an invalid address). It now shows the failure and offers Retry. On the command line, a rejected `--test-email` exited with status 1 but printed nothing; it now says why. In the Python API, `send_merge(test_email=...)` raises `SendAborted` if the test email is not accepted, instead of returning a failed result.

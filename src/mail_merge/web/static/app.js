@@ -70,13 +70,9 @@ function getRecipients() { return state.getRecipients(); }
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-// Mirrors template.PLACEHOLDER_RE. Python's \w matches letters and digits
-// in any script, JavaScript's only ASCII ones, so the classes are spelled
-// out with the u flag: otherwise {{Prénom}} is substituted in the email but
-// not in the preview, and isn't checked against the columns.
-const PLACEHOLDER_SRC = String.raw`\{\{([\p{L}\p{N}_][\p{L}\p{N}_ ]*[\p{L}\p{N}_]|[\p{L}\p{N}_])\}\}`;
-function placeholderRe(flags = "") { return new RegExp(PLACEHOLDER_SRC, `u${flags}`); }
-
+// Placeholders ({{column name}}) are found, checked and substituted by
+// TemplateCore (template-core.js), which follows the same grammar and the
+// same test cases as template.py, so the preview shows what will be sent.
 function $(id) { return document.getElementById(id); }
 function hide(el) { if (typeof el === "string") el = $(el); el.classList.add("hidden"); }
 function show(el) { if (typeof el === "string") el = $(el); el.classList.remove("hidden"); }
@@ -378,8 +374,15 @@ function validateCompose() {
         alert("BCC mode requires a To: address.");
         return false;
     }
-    if (state.sendMode === "bcc" && placeholderRe().test(subject + body)) {
+    if (state.sendMode === "bcc" && TemplateCore.hasPlaceholders(subject + body)) {
         alert("BCC blast mode does not support {{placeholders}} in the subject or body. All recipients receive the same message.");
+        return false;
+    }
+    // A placeholder that names no column would otherwise only be refused
+    // later, by the test email or the dry run.
+    const bad = unresolvedPlaceholders();
+    if (state.sendMode !== "bcc" && bad.length > 0) {
+        alert(`No column named ${bad.map(p => `{{${p}}}`).join(", ")}. Fix the placeholder, or choose one from the list above the subject.`);
         return false;
     }
     // Quick pre-check using the total row count from the spreadsheet.
@@ -417,7 +420,7 @@ function setSendMode(mode) {
 function checkBccPlaceholders() {
     const subject = $("subject-input").value;
     const body = $("body-input").value;
-    const has = placeholderRe().test(subject + body);
+    const has = TemplateCore.hasPlaceholders(subject + body);
     if (has) {
         show("bcc-placeholder-warn");
     } else {
@@ -801,7 +804,12 @@ function showPlaceholderChips(columns) {
     show("placeholder-chips");
     const container = $("chips");
     clear(container);
-    for (const col of columns) {
+    // A column whose name has a brace can't be named by a placeholder.
+    const unusable = TemplateCore.unusableColumns(columns);
+    $("chips-unusable").textContent = unusable.length > 0
+        ? `Not available as placeholders, because the name contains { or }: ${unusable.join(", ")}`
+        : "";
+    for (const col of columns.filter(c => !unusable.includes(c))) {
         const chip = document.createElement("span");
         chip.className = "chip";
         chip.textContent = `{{${col}}}`;
@@ -1015,22 +1023,33 @@ $("bcc-input").addEventListener("input", onTemplateChange);
 $("reply-to-input").addEventListener("input", onTemplateChange);
 $("filter-input").addEventListener("input", onTemplateChange);
 
+// The placeholders in the subject and body that name no column. The body
+// of an HTML email is read as HTML (the editor writes {{R&amp;D budget}}).
+function unresolvedPlaceholders() {
+    if (!state.spreadsheetData) return [];
+    const columns = state.spreadsheetData.columns;
+    return [...new Set([
+        ...TemplateCore.unresolved($("subject-input").value, columns),
+        ...TemplateCore.unresolved($("body-input").value, columns, $("html-toggle").checked),
+    ])].sort();
+}
+
 function validatePlaceholders() {
     if (!state.spreadsheetData) return;
-    const subject = $("subject-input").value;
-    const body = $("body-input").value;
-    const combined = subject + body;
-    const used = [...combined.matchAll(placeholderRe("g"))].map(m => m[1]);
-    const colsLower = state.spreadsheetData.columns.map(c => c.toLowerCase());
-    const bad = used.filter(p => !colsLower.includes(p.toLowerCase()));
+    const messages = [];
+    const available = state.spreadsheetData.columns.join(", ");
+    for (const p of unresolvedPlaceholders()) {
+        messages.push(html`No column named <strong>{{${p}}}</strong>. Available: ${available}`);
+    }
+    // An unfinished placeholder, such as {{name}, would be sent as typed.
+    for (const [label, id] of [["subject", "subject-input"], ["body", "body-input"]]) {
+        if (TemplateCore.hasStrayBraces($(id).value)) {
+            messages.push(html`The ${label} has a <strong>{{</strong> or <strong>}}</strong> that is not part of a placeholder. It will be sent as written: check for a missing brace.`);
+        }
+    }
     const el = $("placeholder-errors");
-    if (bad.length > 0) {
-        const unique = [...new Set(bad)];
-        const available = state.spreadsheetData.columns.join(", ");
-        setHtml(el, joinHtml(
-            unique.map(p => html`No column named <strong>{{${p}}}</strong>. Available: ${available}`),
-            html`<br>`,
-        ));
+    if (messages.length > 0) {
+        setHtml(el, joinHtml(messages, html`<br>`));
         show(el);
     } else {
         hide(el);
@@ -1178,11 +1197,12 @@ function renderPreviewRecipient() {
 
     // Client-side template rendering for preview
     // In BCC mode all recipients get the same message — no substitution
+    // In an HTML body the values are escaped, as they are when sent.
+    const isHtml = $("html-toggle").checked;
     const rendered_subject = state.sendMode === "bcc" ? subject : renderTemplate(subject, row);
-    const rendered_body = state.sendMode === "bcc" ? body : renderTemplate(body, row);
+    const rendered_body = state.sendMode === "bcc" ? body : renderTemplate(body, row, isHtml);
 
     $("preview-subject").textContent = rendered_subject;
-    const isHtml = $("html-toggle").checked;
     if (isHtml) {
         hide("preview-body");
         show("preview-body-html");
@@ -1218,14 +1238,8 @@ function renderPreviewRecipient() {
     $("preview-recipient-label").textContent = `Previewing recipient ${state.previewIndex + 1} of ${recipients.length}`;
 }
 
-function renderTemplate(template, data) {
-    const lowerData = {};
-    for (const [k, v] of Object.entries(data)) {
-        lowerData[k.toLowerCase()] = v;
-    }
-    return template.replace(placeholderRe("g"), (match, key) => {
-        return lowerData[key.toLowerCase()] !== undefined ? lowerData[key.toLowerCase()] : match;
-    });
+function renderTemplate(template, data, isHtml = false) {
+    return TemplateCore.render(template, data, isHtml);
 }
 
 function changePreviewRecipient(delta) {
