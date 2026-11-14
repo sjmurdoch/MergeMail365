@@ -281,6 +281,28 @@ class TestCitations:
         )
 
 
+class TestRouteAccess:
+    """Each route's `access` in spec/coverage.toml matches the @public marks
+    in web/app.py (routes need the session unless marked)."""
+
+    def test_access_matches_the_code(self):
+        pytest.importorskip("flask")
+        from mail_merge.web.app import create_app
+
+        app = create_app(startup_token="t")
+        in_code = {}
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint == "static":
+                continue
+            public = bool(getattr(app.view_functions[rule.endpoint], "_public", False))
+            for method in rule.methods - {"HEAD", "OPTIONS"}:
+                in_code[f"route:{method} {rule.rule}"] = "public" if public else "session"
+        listed = {
+            key: entry.get("access") for key, entry in coverage()["entries"].items() if key.startswith("route:")
+        }
+        assert listed == in_code
+
+
 class TestAssumptions:
     """Every value the environment chooses says what it stands for in the
     code and names a test that pins it (spec/coverage.toml [assumptions])."""

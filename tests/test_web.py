@@ -804,27 +804,75 @@ class TestAuth:
         assert resp.status_code == 302
         mock_flow.assert_called_once_with("from-query", "my-tenant", "http://localhost:5050/auth/callback")
 
-    def test_auth_host_consistency_redirect(self, client):
-        """Test that starting on 127.0.0.1 redirects to localhost for session consistency.
-
-        This test would have caught the 'No auth flow in session' bug where the
-        session was set on 127.0.0.1 but the callback returned to localhost.
+    def test_sign_in_started_on_127_0_0_1_ends_on_a_working_page(self, web_client):
+        """The redirect URI is on localhost, and cookies set on 127.0.0.1 are
+        not sent there. A sign-in started on 127.0.0.1 is handed over to
+        localhost with a one-time pass; without it the user ended on the
+        "Forbidden" page after signing in (docs/review-fixes-plan.md, F10).
         """
-        # 1. Start on 127.0.0.1 - should redirect to localhost/auth/login...
-        resp = client.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/")
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("http://localhost:5050/auth/login")
+        # web_client authenticated on localhost; start again on 127.0.0.1.
+        c = web_client.application.test_client()
+        assert c.get("/?token=test-token-abc", base_url="http://127.0.0.1:5050/").status_code == 302
 
-        # 2. Follow to localhost - should now proceed to Microsoft and set session on localhost
-        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+        resp = c.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/")
+        assert resp.status_code == 302
+        handover = resp.headers["Location"]
+        assert handover.startswith("http://localhost:5050/auth/login?")
+        assert "handoff=" in handover and "client_id=test" in handover
+        assert "test-token-abc" not in handover, "the startup token must not travel in the redirect"
+
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow, \
+             patch("mail_merge.auth.acquire_token_by_auth_code", return_value="tok"):
             mock_flow.return_value = {"auth_uri": "https://microsoft.com/auth", "state": "abc"}
-            resp = client.get(resp.headers["Location"], base_url="http://localhost:5050/")
+            resp = c.get(handover)
             assert resp.status_code == 302
             assert "microsoft.com" in resp.headers["Location"]
-
-            # Verify session is set on localhost
-            with client.session_transaction() as sess:
+            with c.session_transaction(base_url="http://localhost:5050/") as sess:
                 assert "auth_flow" in sess
+
+            resp = c.get("/auth/callback?code=x&state=abc", base_url="http://localhost:5050/")
+            assert resp.status_code == 302 and resp.headers["Location"].endswith("#auth-success")
+
+        assert c.get("/", base_url="http://localhost:5050/").status_code == 200
+
+    def test_handoff_pass_works_once(self, web_client):
+        resp = web_client.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/")
+        # web_client's session is on localhost, so on 127.0.0.1 it has none.
+        assert resp.status_code == 403
+        c = web_client.application.test_client()
+        c.get("/?token=test-token-abc", base_url="http://127.0.0.1:5050/")
+        handover = c.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/").headers["Location"]
+
+        stranger = web_client.application.test_client()
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+            mock_flow.return_value = {"auth_uri": "https://microsoft.com/auth", "state": "abc"}
+            assert stranger.get(handover).status_code == 302
+            again = web_client.application.test_client()
+            assert again.get(handover).status_code == 403, "a handoff pass must be single-use"
+
+    def test_handoff_pass_expires(self, web_client, monkeypatch):
+        c = web_client.application.test_client()
+        c.get("/?token=test-token-abc", base_url="http://127.0.0.1:5050/")
+        handover = c.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/").headers["Location"]
+        real = time.monotonic
+        monkeypatch.setattr("mail_merge.web.app.time.monotonic", lambda: real() + 61)
+        assert web_client.application.test_client().get(handover).status_code == 403
+
+    @pytest.mark.parametrize("query", ["", "?handoff=", "?handoff=guess", "?client_id=attacker-app"])
+    def test_auth_login_needs_the_session(self, client, query):
+        """Any web page can send the browser to http://localhost:5050/auth/login.
+        Without the startup-token session that must not start a sign-in
+        (it used to, for whatever client_id the page chose)."""
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+            resp = client.get(f"/auth/login{query}", base_url="http://localhost:5050/")
+        assert resp.status_code == 403
+        mock_flow.assert_not_called()
+
+    def test_sign_in_that_cannot_start_returns_to_the_page_with_the_reason(self, web_client):
+        with patch("mail_merge.auth.initiate_auth_code_flow", side_effect=ValueError("Invalid tenant_id 'a b'")):
+            resp = web_client.get("/auth/login?client_id=x&tenant_id=a%20b", base_url="http://localhost:5050/")
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/#auth-error=Invalid%20tenant_id%20%27a%20b%27"
 
     @patch("mail_merge.auth._load_cache")
     @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
@@ -2037,3 +2085,117 @@ def test_entry_point_keeps_send_logs_in_the_state_dir(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         web_pkg.main([])
     assert seen["send_log_dir"] == tmp_path / "sends"
+
+
+# ---- Every route is protected unless marked public (docs/review-fixes-plan.md, G6) ----
+
+# The only routes reachable without the startup-token session. "static"
+# serves the page's assets; "auth_callback" is where Microsoft's redirect
+# lands, and does nothing without the session that started the sign-in.
+PUBLIC_ENDPOINTS = {"static", "auth_callback"}
+
+
+def _route_cases(application):
+    cases = []
+    for rule in application.url_map.iter_rules():
+        url = rule.rule.replace("<job_id>", "no-such-job").replace("<path:filename>", "style.css")
+        assert "<" not in url, f"route {rule.rule} has a parameter this test doesn't know how to fill"
+        for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
+            cases.append((rule.endpoint, method, url))
+    return cases
+
+
+class TestRouteTable:
+    """Walks the whole route table, so a new route is covered without anyone
+    writing a test for it."""
+
+    @pytest.fixture(params=[False, True], ids=["browser", "desktop"])
+    def application(self, request):
+        application = create_app(startup_token="test-token-abc", port=5050, desktop_mode=request.param,
+                                 client_id="fixed-client")
+        application.config["TESTING"] = True
+        return application
+
+    def test_only_the_expected_routes_are_public(self, application):
+        marked = {
+            endpoint for endpoint, view in application.view_functions.items()
+            if getattr(view, "_public", False)
+        } | {"static"}
+        assert marked == PUBLIC_ENDPOINTS
+
+    def test_no_route_answers_without_the_session(self, application):
+        cases = _route_cases(application)
+        assert len(cases) >= 20, "the route table looks empty: has the walk broken?"
+        for endpoint, method, url in cases:
+            resp = application.test_client().open(url, method=method, base_url="http://localhost:5050/")
+            if endpoint in PUBLIC_ENDPOINTS:
+                assert resp.status_code != 403, f"{method} {url} should be public"
+            else:
+                assert resp.status_code == 403, (
+                    f"{method} {url} ({endpoint}) answered {resp.status_code} without the startup token"
+                )
+
+    def test_no_state_changing_route_answers_without_the_csrf_token(self, application):
+        c = application.test_client()
+        c.get("/?token=test-token-abc")
+        for endpoint, method, url in _route_cases(application):
+            if method == "GET":
+                continue
+            resp = c.open(url, method=method)
+            assert resp.status_code == 403 and "CSRF" in resp.get_data(as_text=True), (
+                f"{method} {url} ({endpoint}) answered {resp.status_code} without a CSRF token"
+            )
+
+    def test_public_callback_does_nothing_without_a_sign_in_in_progress(self, application):
+        with patch("mail_merge.auth.acquire_token_by_auth_code") as exchange:
+            resp = application.test_client().get("/auth/callback?code=x&state=y", base_url="http://localhost:5050/")
+        assert resp.status_code == 400
+        exchange.assert_not_called()
+
+
+class TestFixedClientId:
+    """--client-id / --tenant-id fix the app registration; nothing a request
+    sends may change it (the fields are hidden in the page, but that is not
+    a control)."""
+
+    @pytest.fixture
+    def fixed(self):
+        application = create_app(startup_token="test-token-abc", port=5050,
+                                 client_id="fixed-client", tenant_id="fixed-tenant")
+        c = application.test_client()
+        c.get("/?token=test-token-abc")
+        return c
+
+    def test_login_ignores_the_query_string(self, fixed):
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+            mock_flow.return_value = {"auth_uri": "https://microsoft.com/auth", "state": "abc"}
+            fixed.get("/auth/login?client_id=other-app&tenant_id=other-tenant", base_url="http://localhost:5050/")
+        mock_flow.assert_called_once_with("fixed-client", "fixed-tenant", "http://localhost:5050/auth/callback")
+
+    def test_session_values_do_not_override(self, fixed):
+        with fixed.session_transaction() as sess:
+            sess["client_id"] = "other-app"
+            sess["tenant_id"] = "other-tenant"
+        with patch("mail_merge.auth.diagnose_auth", return_value={}) as diagnose:
+            fixed.get("/auth/debug")
+        diagnose.assert_called_once_with("fixed-client", "fixed-tenant")
+
+    def test_interactive_sign_in_ignores_the_request_body(self):
+        application = create_app(startup_token="test-token-abc", port=5050, desktop_mode=True,
+                                 client_id="fixed-client", tenant_id="fixed-tenant")
+        c = application.test_client()
+        c.get("/?token=test-token-abc")
+        started = threading.Event()
+        seen = []
+
+        def fake_flow(cid, tid, timeout=None):
+            seen.append((cid, tid))
+            started.set()
+            return "tok"
+
+        with patch("mail_merge.auth.acquire_token_interactive_flow", side_effect=fake_flow):
+            resp = c.post("/auth/interactive", json={"client_id": "other-app", "tenant_id": "other-tenant"},
+                          headers={"X-CSRF-Token": get_csrf(c)})
+            assert resp.status_code == 200
+            assert started.wait(5)
+        assert seen == [("fixed-client", "fixed-tenant")]

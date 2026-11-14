@@ -12,9 +12,11 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlsplit
+from typing import Any, TypeVar
+from urllib.parse import quote, urlencode, urlsplit
 
 import werkzeug
 werkzeug.serving._log_add_style = False
@@ -251,6 +253,25 @@ def _request_hostname() -> str:
     return (urlsplit("//" + request.host).hostname or "").lower()
 
 
+_View = TypeVar("_View", bound=Callable[..., Any])
+
+
+def public(view: _View) -> _View:
+    """Mark a route as reachable without the startup-token session.
+
+    Every route needs the session unless it carries this mark, so a new
+    route is protected without anyone remembering to protect it
+    (tests/test_web.py TestRouteTable checks the whole route table, and
+    spec/coverage.toml records each route's `access`).
+    """
+    view._public = True  # type: ignore[attr-defined]
+    return view
+
+
+# How long a sign-in started on 127.0.0.1 has to arrive on localhost.
+_HANDOFF_LIFETIME = 60.0
+
+
 
 def create_app(
     startup_token: str = "",
@@ -302,12 +323,30 @@ def create_app(
             content_type="text/plain; charset=utf-8",
         )
 
+    def _is_public() -> bool:
+        if request.endpoint == "static":
+            return True
+        view = app.view_functions.get(request.endpoint or "")
+        return bool(getattr(view, "_public", False))
+
+    # One-time passes for a sign-in that started on 127.0.0.1 and continues
+    # on localhost, where the redirect URI lives: nonce -> expiry time.
+    handoffs: dict[str, float] = {}
+
+    def _redeem_handoff() -> bool:
+        nonce = request.args.get("handoff", "")
+        expiry = handoffs.pop(nonce, None) if nonce else None
+        return expiry is not None and expiry >= time.monotonic()
+
     @app.before_request
     def _check_auth() -> Any:
-        # Allow static files and auth routes without session auth
-        if request.endpoint == "static":
+        if _is_public():
             return None
-        if request.endpoint in ("auth_callback", "auth_login"):
+
+        # A sign-in handed over from 127.0.0.1 (see auth_login).
+        if request.endpoint == "auth_login" and _redeem_handoff():
+            session["authenticated"] = True
+            session.permanent = True
             return None
 
         # Check for startup token in query string
@@ -342,8 +381,6 @@ def create_app(
     def _check_csrf() -> Response | None:
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return None
-        if request.endpoint in ("auth_login", "auth_callback"):
-            return None
         csrf_token = request.headers.get("X-CSRF-Token") or ""
         if not csrf_token or csrf_token != session.get("csrf_token"):
             return jsonify({"error": "CSRF token invalid"}), 403  # type: ignore[return-value]
@@ -361,21 +398,32 @@ def create_app(
 
     @app.route("/auth/login")
     def auth_login() -> Any:
-        # If the user is on 127.0.0.1, redirect them to localhost so the
-        # session cookie is set on the domain that matches the redirect_uri.
-        if request.host.startswith("127.0.0.1"):
-            new_url = request.url.replace("127.0.0.1", "localhost", 1)
-            return redirect(new_url)
+        # Microsoft redirects back to localhost (the registered redirect
+        # URI), and cookies set on 127.0.0.1 are not sent there. So a
+        # sign-in started on 127.0.0.1 moves to localhost first, with a
+        # one-time pass that lets this (already authenticated) user in.
+        if _request_hostname() == "127.0.0.1":
+            now = time.monotonic()
+            for stale in [n for n, expiry in handoffs.items() if expiry < now]:
+                del handoffs[stale]
+            nonce = secrets.token_urlsafe(32)
+            handoffs[nonce] = now + _HANDOFF_LIFETIME
+            params = {k: v for k, v in request.args.items() if k != "handoff"}
+            params["handoff"] = nonce
+            return redirect(f"http://localhost:{app.config['PORT']}/auth/login?{urlencode(params)}")
 
-        # Read client_id/tenant_id from query params (sent by JS), falling
-        # back to session/config.  Store in session for later use.
+        # client_id/tenant_id come from the page's fields (sent by JS),
+        # falling back to session/config, unless they were fixed on the
+        # command line.  Stored in the session for later use.
         client_id = (
-            request.args.get("client_id")
+            app.config["FIXED_CLIENT_ID"]
+            or request.args.get("client_id")
             or session.get("client_id")
             or _get_config_value("client_id")
         )
         tenant_id = (
-            request.args.get("tenant_id")
+            app.config["FIXED_TENANT_ID"]
+            or request.args.get("tenant_id")
             or session.get("tenant_id")
             or _get_config_value("tenant_id")
             or "common"
@@ -386,13 +434,22 @@ def create_app(
         from mail_merge.auth import initiate_auth_code_flow
 
         redirect_uri = f"http://localhost:{app.config['PORT']}/auth/callback"
-        flow = initiate_auth_code_flow(client_id, tenant_id, redirect_uri)
+        try:
+            flow = initiate_auth_code_flow(client_id, tenant_id, redirect_uri)
+        except Exception as exc:
+            # Offline, a mistyped tenant, an unknown client ID: back to the
+            # page with the reason, not a bare 500.
+            logger.debug("auth_login: could not start the sign-in", exc_info=True)
+            return redirect(url_for("index") + "#auth-error=" + quote(str(exc), safe=""))
         session["auth_flow"] = flow
         session["client_id"] = client_id
         session["tenant_id"] = tenant_id
         return redirect(flow["auth_uri"])
 
+    # Public: Microsoft's redirect arrives here, and without the session
+    # that started the sign-in (its `auth_flow`) the route does nothing.
     @app.route("/auth/callback")
+    @public
     def auth_callback() -> Any:
         flow = session.get("auth_flow")
         if not flow:
@@ -400,7 +457,7 @@ def create_app(
 
         if "error" in request.args:
             error = request.args.get("error_description", request.args.get("error", "Unknown error"))
-            return redirect(url_for("index") + f"#auth-error={error}")
+            return redirect(url_for("index") + "#auth-error=" + quote(error, safe=""))
 
         client_id = session.get("client_id", "")
         tenant_id = session.get("tenant_id", "common")
@@ -415,7 +472,7 @@ def create_app(
                 auth_response=dict(request.args),
             )
         except RuntimeError as exc:
-            return redirect(url_for("index") + f"#auth-error={exc}")
+            return redirect(url_for("index") + "#auth-error=" + quote(str(exc), safe=""))
 
         session["ms_authenticated"] = True
         session.pop("auth_flow", None)
@@ -470,8 +527,8 @@ def create_app(
 
         data = request.get_json() or {}
         fallback_cid, fallback_tid = _get_client_tenant()
-        cid = data.get("client_id") or fallback_cid
-        tid = data.get("tenant_id") or fallback_tid
+        cid = app.config["FIXED_CLIENT_ID"] or data.get("client_id") or fallback_cid
+        tid = app.config["FIXED_TENANT_ID"] or data.get("tenant_id") or fallback_tid
 
         if not cid:
             return jsonify({"error": "client_id is required"}), 400  # type: ignore[return-value]
@@ -977,8 +1034,14 @@ def create_app(
         return os.environ.get(f"MERGEMAIL365_{key.upper()}") or _cached_config.get(key)
 
     def _get_client_tenant() -> tuple[str | None, str]:
-        client_id = session.get("client_id") or _get_config_value("client_id")
-        tenant_id = session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        # Values fixed on the command line win over anything a request set.
+        client_id = (
+            app.config["FIXED_CLIENT_ID"] or session.get("client_id") or _get_config_value("client_id")
+        )
+        tenant_id = (
+            app.config["FIXED_TENANT_ID"] or session.get("tenant_id")
+            or _get_config_value("tenant_id") or "common"
+        )
         return client_id, tenant_id
 
     return app

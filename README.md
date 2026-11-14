@@ -164,7 +164,7 @@ The web interface provides a step-by-step wizard:
 - **Verify**: Run a full dry-run to ensure all data is valid.
 - **Send**: Monitor real-time progress as emails are delivered.
 
-> **Note on Authentication**: The web interface uses `localhost` for authentication redirects. If you manually access the app via `127.0.0.1`, you will be automatically redirected to `localhost` when signing in to ensure your session is preserved.
+> **Note on Authentication**: The web interface uses `localhost` for authentication redirects. If you open the app at `127.0.0.1` instead, signing in moves you to `localhost`: you stay signed in to the app, but the page starts again at step 1, so sign in before uploading your spreadsheet.
 
 ## Development & Testing
 
