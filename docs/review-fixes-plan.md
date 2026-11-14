@@ -156,6 +156,29 @@ Each has a plain unit or CLI test; no class guard is needed.
 
 Update `CLAUDE.md` (session tiers, auth routes, logging, template grammar, new test files), `README.md` (the `127.0.0.1` note, `--allow-remote`, date formatting, placeholders), `docs/tutorial.md`, `CHANGELOG.md`, `spec/requirements.md`, `spec/coverage.toml` and `docs/quint-model.md`. Do this in the same commit as each change where the spec coverage test requires it, and the rest at the end of each phase.
 
+### Phase G: is it safe to update the dependencies and vendored code?
+
+Added 2026-11-15 at the user's request. The question comes first; updating follows only for what is found safe. Detail is in the Handover section.
+
+| Step | What | Result |
+|---|---|---|
+| G1 | List everything pinned and what newer version exists: Python packages (`uv.lock`), vendored Trix and Pico CSS, Quint (`spec/package.json`), GitHub Actions, the uv and Biome versions pinned in the workflows, Playwright's browser, Python itself. | An inventory table in this file: current, latest, latest allowed by the 7-day cooldown, release date. |
+| G2 | For each, decide whether it is safe: read the changelog between the two versions, check for security advisories against the current version, and name the tests that would notice a regression. Where this branch leans on a dependency's internals, say so. | A verdict per item (update, hold, or needs a test first) with the reason. |
+| G3 | Report to the user and ask which to update. | The user's decision, recorded. |
+| G4 | Update what was agreed, one group per commit, full suite before each, in the order used in `docs/upgrade-plan.md`. | `uv.lock` and vendored files updated; `docs/upgrade-plan.md` brought up to date. |
+
+### Phase H: end-to-end test of the released build on a real system
+
+Added 2026-11-15 at the user's request. Last, after every other phase. The thing tested is the bundle that `.github/workflows/release.yml` builds and attaches to a GitHub release, downloaded from that release, not a local build. Detail is in the Handover section.
+
+| Step | What | Result |
+|---|---|---|
+| H1 | Get the branch through CI (`test.yml`) on Linux, macOS and Windows. It has never run there. | A green run, or fixes. |
+| H2 | Build a release candidate with the release workflow (a pre-release tag), with the user's approval: this pushes, tags and publishes. | `MergeMail365-macOS.zip` and `MergeMail365-Windows.zip` attached to a pre-release. |
+| H3 | Download each bundle from the release onto a real machine of that kind and work through the checklist with a real Microsoft 365 account, sending to mailboxes the user controls. | The checklist filled in for macOS and for Windows. |
+| H4 | Fix what fails, rebuild as the next candidate, repeat H3 for what changed. | Every item passing, or the exceptions listed and accepted by the user. |
+| H5 | Hand back to the user for the real release. | The user's decision. |
+
 ## Part 3: changes to the Quint model
 
 Only one finding is a workflow bug of the kind the model exists for. The others are about data handling, files and HTTP access, where a table-driven test is cheaper and checks the real code; adding them to the model would lengthen Apalache runs (each extra step costs about 2½ times the last) for no extra assurance.
@@ -188,8 +211,11 @@ Only one finding is a workflow bug of the kind the model exists for. The others 
 | C (content) | G4, G5 | Touches both renderers; behaviour changes need changelog entries |
 | D (send engine) | G1 | Small code, careful tests |
 | E (usability) | none | Small |
+| F (documents) | A–E | Small |
+| G (dependency updates) | A–E, so the suite that judges an update is the final one | Mostly reading; size depends on what is outdated |
+| H (released build on a real system) | Everything, and the user: it needs a push, a pre-release, real accounts and a Windows machine | Half a day of supervised testing per round |
 
-A can ship alone. B and C are independent of each other. D needs the outcome matrix from A.
+A can ship alone. B and C are independent of each other. D needs the outcome matrix from A. G comes after the code changes and before H, so that what is tested on a real system is what will be released; F can be done before or after G but must be finished before H2, since the release notes come from the changelog.
 
 ## Finished when
 
@@ -197,6 +223,8 @@ A can ship alone. B and C are independent of each other. D needs the outcome mat
 - Each guard G1–G9 exists and fails when its bug is put back (check by reverting the fix locally).
 - `uv run pytest`, `uv run mypy`, Biome, Ruff, `quint test` and the conformance tiers pass; `spec/check.sh fixed` passes locally for the invariants in `check.sh`.
 - `CLAUDE.md`, `README.md`, the tutorial and the changelog describe the new behaviour.
+- Every pinned dependency and vendored file has a recorded verdict (updated, or held with a reason), and `docs/upgrade-plan.md` reflects it.
+- The bundles built by the release workflow have passed the phase H checklist on a real Mac and a real Windows PC, with real email sent and received, or the user has accepted the listed exceptions.
 
 ## Handover: for whoever continues this work
 
@@ -206,7 +234,7 @@ Written 2026-11-15, at the end of phase C, for an agent (or person) with no memo
 
 - **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`; 15 commits, the last being this handover. Nothing is pushed. The working tree is clean. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers.
 - **Done:** phases A, B and C (findings F1–F4, F6–F8, F10–F14, part of F9; guards G1–G9; requirement R19).
-- **Remaining:** phase D (F5, the rest of F9), phase E (F15, F16), phase F (documents), and the loose ends listed below.
+- **Remaining:** phase D (F5, the rest of F9), phase E (F15, F16), phase F (documents), phase G (whether the dependencies and vendored code can safely be updated), phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
 - **Version and release:** the version is still 0.6.0 and nothing is tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. Bumping the version and releasing are the user's call; ask, don't do it.
 - **Last verified state** (commit `83cce54`): 1163 tests pass and 14 are skipped (Windows-only tests, on macOS); `mypy`, `ruff check .` and `biome lint` are clean; the Quint scenarios pass for `buggy`, `partial`, `round2` and `fixed`; Apalache reports `allInvariants` holds for `fixed` at 16 steps.
 
@@ -307,6 +335,98 @@ Rows hidden or filtered out in Excel are still read and sent to; openpyxl's read
 - `TODO.md`: add what is left open (below).
 - When everything is done, this plan moves to `archive/` like the earlier ones, with its Status section final.
 
+#### G. Whether it is safe to update the dependencies and vendored code
+
+Read `docs/upgrade-plan.md` first. It records the last round (2026-09-30): what was upgraded, the test gaps that were closed beforehand so that an upgrade's regressions would be noticed, and two items still open (a smoke test of the PyInstaller bundle, and manually launching a built app), which phase H now covers. Follow its method: one group per commit, the full suite and `mypy` before each.
+
+**G1. Inventory.** Nothing may be adopted until it has been public for 7 days. `uv` enforces that for Python packages (`exclude-newer = "7 days"` in `pyproject.toml`); for everything else, check the release date by hand.
+
+| What | Where it is pinned | Now | How to see what is newer |
+|---|---|---|---|
+| Python packages (runtime: msal, requests, openpyxl, email-validator, rich, flask, pywebview and what they pull in; tools: pytest, mypy, ruff, playwright, pyinstaller, responses) | `uv.lock` | msal 1.39.0, requests 2.34.2, openpyxl 3.1.5, email-validator 2.3.0, rich 15.0.0, flask 3.1.3, werkzeug 3.1.8, pywebview 6.2.1, pyinstaller 6.22.3, playwright 1.63.0, pytest 9.1.1, mypy 2.3.1, ruff 0.17.4 | `uv tree --outdated`, or `uv lock --upgrade` on a scratch branch and read `git diff uv.lock` (the cooldown is applied for you). Check `uv --help` for the current spelling. |
+| Trix, Pico CSS (vendored) | `scripts/update-vendor.sh`; files in `src/mail_merge/web/static/` | Trix 2.1.19, Pico CSS 2.1.1 | The npm registry pages; the script itself refuses a version under 7 days old. |
+| Quint | `spec/package.json` and its lockfile | 0.32.0 | npm. `TODO.md` notes an `npm audit` finding in its `adm-zip` dependency, used only to unpack Apalache. |
+| GitHub Actions | commit SHAs in `.github/workflows/*.yml` | checkout v7.0.1, setup-python v7.0.0, setup-uv v10.2.0, setup-biome v2.7.1 | Each action's releases page; pin the new commit SHA, keep the version comment. |
+| uv, Biome | versions in the workflows; schema URL in `biome.json` | uv 0.12.18, Biome 2.5.14 | Their release pages. The local `biome` comes from Homebrew and may already differ. |
+| Python | `.python-version`, `requires-python`, the workflows, `mypy` `python_version` | 3.14 | Whether a newer stable release exists. Raising the minimum again is a decision for the user (see `docs/upgrade-plan.md`, "Minimum Python 3.14"), not part of this phase unless they ask. |
+
+**G2. Is each one safe?** For every item with a newer version, record three things.
+
+1. *What changed:* read the changelog or release notes between the two versions, looking for removed or renamed APIs, changed defaults and changed output.
+2. *Known vulnerabilities:* check the current and the candidate version against a vulnerability database (GitHub's advisory database or osv.dev; `npm audit --prefix spec` for Quint). A fix for a vulnerability that affects how this app uses the package outweighs most risk of updating. Do not install a new auditing tool to do this without checking its age.
+3. *Which tests would notice a regression*, and whether that is enough. This branch added code that leans on dependencies in ways the last round did not have:
+
+| Dependency | What this branch relies on | What would notice a change |
+|---|---|---|
+| Flask, Werkzeug | `web/sessions.py` implements Flask's `SessionInterface` with Werkzeug's `CallbackDict`; `web/app.py` reaches the session object with `session._get_current_object()`; `tests/conftest.py` wraps `Flask.process_response`; `MAX_CONTENT_LENGTH` and the 413 handler; `after_request` headers | `tests/test_web_sessions.py`, `TestRouteTable`, `TestSecurityHeaders`, `tests/test_web_robustness.py` |
+| msal | The file log drops msal's DEBUG records because they contain the OAuth code and PKCE verifier (`console._NoMsalDebug`). `tests/test_log_secrets.py::test_sign_in_logs_no_tokens` asserts that msal *does* log the code at DEBUG, on purpose: if an msal update stops doing so, that assertion fails, which means the filter may no longer be needed, not that something broke. Also the token cache format read and written through `write_private()`. | `tests/test_log_secrets.py`, `tests/test_msal_contract.py`, `tests/test_fs_footprint.py` |
+| openpyxl | Read-only cells exposing `number_format`, and dates arriving as `datetime` objects (`excel.cell_text`) | `CELL_CASES` and the workbook tests in `tests/test_excel.py` |
+| email-validator | Used for recipients and, now, every typed address (`addresses.py`). Tests match only the start of its messages. | `tests/test_addresses.py`, `tests/test_input_validation.py` |
+| requests | `sender.py` tells `ReadTimeout` from other errors once D2 is done | `tests/test_outcomes.py` |
+| rich | The confirmation prompt and console logging, as before | `tests/test_console.py`, `tests/test_cli.py` |
+| Python's `logging` | `PrivateRotatingFileHandler` overrides `RotatingFileHandler._open`, a private method | `tests/test_fs_footprint.py`, `tests/test_log_secrets.py` |
+| Trix | Must run under the Content Security Policy (no inline script; inline styles are allowed). `static/trix-config.js` sets `Trix.config.blockAttributes.default.tagName`. Placeholders in an HTML body depend on Trix writing `&amp;`, `&lt;` and `&nbsp;` as it does now. | `PASTE_EXPECTED` and the Trix tests in `tests/test_web_e2e.py` (a change to `PASTE_EXPECTED` is a behaviour change, not a fixture to refresh), `test_rich_text_editor_placeholder_for_a_column_with_markup_characters`, and the `page` fixture, which fails on any policy violation |
+| Pico CSS | Styling only | Nothing automatic: look at each step of the wizard after updating |
+| pywebview | The desktop window, `ALLOW_DOWNLOADS`. **No automated test runs the real web view**, so the Content Security Policy, the `data-action` buttons and the report download have never been exercised in WKWebView or WebView2. | `tests/test_web_cli.py` against an autospec only; really, phase H |
+| PyInstaller | `mergemail365.spec` lists hidden imports by name and does not list the modules this branch added (`mail_merge.addresses`, `mail_merge.web.sessions`); they are imported at module level, so the analysis should find them, but no bundle has been built since. The whole `static/` directory is bundled, so the new script files come along. | Nothing automatic: phase H |
+| Playwright | Test tooling; its browser version moves with it | The browser tests themselves |
+| Quint | `tests/test_conformance.py` reads its trace format (`mbt::actionTaken`, `mbt::nondetPicks`) | The conformance tests and `spec/check.sh` |
+
+Give each item a verdict: *update* (low risk, or a security fix, and covered by tests), *hold* (no benefit, or a risk the tests can't see), or *needs a test first* (write the test, as the last round did, then update).
+
+**G3. Ask.** Put the inventory and verdicts in this file and ask the user which to update. Updating is not automatic.
+
+**G4. Update what was agreed.** `uv lock --upgrade-package <name>` for one package at a time or by group, then `uv sync --locked --all-extras`; `scripts/update-vendor.sh --trix <version>` for vendored code, reviewing the diff. Run the full suite, `mypy`, Ruff and Biome before each commit. For Trix, Pico, pywebview and PyInstaller, the automated tests are not enough: note in Status that phase H must look at them. Bring `docs/upgrade-plan.md` up to date in the last commit.
+
+#### H. End-to-end test of the released build, on real systems
+
+The automated tests mock Microsoft Graph and Entra, and none runs the packaged app. This phase checks the real thing: the bundles that `.github/workflows/release.yml` builds, taken from the GitHub release as a user would get them, running on a real Mac and a real Windows PC, signed in to a real Microsoft 365 account, sending real email.
+
+**What needs the user.** Pushing the branch, creating a tag and publishing a pre-release are outward-facing: get explicit approval for each, or have the user do them. The user must sign in (never ask for or handle their password), choose the mailboxes that receive the test emails, and provide or operate the Windows machine. An agent can prepare everything, drive the parts that don't need credentials, read the logs and record the results.
+
+**H1. CI first.** `test.yml` runs on pushes to `master`, on pull requests and on manual dispatch, so open a pull request for `review-fixes` (or run the workflow manually on the branch). This is the first time the branch's tests run on Linux and Windows; expect to fix platform differences (see "Loose ends"). The `spec` job needs `round2` in its variant loop, which is already there.
+
+**H2. Build a release candidate with the release workflow.** How the workflow behaves (read it before relying on this):
+
+- It runs when a release is published, or by manual dispatch with a `tag` input. It builds on `macos-latest` and `windows-latest` in the `UCL` environment, which supplies the client and tenant IDs baked into the bundle and the Windows signing certificate.
+- It rewrites the version in `pyproject.toml` and `mergemail365.spec` from the tag, builds with `uv run --frozen pyinstaller mergemail365.spec`, signs the Windows bundle, zips, and uploads with `gh release upload <tag>`. The upload needs a release for that tag to exist already.
+- On manual dispatch it checks out the branch it was started from, not the tag; the tag is used only for the version number and the upload.
+
+So: create a **pre-release** with a candidate tag (for example `v0.7.0rc1`; agree the version with the user) pointing at the commit to test, and let publishing it trigger the build, or dispatch the workflow for that tag. Mark it as a pre-release so that it is not offered to users as the latest version. Confirm both zip files are attached and note the commit they were built from.
+
+**H3. The checklist.** Run it on macOS and on Windows. Download the zip from the release page in a browser, so that the operating system treats it as a downloaded file (Gatekeeper on macOS, SmartScreen on Windows; `docs/codesigning.md` describes what to expect). Use a machine that has no development copy of the project if possible. If an earlier version is installed and signed in, leave its token cache and log files in place: the upgrade is part of the test.
+
+Prepare a spreadsheet for the test, with 6 to 10 rows addressed to mailboxes the user controls, containing: a column name with punctuation (`First-Name`) and one with spaces; a date column, a percentage column and a currency-formatted column; a cell containing `<`, `&` and a line break; two rows with the same address; one row with an invalid address; a second sheet; and about 60 columns with long headings (the session-cookie case).
+
+| # | Do | Expect | Covers |
+|---|---|---|---|
+| 1 | Unzip and open the app. | It opens without a security block beyond what `docs/codesigning.md` describes. The window shows the wizard; the footer shows the candidate's version. | Build, signing, version injection |
+| 2 | Click every button on step 1, including "Test connection". | Each responds. Nothing is dead. | The Content Security Policy and `data-action` buttons in the real web view, which no automated test runs |
+| 3 | If an earlier version was signed in: check the header. Otherwise sign in (the system browser opens). | Still signed in after the upgrade, or sign-in completes and the header shows the account. | Token cache written by `write_private()`, read from the old location; desktop sign-in |
+| 4 | Upload the spreadsheet. | It loads despite the wide headings. The note about unformatted numbers names the currency column. Dates show as `2026-12-01`, the percentage as `25%`. | F14, F6 |
+| 5 | Change sheet and back. | The preview follows. | Sessions |
+| 6 | Compose: use the chips for the punctuated columns, type `{{ First Name }}` by hand, add a CC as `"Surname, First" <address>`, attach a small file. Try Next with a misspelt placeholder, then with a bad CC address. | Each mistake is refused on this step with a message naming it. Corrected, Next works. | F4, F7 |
+| 7 | Switch to HTML, use the editor's bold and a list, insert a chip, paste formatted text from Word or a web page. | The editor works; the preview shows the formatted email with the cell's `<` and `&` as text and the line break kept. | Trix under the policy, F8 |
+| 8 | Step 3: page through the recipients. | The invalid address is listed as skipped; both rows with the shared address are present. | Preview |
+| 9 | Step 4: send the test email to yourself. | "Sent successfully" appears and the email arrives, with the right subject, body, CC, attachment name and From. | The real Graph call |
+| 10 | If an account or setting is available that makes Graph refuse the email (for example an account without a mailbox): send a test with it. | The step shows a failure and Next stays disabled. If no such account exists, note that this was not tested on a real system (the automated outcome matrix covers it). | F1 |
+| 11 | Steps 5 and 6: dry run, then send. Press "Stop sending" after the second email. | The send stops; the results list exactly the emails that went out, and those arrived. | Stop, results |
+| 12 | Send again to the rest; while it runs, quit the app. Reopen it. | Step 1 reports the interrupted send and which emails went out. "Download CSV" asks where to save and the file is correct. | Send log, download in the web view |
+| 13 | Complete a send. "Download mail merge report". Then "New merge". | The report saves; every field is cleared. | Report, reset |
+| 14 | Read the received emails in Outlook on the web and one other mail client. | Placeholders filled in everywhere, no `{{`; dates and percentages as in the preview; HTML renders; nothing from the cell was treated as markup. | F4, F6, F8 end to end |
+| 15 | Open the log file (`~/Library/Logs/mergemail365/` or `%LOCALAPPDATA%\mergemail365\logs\`) and search it for `Bearer`, `eyJ`, `token=` followed by anything but `[redacted]`, and a distinctive phrase from the email body. | None found. The log still shows each send and its result. | F2, F13 |
+| 16 | macOS only: `stat -f '%Lp %N' ~ ~/.mergemail365-token-cache.json ~/Library/Logs/mergemail365 ~/Library/Logs/mergemail365/*.log` before and after the session. | The home directory's mode is unchanged; the cache and logs are 600, the log directory 700; log files left by the earlier version are now 600. | F3 |
+| 17 | Windows only: leave a send running with the window in the background for some minutes. | It keeps sending. If it stalls, keep `mergemail365.log` and `mergemail365-stalls.log`: this is the fault reported against 0.3.1 and 0.4.1 (`TODO.md`). | The open Windows report |
+| 18 | Sign out, then sign in again. | Both work; the header follows. | Sign-in |
+
+If phase G updated Trix, Pico CSS, pywebview or PyInstaller, items 1, 2, 7 and 12 are where a regression would show.
+
+The command-line tool is not part of what the release workflow builds. If the user wants it covered, run steps 9, 11 and 14's equivalents with `mergemail365` from a clean checkout of the candidate's commit (`uv sync --locked`, then a dry run, `--test-email` and a small `--send --output`), and say in Status that this was a source install, not a release artefact.
+
+**H4. Record and repeat.** Put the result of every item, per platform, in Status, with the candidate's tag and commit. Fix failures on the branch with tests where a test is possible, build the next candidate, and repeat the affected items. Remove candidate pre-releases only if the user asks.
+
+**H5. Hand back.** The real release (version number, tag, release notes from the changelog) is the user's to make.
+
 ### Loose ends and things not verified
 
 - **Not run on Windows or Linux.** CI has not run on this branch. The permission tests are skipped on Windows; `os.fchmod` and the `chmod` calls are guarded by platform checks, but that is untested there.
@@ -321,12 +441,14 @@ Rows hidden or filtered out in Excel are still read and sent to; openpyxl's read
 1. **`batch_size=0`.** It used to mean "send nothing this time" and an existing test said so; it is now an error, as the accepted plan specified (`batch_size >= 1`). The user was told and has not yet answered whether 0 should stay a no-op.
 2. **Resume and "outcome unknown"** (before starting D2): skip such rows with a warning, or re-send them? See D2.
 3. **Releasing.** Whether phase A should go out on its own as 0.6.1 (it would have to be cherry-picked, since later commits change behaviour) or everything together as 0.7.0.
+4. **Phase G:** which updates to make, once the verdicts are in; and whether to raise the minimum Python version if a newer stable release exists.
+5. **Phase H:** approval to push the branch, open a pull request and publish a pre-release; the candidate's version number; which Microsoft 365 account and which recipient mailboxes to use; who operates the Windows machine.
 
 ## Status
 
 Updated 2026-11-15 (end of phase C; last commit `83cce54` plus the handover notes). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A, B and C are complete. Phases D, E and F have not been started. Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A, B and C are complete. Phases D, E, F, G and H have not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
 **Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
 
@@ -358,6 +480,6 @@ Updated 2026-11-15 (end of phase C; last commit `83cce54` plus the handover note
 | C4 (F7) | Done | `addresses.py`, `tests/test_addresses.py`. Not an RFC 5322 parser, on purpose: a strict one refuses names people write unquoted, such as `[Team] Lead <x@y>`, which an existing test covers. Semicolons and newlines separate addresses as well as commas. `/api/get-recipients` checks the Compose step's addresses. |
 | C5 (F9 part, G5) | Done | `_check_options()`, `_check_message_size()`, argparse types, `tests/test_input_validation.py` (34 rows). The table found one more: an unknown `--sheet` raised `KeyError`, reported as "Unexpected error". The total-size limit reuses the per-attachment limit's existing assumption (about 4 MB per request to Graph, 3 MB of files once base64-encoded); that figure was already in the code and is not stated in the copies of Microsoft's documentation kept in `docs/`. |
 
-### Phases D, E, F — not started
+### Phases D, E, F, G, H — not started
 
 What each step involves, file by file, is under [Remaining work, in detail](#remaining-work-in-detail) in the Handover section. Add a table here for each phase as it is done, in the style of the ones above.
