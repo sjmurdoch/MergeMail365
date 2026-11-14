@@ -86,3 +86,28 @@ def body_template_file(tmp_path: Path) -> Path:
     path = tmp_path / "body.txt"
     path.write_text("Hello {{name}},\n\nWelcome from {{company}}.\n", encoding="utf-8")
     return path
+
+
+@pytest.fixture
+def page(page):  # type: ignore[no-untyped-def]
+    """pytest-playwright's page, failing the test on any Content Security
+    Policy violation.
+
+    The policy (web/app.py CONTENT_SECURITY_POLICY) forbids inline script.
+    A violation means either the app's own page needs something the policy
+    forbids, or injected markup tried to run and only the policy stopped it;
+    both are bugs. Tests that seed a bug on purpose set
+    ``page.expect_csp_violations = True``.
+    """
+    violations: list[str] = []
+    page.expect_csp_violations = False
+    page.csp_violations = violations
+
+    def on_console(message):  # type: ignore[no-untyped-def]
+        if "Content Security Policy" in message.text or "Content-Security-Policy" in message.text:
+            violations.append(message.text)
+
+    page.on("console", on_console)
+    yield page
+    if not page.expect_csp_violations:
+        assert not violations, f"Content Security Policy violations: {violations}"

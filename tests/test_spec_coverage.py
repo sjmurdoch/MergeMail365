@@ -51,7 +51,9 @@ _CONTEXT_RES = [
 
 
 def html_entry_points(text: str) -> set[str]:
-    return {f"html:{m[2]}" for m in re.finditer(r'\bon(click|change|input|submit)="([^"]*)"', text)}
+    """Buttons name what they do in data-action="call(arg)" (app.js
+    runDataAction); there are no inline handlers (TestNoInlineScript)."""
+    return {f"html:{m[1]}" for m in re.finditer(r'\bdata-action="([^"]*)"', text)}
 
 
 def js_entry_points(text: str) -> set[str]:
@@ -123,7 +125,7 @@ class TestExtraction:
     """The extractors find the kinds of entry point the inventory relies on."""
 
     def test_html(self):
-        assert html_entry_points('<button onclick="goToStep(2)">') == {"html:goToStep(2)"}
+        assert html_entry_points('<button data-action="goToStep(2)">') == {"html:goToStep(2)"}
 
     def test_js_listeners(self):
         src = '$("btn-x").addEventListener("click", f);\ndocument.addEventListener("trix-change", g);\nchip.addEventListener("mousedown", h);\nevtSource.onmessage = (e) => {};'
@@ -279,6 +281,98 @@ class TestCitations:
             f"action {action} in wizard.qnt needs a comment naming the code it models, "
             "e.g. `// app.js: stopSend(); web/app.py: api_job_stop` or `// environment: ...`"
         )
+
+
+SAFE_HTML = WEB / "static" / "safe-html.js"
+
+
+def html_sinks(text: str) -> list[str]:
+    """Statements in a script that write markup to the page."""
+    found = []
+    for n, line in enumerate(text.splitlines(), start=1):
+        code = line.split("//")[0]
+        if re.search(r"\.(innerHTML|outerHTML)\s*\+?=[^=]", code) or re.search(
+            r"\b(insertAdjacentHTML|document\.write|createContextualFragment|setHTMLUnsafe)\b", code,
+        ) or re.search(r"\beval\(|new Function\(|\bsrcdoc\s*=", code):
+            found.append(f"{n}: {line.strip()}")
+    return found
+
+
+class TestHtmlSinks:
+    """Markup reaches the page only through setHtml() in safe-html.js, which
+    escapes every interpolated value (docs/review-fixes-plan.md, F11, G7)."""
+
+    # The exceptions, each with its reason. Anything else fails the test.
+    ALLOWED_IN_APP_JS = {
+        # Clipboard HTML is parsed in an inert document, where nothing loads
+        # or runs, before Trix sanitises it (CLAUDE.md, "Untrusted content").
+        "div.innerHTML = paste.html;  // inert document: nothing loads or runs",
+        # The email preview: an iframe with sandbox="" (no script, no forms).
+        '$("preview-body-html").srcdoc = w',
+    }
+
+    def test_app_js_has_no_other_sink(self):
+        sinks = [s.split(": ", 1)[1] for s in html_sinks(APP_JS.read_text(encoding="utf-8"))]
+        unexpected = [s for s in sinks if s not in self.ALLOWED_IN_APP_JS]
+        assert not unexpected, (
+            "app.js writes markup to the page outside setHtml(): build it with html`...` "
+            f"and pass it to setHtml(), or use textContent. Found: {unexpected}"
+        )
+        assert set(sinks) == self.ALLOWED_IN_APP_JS, "an allowed exception has gone: remove it from the list"
+
+    def test_wizard_core_has_no_sink(self):
+        assert html_sinks(WIZARD_CORE.read_text(encoding="utf-8")) == []
+
+    def test_safe_html_has_the_one_sink(self):
+        sinks = html_sinks(SAFE_HTML.read_text(encoding="utf-8"))
+        assert [s.split(": ", 1)[1] for s in sinks] == ["element.innerHTML = toMarkup(content);"]
+
+    def test_the_detector_sees_each_kind_of_sink(self):
+        for line in [
+            "el.innerHTML = x;", "el.innerHTML += x;", "el.outerHTML = x;", 'el.insertAdjacentHTML("beforeend", x);',
+            "document.write(x);", "eval(x);", "f = new Function(x);", "frame.srcdoc = x;",
+        ]:
+            assert html_sinks(line), line
+        for line in ["if (el.innerHTML === x) {}", "paste.html = div.innerHTML;", "// el.innerHTML = x;",
+                     "el.textContent = x;"]:
+            assert not html_sinks(line), line
+
+    def test_preview_iframe_is_fully_sandboxed(self):
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        assert re.search(r'<iframe id="preview-body-html"[^>]*\bsandbox=""', page)
+
+
+class TestNoInlineScript:
+    """The Content Security Policy allows script from this server's files
+    only, so the template has no inline script or handler to break (and
+    injected markup has none that would run)."""
+
+    def test_template_has_no_inline_script_or_handlers(self):
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        inline = [m[0] for m in re.finditer(r"<script(?![^>]*\bsrc=)[^>]*>", page)]
+        assert not inline, f"inline <script> in index.html: {inline}"
+        handlers = re.findall(r"\son[a-z]+\s*=", page)
+        assert not handlers, f"inline event handlers in index.html: {handlers}"
+        assert "javascript:" not in page
+
+    def test_every_data_action_names_an_allowed_function(self):
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        script = APP_JS.read_text(encoding="utf-8")
+        table = re.search(r"const CLICK_ACTIONS = \{(.*?)\n\};", script, re.DOTALL)
+        assert table
+        allowed = set(re.findall(r"\b([A-Za-z_]\w*)\s*(?:,|:|\n)", table[1]))
+        used = re.findall(r'data-action="(\w+)\((?:\'[^\']*\'|-?\d+)?\)"', page)
+        assert len(used) == len(re.findall(r"data-action=", page)), "a data-action isn't of the form name(arg)"
+        assert set(used) <= allowed, f"data-action names not in CLICK_ACTIONS: {sorted(set(used) - allowed)}"
+
+    def test_policy_forbids_inline_script(self):
+        from mail_merge.web.app import CONTENT_SECURITY_POLICY
+
+        directives = dict(d.split(" ", 1) for d in CONTENT_SECURITY_POLICY.split("; "))
+        assert directives["script-src"] == "'self'"
+        assert directives["default-src"] == "'self'"
+        assert directives["object-src"] == "'none'" and directives["base-uri"] == "'none'"
+        assert directives["frame-ancestors"] == "'none'"
 
 
 class TestRouteAccess:

@@ -1024,7 +1024,7 @@ class TestReportDownload:
             ];
         }""")
         # The button (on step 6) calls downloadCsv().
-        assert page.get_attribute("#btn-download-csv", "onclick") == "downloadCsv()"
+        assert page.get_attribute("#btn-download-csv", "data-action") == "downloadCsv()"
         with page.expect_download() as download:
             page.evaluate("downloadCsv()")
         assert download.value.suggested_filename == "mergemail365-results.csv"

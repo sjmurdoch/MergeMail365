@@ -2199,3 +2199,35 @@ class TestFixedClientId:
             assert resp.status_code == 200
             assert started.wait(5)
         assert seen == [("fixed-client", "fixed-tenant")]
+
+
+class TestSecurityHeaders:
+    """docs/review-fixes-plan.md, G7: the policy is the second defence behind
+    escaping, so it must be on every answer, errors included."""
+
+    @pytest.mark.parametrize("path", ["/", "/api/config", "/static/app.js", "/no-such-page", "/api/log-path"])
+    def test_policy_and_nosniff_on_every_response(self, web_client, path):
+        from mail_merge.web.app import CONTENT_SECURITY_POLICY
+
+        resp = web_client.get(path)
+        assert resp.headers["Content-Security-Policy"] == CONTENT_SECURITY_POLICY
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert resp.headers["Referrer-Policy"] == "no-referrer"
+
+    def test_forbidden_page_has_the_policy_too(self, client):
+        resp = client.get("/")
+        assert resp.status_code == 403
+        assert "script-src 'self'" in resp.headers["Content-Security-Policy"]
+
+    def test_pages_and_api_answers_are_not_cached_but_static_files_may_be(self, web_client):
+        assert web_client.get("/").headers["Cache-Control"] == "no-store"
+        assert web_client.get("/api/config").headers["Cache-Control"] == "no-store"
+        assert "no-store" not in web_client.get("/static/app.js").headers.get("Cache-Control", "")
+
+    def test_page_carries_the_csrf_token_in_a_meta_tag_not_a_script(self, web_client):
+        page = web_client.get("/").get_data(as_text=True)
+        with web_client.session_transaction() as sess:
+            token = sess["csrf_token"]
+        assert f'<meta name="csrf-token" content="{token}">' in page
+        assert page.count(token) == 1
+        assert "<script>" not in page

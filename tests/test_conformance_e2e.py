@@ -414,8 +414,8 @@ APP_MUTANTS = [
      'case "checkAuth":\n            checkAuthStatus();',
      'case "checkAuth":'),
     ("results-not-rendered",
-     "let html = `<h4>Results</h4>`;",
-     'let html = "";'),
+     'setHtml($("send-result"), parts);',
+     'setHtml($("send-result"), []);'),
 ]
 
 

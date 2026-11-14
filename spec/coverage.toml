@@ -1,7 +1,7 @@
 # Coverage inventory for spec/wizard.qnt.
 #
-# Every entry point in the web UI and server is listed here: each inline
-# handler in templates/index.html, each listener, EventSource callback and
+# Every entry point in the web UI and server is listed here: each button's
+# data-action in templates/index.html, each listener, EventSource callback and
 # timer in static/app.js, and each Flask route in web/app.py. Each maps to the
 # model actions that describe it, or is excluded with a reason.
 #
@@ -11,7 +11,7 @@
 # until someone decides how it is modelled.
 #
 # Keys:
-#   html:<handler>            onclick/onchange/oninput attribute text
+#   html:<handler>            a button's data-action attribute, e.g. goToStep(2)
 #   js:#<id>:<event>          $("id").addEventListener(event)
 #   js:document:<event>       document.addEventListener(event)
 #   js:window:<event>         window.addEventListener(event)
@@ -63,7 +63,7 @@ environment = ["tokenExpires"]
 not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists the current requests.", verifyGen = "Replaced by request ids: abstractPage's pending lists the current requests.", previewGen = "Replaced by request ids: abstractPage's previewReq.", progressJob = "DOM text (#send-progress-text) the reducer does not hold.", bccToMerge = "DOM field (#bcc-blast-to) the reducer does not hold.", signedIn = "The MSAL token cache; conformance drives a fake cache.", btnNext2 = "DOM: loadPreview() disables #btn-next-2 until its response arrives, stale or not, while the reducer forgets stale requests." }
 
 [entries]
-# --- templates/index.html inline handlers ---
+# --- templates/index.html buttons (data-action) ---
 "html:goToStep(2)" = { actions = ["next1"] }
 "html:setSendMode('individual')" = { actions = ["edit"] }
 "html:setSendMode('bcc')" = { actions = ["edit"] }
@@ -84,9 +84,10 @@ not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists 
 "html:newMerge()" = { actions = ["newMerge"] }
 "html:dismissInterrupted()" = { actions = ["dismissInterrupted"] }
 "html:downloadInterruptedCsv()" = { out_of_scope = "Builds a CSV of the interrupted sends already shown; no state change." }
-"html:window.location.reload()" = { actions = ["reload"] }
+"html:reloadPage()" = { actions = ["reload"] }
 
 # --- static/app.js listeners ---
+"js:document:click" = { out_of_scope = "Runs the data-action of the button clicked (runDataAction); each button is listed above as html:<its data-action>." }
 "js:window:beforeunload" = { out_of_scope = "Browser leave-page warning while sending; the page itself is unchanged." }
 "js:#btn-sign-in:click" = { actions = ["signIn", "signOut"] }
 "js:#btn-sign-in-4:click" = { actions = ["signIn"] }

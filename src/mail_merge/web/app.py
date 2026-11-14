@@ -269,6 +269,26 @@ def public(view: _View) -> _View:
     return view
 
 
+# The page's Content Security Policy: the second defence against injected
+# markup, behind the escaping in static/safe-html.js. Script only from this
+# server's own files: no inline <script>, no on...= handlers, no eval. So
+# markup that did reach the page unescaped still could not run script, which
+# here could send email as the signed-in user.
+# - style-src allows inline styles: the Trix editor and the email preview's
+#   wrapper (a srcdoc iframe inherits this policy) use them.
+# - img-src allows https images, so an HTML email's pictures show in the
+#   preview.
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
 # How long a sign-in started on 127.0.0.1 has to arrive on localhost.
 _HANDOFF_LIFETIME = 60.0
 
@@ -376,6 +396,17 @@ def create_app(
         # Refresh sliding window
         session.permanent = True
         return None
+
+    @app.after_request
+    def _security_headers(response: Response) -> Response:
+        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # The page and the API answers hold addresses and tokens; static
+        # files may be cached.
+        if request.endpoint != "static":
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     # ----- CSRF protection -----
 

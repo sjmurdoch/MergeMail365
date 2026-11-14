@@ -1,5 +1,9 @@
 /* MergeMail365 — Wizard UI */
 
+// In a <meta> tag, not an inline script: the page's Content Security Policy
+// allows no inline script.
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -76,11 +80,11 @@ function placeholderRe(flags = "") { return new RegExp(PLACEHOLDER_SRC, `u${flag
 function $(id) { return document.getElementById(id); }
 function hide(el) { if (typeof el === "string") el = $(el); el.classList.add("hidden"); }
 function show(el) { if (typeof el === "string") el = $(el); el.classList.remove("hidden"); }
-function escapeHtml(s) {
-    const d = document.createElement("div");
-    d.textContent = s;
-    return d.innerHTML;
-}
+// Markup is built with html`...` (every ${value} escaped) and put on the
+// page with setHtml(); nothing else in this file assigns innerHTML
+// (tests/test_spec_coverage.py TestHtmlSinks). See safe-html.js.
+const { html, joinHtml, setHtml } = SafeHtmlLib;
+function clear(el) { if (typeof el === "string") el = $(el); el.replaceChildren(); }
 
 // Requests the page waits for (WizardCore.startRequest): a response or job
 // completion is applied only while its request is current.
@@ -169,15 +173,16 @@ function updateStepUI(n) {
 function renderSpreadsheetSummary(data) {
     $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${data.total_rows} rows.`;
     if (data.total_rows > 99) {
-        $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning">Large file — filters required</span>`;
+        const badge = document.createElement("span");
+        badge.className = "badge badge-warning";
+        badge.textContent = "Large file — filters required";
+        $("spreadsheet-summary").append(" ", badge);
     }
 }
 
 function populateSheetSelect(sheets) {
     const sel = $("sheet-select");
-    sel.innerHTML = sheets.map(s =>
-        `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
-    ).join("");
+    setHtml(sel, sheets.map(s => html`<option value="${s}">${s}</option>`));
 }
 
 function populateColumnDropdowns(columns) {
@@ -310,9 +315,9 @@ function confirmGoBack(targetStep) {
 }
 
 function clearTestAndVerifyLogs() {
-    $("test-log").innerHTML = "";
+    clear("test-log");
     hide("test-log");
-    $("verify-log").innerHTML = "";
+    clear("verify-log");
 }
 
 // ---------------------------------------------------------------------------
@@ -519,13 +524,13 @@ async function checkAuthStatus() {
 function showAuth(status) {
     const el = $("auth-display");
     if (status.authenticated) {
-        el.innerHTML = `<span class="dot green"></span> Signed in as <span class="email">${escapeHtml(status.email)}</span>`;
+        setHtml(el, html`<span class="dot green"></span> Signed in as <span class="email">${status.email}</span>`);
         if ($("test-email-input") && !$("test-email-input").value) {
             $("test-email-input").value = status.email;
         }
         _auth.tokenExpiresAt = status.token_expires_at ? new Date(status.token_expires_at) : null;
     } else {
-        el.innerHTML = '<span class="dot gray"></span> Not signed in';
+        setHtml(el, html`<span class="dot gray"></span> Not signed in`);
         _auth.tokenExpiresAt = null;
     }
     updateSignInButton();
@@ -680,20 +685,21 @@ $("btn-test-connection").addEventListener("click", async () => {
         const data = await resp.json();
 
         // Build a summary of results
-        let summary = "";
+        let summary;
         if (data.error) {
-            summary = `<div class="callout callout-danger mt-0"><strong>Connection Error:</strong> ${escapeHtml(data.error)}</div>`;
+            summary = html`<div class="callout callout-danger mt-0"><strong>Connection Error:</strong> ${data.error}</div>`;
         } else if (data.token_valid) {
-            summary = `<div class="callout callout-success mt-0"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
+            summary = html`<div class="callout callout-success mt-0"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
         } else if (data.authority_reachable) {
-            summary = `<div class="callout callout-warning mt-0"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
+            summary = html`<div class="callout callout-warning mt-0"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
         } else {
-            summary = `<div class="callout callout-danger mt-0"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
+            summary = html`<div class="callout callout-danger mt-0"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
         }
 
-        $("auth-diag-content").innerHTML = `${summary}<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        // The JSON holds the tenant ID, account names and error text.
+        setHtml($("auth-diag-content"), html`${summary}<pre>${JSON.stringify(data, null, 2)}</pre>`);
     } catch (e) {
-        $("auth-diag-content").innerHTML = `<div class="callout callout-danger mt-0"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
+        setHtml($("auth-diag-content"), html`<div class="callout callout-danger mt-0"><strong>Error:</strong> ${e.message}</div>`);
     }
 });
 
@@ -758,20 +764,15 @@ $("sheet-select").addEventListener("change", async () => {
 });
 
 function populateSelect(sel, cols, required) {
-    let html = required ? '<option value="">-- select --</option>' : '<option value="">-- none --</option>';
-    for (const c of cols) {
-        html += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
-    }
-    sel.innerHTML = html;
+    const first = required ? html`<option value="">-- select --</option>` : html`<option value="">-- none --</option>`;
+    setHtml(sel, [first, ...cols.map(c => html`<option value="${c}">${c}</option>`)]);
 }
 
 function buildPreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#preview-table thead");
     const tbody = document.querySelector("#preview-table tbody");
-    thead.innerHTML = `<tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
-    tbody.innerHTML = rows.map(row =>
-        `<tr>${columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
-    ).join("");
+    setHtml(thead, html`<tr>${columns.map(c => html`<th>${c}</th>`)}</tr>`);
+    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
     // Show truncation notice if not all rows are displayed
     const caption = document.querySelector("#preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
@@ -785,10 +786,8 @@ function buildPreviewTable(columns, rows, totalRows) {
 function buildComposePreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#compose-preview-table thead");
     const tbody = document.querySelector("#compose-preview-table tbody");
-    thead.innerHTML = `<tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
-    tbody.innerHTML = rows.map(row =>
-        `<tr>${columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
-    ).join("");
+    setHtml(thead, html`<tr>${columns.map(c => html`<th>${c}</th>`)}</tr>`);
+    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
     const caption = document.querySelector("#compose-preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
         caption.textContent = `Showing ${rows.length} of ${totalRows} rows`;
@@ -801,7 +800,7 @@ function buildComposePreviewTable(columns, rows, totalRows) {
 function showPlaceholderChips(columns) {
     show("placeholder-chips");
     const container = $("chips");
-    container.innerHTML = "";
+    clear(container);
     for (const col of columns) {
         const chip = document.createElement("span");
         chip.className = "chip";
@@ -844,7 +843,7 @@ function showPlaceholderChips(columns) {
 function showFilterChips(columns) {
     show("filter-chips");
     const container = $("filter-chips-container");
-    container.innerHTML = "";
+    clear(container);
     for (const col of columns) {
         const chip = document.createElement("span");
         chip.className = "chip";
@@ -926,7 +925,7 @@ document.addEventListener('trix-before-paste', (e) => {
     if (!paste.html) return;
     const doc = document.implementation.createHTMLDocument("");
     const div = doc.createElement("div");
-    div.innerHTML = paste.html;
+    div.innerHTML = paste.html;  // inert document: nothing loads or runs
     // Remove empty paragraphs/divs (margin-only spacers)
     for (const el of div.querySelectorAll("p, div")) {
         if (!el.textContent.trim() && !el.querySelector("img, table")) {
@@ -1027,10 +1026,11 @@ function validatePlaceholders() {
     const el = $("placeholder-errors");
     if (bad.length > 0) {
         const unique = [...new Set(bad)];
-        const available = state.spreadsheetData.columns.map(escapeHtml).join(", ");
-        el.innerHTML = unique.map(p =>
-            `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${available}`
-        ).join("<br>");
+        const available = state.spreadsheetData.columns.join(", ");
+        setHtml(el, joinHtml(
+            unique.map(p => html`No column named <strong>{{${p}}}</strong>. Available: ${available}`),
+            html`<br>`,
+        ));
         show(el);
     } else {
         hide(el);
@@ -1062,62 +1062,48 @@ function validateHtmlBody() {
     const warnings = [];
 
     if (!HTML_TAG_RE.test(body)) {
-        warnings.push(
-            "<strong>No HTML tags detected.</strong> The body appears to be plain text " +
-            "but will be sent as HTML. Line breaks will not be visible to recipients. " +
-            "Use <code>&lt;br&gt;</code> for line breaks or <code>&lt;p&gt;</code> for paragraphs."
-        );
+        warnings.push(html`<strong>No HTML tags detected.</strong> The body appears to be plain text
+            but will be sent as HTML. Line breaks will not be visible to recipients.
+            Use <code>&lt;br&gt;</code> for line breaks or <code>&lt;p&gt;</code> for paragraphs.`);
     } else if (/\n/.test(body) && !BLOCK_OR_BR_RE.test(body)) {
-        warnings.push(
-            "<strong>Line breaks may not render.</strong> The body contains newlines but no " +
-            "<code>&lt;br&gt;</code>, <code>&lt;p&gt;</code>, or <code>&lt;div&gt;</code> tags. " +
-            "Newlines are ignored in HTML — use <code>&lt;br&gt;</code> for line breaks."
-        );
+        warnings.push(html`<strong>Line breaks may not render.</strong> The body contains newlines but no
+            <code>&lt;br&gt;</code>, <code>&lt;p&gt;</code>, or <code>&lt;div&gt;</code> tags.
+            Newlines are ignored in HTML — use <code>&lt;br&gt;</code> for line breaks.`);
     }
 
     if (STRIPPED_TAGS_RE.test(body)) {
         const found = [];
         for (const tag of ["script", "iframe", "form", "embed", "object"]) {
-            if (new RegExp(`<${tag}\\b`, "i").test(body)) found.push(`&lt;${tag}&gt;`);
+            if (new RegExp(`<${tag}\\b`, "i").test(body)) found.push(`<${tag}>`);
         }
-        warnings.push(
-            `<strong>Unsupported tags:</strong> ${found.join(", ")} will be stripped by email clients.`
-        );
+        warnings.push(html`<strong>Unsupported tags:</strong> ${found.join(", ")} will be stripped by email clients.`);
     }
 
     if (EXT_STYLESHEET_RE.test(body)) {
-        warnings.push(
-            "<strong>External stylesheets ignored:</strong> <code>&lt;link rel=\"stylesheet\"&gt;</code> " +
-            "is not supported in email. Use inline <code>style</code> attributes instead."
-        );
+        warnings.push(html`<strong>External stylesheets ignored:</strong> <code>&lt;link rel="stylesheet"&gt;</code>
+            is not supported in email. Use inline <code>style</code> attributes instead.`);
     }
 
     if (STYLE_BLOCK_RE.test(body)) {
-        warnings.push(
-            "<strong>Inline &lt;style&gt; blocks may be stripped</strong> by email clients " +
-            "(Gmail, Outlook.com). Use inline <code>style</code> attributes on each " +
-            "element for reliable rendering."
-        );
+        warnings.push(html`<strong>Inline &lt;style&gt; blocks may be stripped</strong> by email clients
+            (Gmail, Outlook.com). Use inline <code>style</code> attributes on each
+            element for reliable rendering.`);
     }
 
     if (FULL_HTML_DOC_RE.test(body)) {
-        warnings.push(
-            "<strong>Full HTML document tags detected</strong> (&lt;!DOCTYPE&gt;, &lt;html&gt;, " +
-            "&lt;head&gt;, &lt;body&gt;). These will be stripped before sending — the app " +
-            "always adds its own email compatibility wrappers. Just provide the body content."
-        );
+        warnings.push(html`<strong>Full HTML document tags detected</strong> (&lt;!DOCTYPE&gt;, &lt;html&gt;,
+            &lt;head&gt;, &lt;body&gt;). These will be stripped before sending — the app
+            always adds its own email compatibility wrappers. Just provide the body content.`);
     }
 
     const sizeKb = new Blob([body]).size / 1024 + EMAIL_WRAPPER_KB;
     if (sizeKb > GMAIL_CLIP_KB) {
-        warnings.push(
-            `<strong>Large body (~${Math.round(sizeKb)} KB with email wrapper):</strong> Gmail clips ` +
-            "emails over ~102 KB. Recipients may see a truncated message."
-        );
+        warnings.push(html`<strong>Large body (~${Math.round(sizeKb)} KB with email wrapper):</strong> Gmail clips
+            emails over ~102 KB. Recipients may see a truncated message.`);
     }
 
     if (warnings.length > 0) {
-        el.innerHTML = warnings.join("<hr>");
+        setHtml(el, joinHtml(warnings, html`<hr>`));
         show(el);
     } else {
         hide(el);
@@ -1257,10 +1243,8 @@ function buildRecipientsTable() {
     const cols = [emailCol, ...state.spreadsheetData.columns.filter(c => c !== emailCol)];
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
-    thead.innerHTML = `<tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
-    tbody.innerHTML = recipients.map(row =>
-        `<tr>${cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
-    ).join("");
+    setHtml(thead, html`<tr>${cols.map(c => html`<th>${c}</th>`)}</tr>`);
+    setHtml(tbody, recipients.map(row => html`<tr>${cols.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
 }
 
 function showInvalidEmailWarning(invalidEmails, totalBefore) {
@@ -1272,12 +1256,8 @@ function showInvalidEmailWarning(invalidEmails, totalBefore) {
     const recipients = getRecipients();
     const validCount = recipients ? recipients.length : 0;
     const skippedList = invalidEmails.map(e =>
-        `<li><strong>${escapeHtml(e.address || "(empty)")}</strong>: ${escapeHtml(e.reason)}</li>`
-    ).join("");
-    el.innerHTML =
-        `<strong>${invalidEmails.length} invalid email${invalidEmails.length > 1 ? " addresses" : " address"} skipped</strong>` +
-        ` (${validCount} of ${totalBefore} recipients remain)` +
-        `<ul class="skipped-list">${skippedList}</ul>`;
+        html`<li><strong>${e.address || "(empty)"}</strong>: ${e.reason}</li>`);
+    setHtml(el, html`<strong>${invalidEmails.length} invalid email${invalidEmails.length > 1 ? " addresses" : " address"} skipped</strong> (${validCount} of ${totalBefore} recipients remain)<ul class="skipped-list">${skippedList}</ul>`);
     show(el);
 }
 
@@ -1297,10 +1277,7 @@ function updateTestPreview() {
     const subject = $("subject-input").value;
     const rendered = renderTemplate(subject, row);
     const testAddr = $("test-email-input").value || "(enter test address above)";
-    $("test-preview-info").innerHTML =
-        `<strong>To:</strong> ${escapeHtml(testAddr)}<br>` +
-        `<strong>Subject:</strong> ${escapeHtml(rendered)}<br>` +
-        `<small>Using data from first recipient: ${escapeHtml(row[$("email-column").value] || "?")}</small>`;
+    setHtml($("test-preview-info"), html`<strong>To:</strong> ${testAddr}<br><strong>Subject:</strong> ${rendered}<br><small>Using data from first recipient: ${row[$("email-column").value] || "?"}</small>`);
 }
 
 $("test-email-input").addEventListener("input", updateTestPreview);
@@ -1321,7 +1298,7 @@ async function runJob(mode, id) {
         const recipients = getRecipients();
         $("verify-count").textContent = recipients ? recipients.length : "?";
     }
-    $(logPanel).innerHTML = "";
+    clear(logPanel);
     saveState();
 
     const form = buildJobFormData(mode);
@@ -1388,21 +1365,18 @@ function prepareSend() {
     $("send-count").textContent = n;
 
     // Build details
-    let details = "";
+    const details = [];
     const authEmail = $("auth-display").querySelector(".email");
-    if (authEmail) details += `<strong>From:</strong> ${escapeHtml(authEmail.textContent)}<br>`;
-    details += `<strong>Recipients:</strong> ${n}<br>`;
-    if ($("cc-input").value) details += `<strong>CC:</strong> ${escapeHtml($("cc-input").value)}<br>`;
-    if ($("bcc-input").value) details += `<strong>BCC:</strong> ${escapeHtml($("bcc-input").value)}<br>`;
+    if (authEmail) details.push(html`<strong>From:</strong> ${authEmail.textContent}<br>`);
+    details.push(html`<strong>Recipients:</strong> ${n}<br>`);
+    if ($("cc-input").value) details.push(html`<strong>CC:</strong> ${$("cc-input").value}<br>`);
+    if ($("bcc-input").value) details.push(html`<strong>BCC:</strong> ${$("bcc-input").value}<br>`);
     const attInput = $("attachment-input");
     if (attInput.files.length > 0) {
-        const attList = Array.from(attInput.files).map(f => {
-            const sizeKb = (f.size / 1024).toFixed(0);
-            return `${escapeHtml(f.name)} (${sizeKb} KB)`;
-        });
-        details += `<strong>Attachments:</strong> ${attList.join(", ")}<br>`;
+        const attList = Array.from(attInput.files).map(f => `${f.name} (${(f.size / 1024).toFixed(0)} KB)`);
+        details.push(html`<strong>Attachments:</strong> ${attList.join(", ")}<br>`);
     }
-    $("send-confirm-details").innerHTML = details;
+    setHtml($("send-confirm-details"), details);
 
     state.sendOutcome = null;
     $("send-confirm-input").value = "";
@@ -1418,7 +1392,7 @@ function startSend() {
 
 // The "startSendJob" effect: start the send for request `id`.
 async function startSendJob(id) {
-    $("send-log").innerHTML = "";
+    clear("send-log");
     $("send-progress-text").textContent = "Sending...";
     $("send-progress-bar").value = 0;
     window.addEventListener("beforeunload", beforeUnloadWarn);
@@ -1481,32 +1455,26 @@ async function fetchResults(jobId) {
 function showResults(data) {
     window.removeEventListener("beforeunload", beforeUnloadWarn);
     const summary = data.summary || {};
-    let html = `<h4>Results</h4>`;
+    const parts = [html`<h4>Results</h4>`];
     if (data.status === "stopped") {
-        html += `<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`;
+        parts.push(html`<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`);
     } else if (data.status === "failed") {
-        html += `<div class="callout callout-danger">Sending failed: ${escapeHtml(data.error || "unknown error")}. Recipients not listed below were not sent an email.</div>`;
+        parts.push(html`<div class="callout callout-danger">Sending failed: ${data.error || "unknown error"}. Recipients not listed below were not sent an email.</div>`);
     }
-    html += `<p><strong>Total:</strong> ${summary.total || 0} | `;
-    html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
-    html += `<span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`;
+    parts.push(html`<p><strong>Total:</strong> ${summary.total || 0} | <span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | <span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`);
 
     if (state.sendResults.length > 0) {
-        html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>`;
-        for (const r of state.sendResults) {
-            const cls = r.success ? "success" : "failure";
-            html += `<tr class="${cls}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${escapeHtml(r.error || "")}</td></tr>`;
-        }
-        html += `</tbody></table>`;
+        const rows = state.sendResults.map(r => html`<tr class="${r.success ? "success" : "failure"}"><td>${r.email}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${r.error || ""}</td></tr>`);
+        parts.push(html`<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table>`);
     }
 
-    $("send-result").innerHTML = html;
+    setHtml($("send-result"), parts);
 }
 
 // The "showSendError" effect.
 function showSendError(message) {
     window.removeEventListener("beforeunload", beforeUnloadWarn);
-    $("send-result").innerHTML = `<div class="callout callout-danger">${escapeHtml(message)}</div>`;
+    setHtml($("send-result"), html`<div class="callout callout-danger">${message}</div>`);
 }
 
 function sanitizeCsvValue(val) {
@@ -1524,20 +1492,16 @@ function downloadCsv() {
 // The "showInterrupted" effect: what each unfinished send had sent.
 // Addresses come from the spreadsheet, so they are escaped.
 function showInterrupted() {
-    let html = "";
+    const parts = [];
     for (const send of state.interrupted) {
         const sent = send.results.filter(r => r.success).length;
-        html += `<p><strong>The app closed while sending</strong> (started ${escapeHtml(send.started || "at an unknown time")}). `;
-        html += `${sent} email${sent === 1 ? " was" : "s were"} recorded as sent. Recipients not listed were not sent an email, except perhaps the one being sent when the app stopped.</p>`;
+        parts.push(html`<p><strong>The app closed while sending</strong> (started ${send.started || "at an unknown time"}). ${sent} email${sent === 1 ? " was" : "s were"} recorded as sent. Recipients not listed were not sent an email, except perhaps the one being sent when the app stopped.</p>`);
         if (send.results.length > 0) {
-            html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th></tr></thead><tbody>`;
-            for (const r of send.results) {
-                html += `<tr class="${r.success ? "success" : "failure"}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : `Failed: ${escapeHtml(r.error || "")}`}</td></tr>`;
-            }
-            html += `</tbody></table>`;
+            const rows = send.results.map(r => html`<tr class="${r.success ? "success" : "failure"}"><td>${r.email}</td><td>${r.success ? "Sent" : `Failed: ${r.error || ""}`}</td></tr>`);
+            parts.push(html`<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`);
         }
     }
-    $("interrupted-send-details").innerHTML = html;
+    setHtml($("interrupted-send-details"), parts);
 }
 
 function downloadInterruptedCsv() {
@@ -1581,8 +1545,8 @@ function clearForm() {
     // Clear Step 2 — compose fields
     $("subject-input").value = "";
     $("body-input").value = "";
-    $("email-column").innerHTML = '<option value="">-- select --</option>';
-    $("name-column").innerHTML = '<option value="">-- none --</option>';
+    setHtml($("email-column"), html`<option value="">-- select --</option>`);
+    setHtml($("name-column"), html`<option value="">-- none --</option>`);
     $("html-toggle").checked = false;
     $("source-toggle").checked = false;
     if (state.trixEditor) {
@@ -1614,24 +1578,24 @@ function clearForm() {
     $("preview-body").textContent = "";
     hide("preview-body-html");
     hide("invalid-email-warning");
-    document.querySelector("#recipients-table thead").innerHTML = "";
-    document.querySelector("#recipients-table tbody").innerHTML = "";
+    clear(document.querySelector("#recipients-table thead"));
+    clear(document.querySelector("#recipients-table tbody"));
 
     // Clear Step 4 (Test)
     $("test-email-input").value = "";
-    $("test-log").innerHTML = "";
+    clear("test-log");
     hide("test-log");
-    $("test-result").innerHTML = "";
+    clear("test-result");
 
     // Clear Step 5 (Verify)
-    $("verify-log").innerHTML = "";
+    clear("verify-log");
     hide("verify-log");
-    $("verify-result").innerHTML = "";
+    clear("verify-result");
 
     // Clear Step 6 (Send)
     $("send-confirm-input").value = "";
-    $("send-log").innerHTML = "";
-    $("send-result").innerHTML = "";
+    clear("send-log");
+    clear("send-result");
     $("send-progress-bar").value = 0;
 
     // Clear localStorage
@@ -1806,8 +1770,33 @@ function categoriseError(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Expose functions called from HTML onclick attributes
+// Buttons. The template names what each does in a data-action attribute,
+// written as a call: data-action="goToStep(2)". No inline onclick handlers:
+// the page's Content Security Policy forbids inline script, so that injected
+// markup can't run any either. Only the functions listed here can be called,
+// with at most one number or quoted-string argument.
 // ---------------------------------------------------------------------------
+const CLICK_ACTIONS = {
+    goToStep, setSendMode, confirmGoBack, changePreviewRecipient, sendTestEmail,
+    startSend, stopSend, downloadCsv, newMerge, dismissInterrupted, downloadInterruptedCsv,
+    reloadPage: () => window.location.reload(),
+};
+
+function runDataAction(text) {
+    const m = /^(\w+)\((?:'([^']*)'|(-?\d+))?\)$/.exec(text);
+    const action = m && Object.hasOwn(CLICK_ACTIONS, m[1]) ? CLICK_ACTIONS[m[1]] : null;
+    if (!action) throw new Error(`Unknown data-action: ${text}`);
+    if (m[2] !== undefined) return action(m[2]);
+    if (m[3] !== undefined) return action(Number(m[3]));
+    return action();
+}
+
+document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-action]");
+    if (el && !el.disabled) runDataAction(el.dataset.action);
+});
+
+// Also on window, for the browser tests and the console.
 window.goToStep = goToStep;
 window.setSendMode = setSendMode;
 window.confirmGoBack = confirmGoBack;
