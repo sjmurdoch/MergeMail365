@@ -103,7 +103,8 @@ class JobStore:
 
     def __init__(self) -> None:
         self.jobs: dict[str, Job] = {}
-        self.lock = threading.Lock()
+        # Re-entrant: create() holds it while asking running_send().
+        self.lock = threading.RLock()
         self.created = 0
         # The latest send job, kept after eviction for abstract().
         self.last_send: Job | None = None
@@ -129,10 +130,13 @@ class JobStore:
         Checked across sessions: a page whose start-job response never
         arrived has no job id in its session cookie (runningSendVisible).
         """
-        for job in self.jobs.values():
-            if job.mode == "send" and job.status not in FINISHED_STATUSES:
-                return job
-        return None
+        # Under the lock: create() adds and evicts jobs from another request's
+        # thread, and a dict must not change size while it is iterated.
+        with self.lock:
+            for job in self.jobs.values():
+                if job.mode == "send" and job.status not in FINISHED_STATUSES:
+                    return job
+            return None
 
     def create(self, mode: str) -> Job | None:
         """A new job, or None if `mode` is "send" and a send is running
@@ -185,8 +189,12 @@ class JobStore:
         return job.id if job and job.mode == "send" else None
 
     def run(self, job: Job, kwargs: dict[str, Any],
-            runner: Callable[..., list[SendResult]] | None = None) -> None:
-        """Run the job to the end in this thread (finishSend, completeJob)."""
+            runner: Callable[..., list[SendResult]] | None = None,
+            on_finish: Callable[[], None] | None = None) -> None:
+        """Run the job to the end in this thread (finishSend, completeJob).
+
+        `on_finish` is called once the job has ended, however it ended (to
+        delete the attachment files saved for it)."""
         job.status = JobStatus.RUNNING
         logger.debug("Job %s started (mode=%r)", job.id, job.mode)
         handler = JobLogHandler(job)
@@ -228,12 +236,19 @@ class JobStore:
             if send_log is not None:
                 send_log.finish(job.id)
             mm_logger.removeHandler(handler)
+            if on_finish is not None:
+                try:
+                    on_finish()
+                except Exception:
+                    logger.debug("Job %s: clean-up failed", job.id, exc_info=True)
             job.events.put(None)  # Sentinel
 
-    def start(self, job: Job, kwargs: dict[str, Any]) -> threading.Thread:
+    def start(self, job: Job, kwargs: dict[str, Any],
+              on_finish: Callable[[], None] | None = None) -> threading.Thread:
         """Run the job in a daemon thread named after it."""
         thread = threading.Thread(
-            target=self.run, args=(job, kwargs), name=f"job-{job.id[:8]}", daemon=True,
+            target=self.run, args=(job, kwargs), kwargs={"on_finish": on_finish},
+            name=f"job-{job.id[:8]}", daemon=True,
         )
         thread.start()
         return thread

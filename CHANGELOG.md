@@ -10,6 +10,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - The log file also no longer records the web UI's access token, the sign-in redirect's authorisation code, or the rendered body of each email in a dry run (a dry run at `--log-level DEBUG` still shows the bodies in the terminal).
 - Web UI: the sign-in route (`/auth/login`) now requires the app's access token like every other page. Before, any web page open in your browser could send it to `http://localhost:5050/auth/login` with an app registration of its choosing and start a Microsoft sign-in for it, and the choice replaced a client ID fixed with `--client-id`. A fixed client or tenant ID can no longer be overridden by a request.
 - Web UI: the page now has a Content Security Policy that only allows the app's own scripts to run, as a second line of defence if text from a spreadsheet or a server response were ever shown without escaping. All text placed on the page now goes through one escaping function. This also fixes the "Test connection" panel, which showed its diagnostic details (including the tenant ID and error text) without escaping them, and column names containing a double quote, which could not be selected as the email or name column.
+- `mergemail365-web --host` with an address other computers can reach (`0.0.0.0`, a LAN address or name) is refused unless `--allow-remote` is also given, and then starts with a warning: the connection is plain HTTP, and anyone who learns the access URL can send email as the signed-in account.
 - Log files and the folder they are in are now readable by you only, as is the token cache from the moment it is written (it used to be created readable by others and restricted a moment later). Existing log files are restricted when the app next starts.
 
 ### Fixed
@@ -18,6 +19,9 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Web UI: signing in after opening the app at `127.0.0.1` (rather than `localhost`) ended on a "Forbidden" page, although the sign-in itself had worked. It now returns to the app.
 - Web UI: a sign-in that can't start (no network, a mistyped tenant ID) shows the reason on the page instead of an "Internal Server Error" page.
 - Web UI: a spreadsheet with many columns or long column headings (a survey export, for example) could make the app forget the upload, answering "No spreadsheet uploaded" or "Forbidden" at the next step. The session's data was kept in a browser cookie, which browsers discard once it passes about 4 KB; it is now kept in the app, and the cookie is only an identifier.
+- Web UI: attachments are deleted from the temporary folder when the job that used them ends. A copy used to be kept for every test email, dry run and send until the next upload or until the app closed.
+- Web UI: an upload over 64 MB is refused with a message instead of being written to disk first.
+- `mergemail365-web`: the search for a free port now checks the address the server will listen on, not always `127.0.0.1`.
 - Signing in no longer changes the permissions of your home directory. On macOS and Linux, saving the token cache set the home directory to mode 0700 each time, which could stop other accounts and services (file sharing, a web server's user directories) from reaching files you had shared.
 - A token cache file that is damaged (for example by a crash while it was being written) no longer blocks sign-in: it is ignored with a warning and replaced the next time you sign in. The cache is now written atomically, so a crash can't truncate it.
 

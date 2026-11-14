@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 MAX_WEB_RECIPIENTS = 99
 WEB_SEND_DELAY = 2.0
+# The largest request accepted: a spreadsheet (50 MB limit in excel.py), or
+# a job's body and attachments (Graph takes about 4 MB a message).
+MAX_REQUEST_BYTES = 64 * 1024 * 1024
 
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z][^>]*>")
 _BLOCK_OR_BR_RE = re.compile(
@@ -324,6 +327,7 @@ def create_app(
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
+    app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     app.config["STARTUP_TOKEN"] = startup_token
     app.config["PORT"] = port
     app.config["FIXED_CLIENT_ID"] = client_id
@@ -407,6 +411,18 @@ def create_app(
         if request.endpoint != "static":
             response.headers.setdefault("Cache-Control", "no-store")
         return response
+
+    @app.errorhandler(413)
+    def _too_large(_exc: Exception) -> Any:
+        # JSON, like every other answer the page's fetch() calls expect.
+        limit_mb = MAX_REQUEST_BYTES // (1024 * 1024)
+        return jsonify({"error": f"Upload too large (the limit is {limit_mb} MB)"}), 413
+
+    def _json_object() -> dict[str, Any] | None:
+        """The request's JSON body if it is an object, else None (never an
+        exception: a malformed body is the caller's mistake, a 400)."""
+        data = request.get_json(silent=True)
+        return data if isinstance(data, dict) else None
 
     # ----- CSRF protection -----
 
@@ -566,7 +582,7 @@ def create_app(
         if not app.config["DESKTOP_MODE"]:
             return jsonify({"error": "Interactive auth is only available in desktop mode"}), 400  # type: ignore[return-value]
 
-        data = request.get_json() or {}
+        data = _json_object() or {}
         fallback_cid, fallback_tid = _get_client_tenant()
         cid = app.config["FIXED_CLIENT_ID"] or data.get("client_id") or fallback_cid
         tid = app.config["FIXED_TENANT_ID"] or data.get("tenant_id") or fallback_tid
@@ -649,7 +665,9 @@ def create_app(
 
     @app.route("/api/state", methods=["POST"])
     def api_save_state() -> Response:
-        data = request.get_json()
+        data = _json_object()
+        if data is None:
+            return jsonify({"error": "Expected a JSON object"}), 400  # type: ignore[return-value]
         if "current_step" in data:
             session["current_step"] = data["current_step"]
         if "test_passed" in data:
@@ -731,8 +749,12 @@ def create_app(
         if not filepath or not os.path.exists(filepath):
             return jsonify({"error": "No spreadsheet uploaded"}), 400  # type: ignore[return-value]
 
-        data = request.get_json()
-        sheet_name = data.get("sheet") if data else None
+        data = _json_object()
+        if data is None:
+            return jsonify({"error": "Expected a JSON object"}), 400  # type: ignore[return-value]
+        sheet_name = data.get("sheet")
+        if sheet_name is not None and not isinstance(sheet_name, str):
+            return jsonify({"error": "sheet must be a string"}), 400  # type: ignore[return-value]
 
         from mail_merge.excel import read_preview
 
@@ -804,7 +826,7 @@ def create_app(
 
     @app.route("/api/preview-template", methods=["POST"])
     def api_preview_template() -> Response:
-        data = request.get_json()
+        data = _json_object()
         if not data:
             return jsonify({"error": "No data provided"}), 400  # type: ignore[return-value]
 
@@ -917,7 +939,14 @@ def create_app(
             kwargs["bcc_blast"] = True
             kwargs["bcc_blast_to"] = data.get("bcc_blast_to", "")
 
-        # Handle attachments
+        # Handle attachments. Each job gets its own copies (the page sends
+        # them again with every job), deleted when the job ends.
+        att_dirs: list[str] = []
+
+        def _remove_attachments() -> None:
+            for d in att_dirs:
+                shutil.rmtree(d, ignore_errors=True)
+
         attachments = [a for a in request.files.getlist("attachments") if a.filename]
         att_names: list[str] = []
         for att in attachments:
@@ -938,10 +967,12 @@ def create_app(
             att_paths: list[str] = []
             for att, name in zip(attachments, att_names):
                 att_dir = tempfile.mkdtemp(dir=tmp_dir)
+                att_dirs.append(att_dir)
                 att_path = os.path.join(att_dir, name)
                 # On Windows a drive-relative name ("C:x.txt") makes join
                 # discard att_dir, so check where the path actually lands.
                 if os.path.dirname(os.path.abspath(att_path)) != os.path.abspath(att_dir):
+                    _remove_attachments()
                     return jsonify({"error": f"Invalid attachment filename: {att.filename!r}"}), 400  # type: ignore[return-value]
                 att.save(att_path)
                 att_paths.append(att_path)
@@ -959,6 +990,7 @@ def create_app(
         # Token provider for authenticated modes
         if mode in ("test_email", "send"):
             if not client_id:
+                _remove_attachments()
                 return jsonify({"error": "client_id is required for sending"}), 400  # type: ignore[return-value]
 
             # Silent only: a job has nobody to answer a sign-in prompt, so
@@ -975,10 +1007,11 @@ def create_app(
         # Checked again here: two requests can pass the early check.
         job = _job_store.create(mode)
         if job is None:
+            _remove_attachments()
             return jsonify({"error": "A send is already in progress"}), 409  # type: ignore[return-value]
         # The job's runner adds should_stop (checked before each email,
         # stopHonoured) and on_result (counts emails sent).
-        _job_store.start(job, kwargs)
+        _job_store.start(job, kwargs, on_finish=_remove_attachments)
 
         session["job_id"] = job.id
         return jsonify({"job_id": job.id})

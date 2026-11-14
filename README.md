@@ -164,6 +164,8 @@ The web interface provides a step-by-step wizard:
 - **Verify**: Run a full dry-run to ensure all data is valid.
 - **Send**: Monitor real-time progress as emails are delivered.
 
+> **Only on this computer**: the web interface listens on `localhost`, so only you can reach it. `--host` with an address other computers can reach is refused unless you add `--allow-remote`; the connection is not encrypted, and anyone who learns the access URL could send email as the signed-in account, so don't do this on a network you don't control.
+
 > **Note on Authentication**: The web interface uses `localhost` for authentication redirects. If you open the app at `127.0.0.1` instead, signing in moves you to `localhost`: the app keeps your uploaded spreadsheet, and the page starts again at step 1.
 
 ## Development & Testing

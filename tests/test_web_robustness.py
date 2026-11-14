@@ -133,3 +133,211 @@ def test_template_tags_balanced():
     assert checker.errors == [], (
         "Unbalanced tags in index.html:\n  " + "\n  ".join(checker.errors)
     )
+
+
+# ---- docs/review-fixes-plan.md, B5: robustness seen during the review ----
+
+
+@pytest.fixture
+def signed_in(client):
+    client.get("/?token=test")
+    return client, {"X-CSRF-Token": get_csrf(client)}
+
+
+@pytest.fixture
+def small_xlsx(tmp_path: Path) -> Path:
+    import openpyxl
+
+    path = tmp_path / "people.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["email", "name"])
+    ws.append(["alice@example.com", "Alice"])
+    wb.save(path)
+    return path
+
+
+def upload(client, headers, xlsx: Path) -> None:
+    with xlsx.open("rb") as f:
+        assert client.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "people.xlsx")},
+                           headers=headers).status_code == 200
+
+
+def wait_done(client, job_id: str) -> dict:
+    import time
+
+    deadline = time.monotonic() + 15
+    while True:
+        status = client.get(f"/api/job/{job_id}/status").get_json()
+        if status["status"] not in ("pending", "running"):
+            return status
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+
+
+@pytest.mark.parametrize(("route", "kwargs"), [
+    ("/api/state", {"data": "not json", "content_type": "application/json"}),
+    ("/api/state", {"data": "[1, 2]", "content_type": "application/json"}),
+    ("/api/state", {"data": "null", "content_type": "application/json"}),
+    ("/api/state", {"data": "current_step=2"}),
+    ("/api/change-sheet", {"data": "{", "content_type": "application/json"}),
+    ("/api/change-sheet", {"data": '"Sheet1"', "content_type": "application/json"}),
+    ("/api/change-sheet", {"data": '{"sheet": 5}', "content_type": "application/json"}),
+    ("/api/preview-template", {"data": "<xml/>", "content_type": "text/xml"}),
+    ("/api/preview-template", {"data": "[]", "content_type": "application/json"}),
+])
+def test_malformed_json_is_a_400_with_a_json_error(signed_in, small_xlsx, route, kwargs):
+    """Not a 500, and not werkzeug's HTML error page: the page's fetch()
+    callers read every answer as JSON."""
+    client, headers = signed_in
+    upload(client, headers, small_xlsx)
+    resp = client.post(route, headers=headers, **kwargs)
+    assert resp.status_code == 400, resp.get_data(as_text=True)
+    assert resp.get_json()["error"]
+
+
+def test_interactive_sign_in_tolerates_a_missing_body():
+    from unittest.mock import patch
+
+    app = create_app(startup_token="test", desktop_mode=True, client_id="cid")
+    client = app.test_client()
+    client.get("/?token=test")
+    with patch("mail_merge.auth.acquire_token_interactive_flow", return_value="tok"):
+        resp = client.post("/auth/interactive", headers={"X-CSRF-Token": get_csrf(client)})
+    assert resp.status_code == 200
+
+
+def test_oversized_request_is_refused_with_a_json_error(signed_in, monkeypatch):
+    import io
+
+    client, headers = signed_in
+    client.application.config["MAX_CONTENT_LENGTH"] = 1024
+    resp = client.post("/api/upload-spreadsheet", headers=headers,
+                       data={"spreadsheet": (io.BytesIO(b"x" * 4096), "big.xlsx")})
+    assert resp.status_code == 413
+    assert "too large" in resp.get_json()["error"]
+
+
+def test_request_size_limit_is_set_and_admits_the_largest_spreadsheet():
+    from mail_merge.excel import _MAX_SPREADSHEET_SIZE
+    from mail_merge.web.app import MAX_REQUEST_BYTES
+
+    app = create_app(startup_token="test")
+    assert app.config["MAX_CONTENT_LENGTH"] == MAX_REQUEST_BYTES
+    assert MAX_REQUEST_BYTES > _MAX_SPREADSHEET_SIZE
+
+
+class TestAttachmentCleanup:
+    """Each job gets its own copy of the attachments; they used to pile up
+    in the session's temp directory until the next upload or exit."""
+
+    def _start(self, client, headers, mode="dry_run"):
+        import io
+
+        return client.post("/api/start-job", headers=headers, data={
+            "mode": mode, "email_column": "email", "subject": "Hi", "body": "Hello",
+            "attachments": [(io.BytesIO(b"one"), "a.txt"), (io.BytesIO(b"two"), "b.txt")],
+        })
+
+    def _leftovers(self, client) -> list[str]:
+        import os
+
+        with client.session_transaction() as sess:
+            tmp_dir = sess["spreadsheet_tmp_dir"]
+        return sorted(n for n in os.listdir(tmp_dir) if n != "upload.xlsx")
+
+    def test_attachments_exist_during_the_job_and_are_deleted_after(self, signed_in, small_xlsx, monkeypatch):
+        client, headers = signed_in
+        upload(client, headers, small_xlsx)
+        seen = {}
+
+        def fake_send_merge(**kwargs):
+            seen["contents"] = sorted(Path(p).read_bytes() for p in kwargs["attachment"])
+            return []
+
+        monkeypatch.setattr("mail_merge.api.send_merge", fake_send_merge)
+        for _ in range(3):
+            job_id = self._start(client, headers).get_json()["job_id"]
+            client.get(f"/api/job/{job_id}/events").get_data()  # until the job's last event
+            assert wait_done(client, job_id)["ok"]
+        assert seen["contents"] == [b"one", b"two"]
+        assert self._leftovers(client) == []
+
+    def test_deleted_when_the_job_fails(self, signed_in, small_xlsx, monkeypatch):
+        client, headers = signed_in
+        upload(client, headers, small_xlsx)
+
+        def failing(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("mail_merge.api.send_merge", failing)
+        job_id = self._start(client, headers).get_json()["job_id"]
+        client.get(f"/api/job/{job_id}/events").get_data()
+        assert wait_done(client, job_id)["status"] == "failed"
+        assert self._leftovers(client) == []
+
+    def test_deleted_when_the_job_is_refused(self, signed_in, small_xlsx, monkeypatch):
+        """A send while another runs is answered 409: its files must go too."""
+        import threading
+
+        from mail_merge.web.app import _job_store
+
+        client, headers = signed_in
+        client.application.config["FIXED_CLIENT_ID"] = "cid"
+        upload(client, headers, small_xlsx)
+        release = threading.Event()
+
+        def held(**kwargs):
+            release.wait(10)
+            return []
+
+        monkeypatch.setattr("mail_merge.api.send_merge", held)
+        first = self._start(client, headers, mode="send")
+        assert first.status_code == 200
+        try:
+            # Past the early check, so the refusal comes from JobStore.create().
+            monkeypatch.setattr("mail_merge.web.app._running_send_job", lambda: None)
+            second = self._start(client, headers, mode="send")
+            assert second.status_code == 409
+            assert len(self._leftovers(client)) == 2, "only the running send's two files should remain"
+        finally:
+            release.set()
+        client.get(f"/api/job/{first.get_json()['job_id']}/events").get_data()
+        assert self._leftovers(client) == []
+        assert _job_store.running_send() is None
+
+
+def test_running_send_lookup_survives_jobs_being_created_meanwhile():
+    """running_send() iterates the job table while other requests add and
+    evict jobs; without the lock that is "dictionary changed size during
+    iteration" now and then."""
+    import threading
+
+    from mail_merge.web.jobs import JobStatus, JobStore
+
+    store = JobStore()
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def churn() -> None:
+        while not stop.is_set():
+            job = store.create("dry_run")
+            assert job is not None
+            job.status = JobStatus.COMPLETED
+
+    def look() -> None:
+        try:
+            for _ in range(20000):
+                store.running_send()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=churn) for _ in range(2)] + [threading.Thread(target=look) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads[2:]:
+        t.join(30)
+    stop.set()
+    for t in threads[:2]:
+        t.join(5)
+    assert not errors, errors
