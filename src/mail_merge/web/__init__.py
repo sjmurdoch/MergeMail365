@@ -1,6 +1,7 @@
 """Web interface for MergeMail365."""
 
 import argparse
+import ipaddress
 import logging
 import secrets
 import socket
@@ -11,16 +12,35 @@ import webbrowser
 from mail_merge.console import setup_logging
 
 
-def _find_open_port(start: int = 5050, end: int = 5099) -> int:
-    """Find an available port in the given range."""
+def _find_open_port(start: int = 5050, end: int = 5099, host: str = "127.0.0.1") -> int:
+    """Find a port in the range that is free on `host`, the address the
+    server will listen on (a port free on 127.0.0.1 may be taken on another
+    interface, and the reverse)."""
     for port in range(start, end + 1):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            family, kind, proto, _name, address = socket.getaddrinfo(
+                host or None, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE,
+            )[0]
+        except socket.gaierror as exc:
+            raise RuntimeError(f"Cannot listen on host {host!r}: {exc}") from exc
+        with socket.socket(family, kind, proto) as s:
             try:
-                s.bind(("127.0.0.1", port))
+                s.bind(address)
                 return port
             except OSError:
                 continue
     raise RuntimeError(f"No available port in range {start}-{end}")
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether `host` can only be reached from this computer."""
+    name = host.strip("[]").lower()
+    if name == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False  # another name, or a wildcard such as "" or 0.0.0.0
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -28,7 +48,8 @@ def main(argv: list[str] | None = None) -> None:
         prog="mergemail365-web",
         description="MergeMail365 web interface",
     )
-    parser.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
+    parser.add_argument("--host", default="localhost", help="Host to bind to (default: localhost). Anything but this computer's own loopback address also needs --allow-remote")
+    parser.add_argument("--allow-remote", action="store_true", help="Allow --host to be an address other computers can reach. The connection is not encrypted, and anyone who learns the access URL can send email as the signed-in account")
     parser.add_argument("--port", type=int, default=5050, help="Port to bind to (default: 5050)")
     parser.add_argument("--desktop", action="store_true", help="Open in a native desktop window (requires pywebview)")
     parser.add_argument("--client-id", default="", help="Azure AD client ID (pre-fills and locks the field in the UI)")
@@ -49,6 +70,20 @@ def main(argv: list[str] | None = None) -> None:
 
     desktop = args.desktop or is_bundled
 
+    if not _is_loopback(args.host):
+        if not args.allow_remote:
+            logger.error(
+                "--host %s would let other computers reach this app, which sends email as "
+                "whoever is signed in. Add --allow-remote if that is what you want.", args.host,
+            )
+            sys.exit(2)
+        logger.warning(
+            "⚠️  Listening on %s: other computers can reach this app. The connection is not "
+            "encrypted (plain HTTP), so the access URL and everything sent can be read on the "
+            "network, and anyone who has the URL can send email as the signed-in account. "
+            "Signing in with Microsoft only works in a browser on this computer.", args.host,
+        )
+
     if desktop:
         try:
             import webview
@@ -65,7 +100,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Both modes serve the app on a localhost port and open it at the same
     # token URL; only what opens that URL differs.
-    port = _find_open_port(args.port)
+    port = _find_open_port(args.port, host=args.host)
     if port != args.port:
         logger.info("Port %d in use, using %d instead", args.port, port)
 

@@ -2081,7 +2081,7 @@ def test_entry_point_keeps_send_logs_in_the_state_dir(monkeypatch, tmp_path):
 
     monkeypatch.setattr(_paths, "state_dir", lambda: tmp_path)
     monkeypatch.setattr("mail_merge.web.app.create_app", fake_create_app)
-    monkeypatch.setattr(web_pkg, "_find_open_port", lambda port: port)
+    monkeypatch.setattr(web_pkg, "_find_open_port", lambda port, host="127.0.0.1": port)
     with pytest.raises(SystemExit):
         web_pkg.main([])
     assert seen["send_log_dir"] == tmp_path / "sends"

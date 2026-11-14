@@ -36,7 +36,7 @@ def test_web_host_override():
         mock_app = mock_create.return_value
         with patch("mail_merge.web._find_open_port", return_value=5050):
             with patch("threading.Timer"):
-                main(["--host", "0.0.0.0"])
+                main(["--host", "0.0.0.0", "--allow-remote"])
                 
                 mock_app.run.assert_called_once()
                 args, kwargs = mock_app.run.call_args
@@ -220,5 +220,67 @@ def test_browser_mode_passes_bind_host_to_app():
     with patch("mail_merge.web.app.create_app") as mock_create, \
          patch("mail_merge.web._find_open_port", return_value=5050), \
          patch("threading.Timer"):
-        main(["--host", "myhost.lan"])
+        main(["--host", "myhost.lan", "--allow-remote"])
     assert mock_create.call_args.kwargs["host"] == "myhost.lan"
+
+
+class TestRemoteHosts:
+    """docs/review-fixes-plan.md, F12: a host other computers can reach has
+    to be asked for twice."""
+
+    @pytest.mark.parametrize("host", ["0.0.0.0", "::", "", "192.168.1.20", "my-laptop.local"])
+    def test_non_loopback_host_is_refused_without_allow_remote(self, host, caplog):
+        with patch("mail_merge.web.app.create_app") as mock_create, \
+             patch("mail_merge.web._find_open_port", return_value=5050), \
+             patch("threading.Timer"), \
+             pytest.raises(SystemExit) as exit_info:
+            main(["--host", host])
+        assert exit_info.value.code == 2
+        mock_create.assert_not_called()
+        assert any("--allow-remote" in r.getMessage() and r.levelname == "ERROR" for r in caplog.records)
+
+    def test_allow_remote_starts_with_a_warning(self, caplog):
+        with patch("mail_merge.web.app.create_app") as mock_create, \
+             patch("mail_merge.web._find_open_port", return_value=5050), \
+             patch("threading.Timer"):
+            main(["--host", "0.0.0.0", "--allow-remote"])
+        mock_create.return_value.run.assert_called_once()
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert "not encrypted" in warnings[0] and "0.0.0.0" in warnings[0]
+
+    @pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "::1", "[::1]", "LOCALHOST", "127.0.0.2"])
+    def test_loopback_hosts_need_no_flag_and_give_no_warning(self, host, caplog):
+        with patch("mail_merge.web.app.create_app") as mock_create, \
+             patch("mail_merge.web._find_open_port", return_value=5050), \
+             patch("threading.Timer"):
+            main(["--host", host])
+        mock_create.return_value.run.assert_called_once()
+        assert not [r for r in caplog.records if r.levelno >= 30]
+
+    def test_port_is_probed_on_the_host_that_will_be_served(self):
+        with patch("mail_merge.web.app.create_app"), \
+             patch("mail_merge.web._find_open_port", return_value=5050) as find, \
+             patch("threading.Timer"):
+            main(["--host", "127.0.0.1", "--port", "5051"])
+        find.assert_called_once_with(5051, host="127.0.0.1")
+
+
+def test_find_open_port_skips_a_port_taken_on_that_host():
+    import socket
+
+    from mail_merge.web import _find_open_port
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        port = taken.getsockname()[1]
+        found = _find_open_port(port, port + 20, host="127.0.0.1")
+        assert port < found <= port + 20
+
+
+def test_find_open_port_reports_an_unusable_host():
+    from mail_merge.web import _find_open_port
+
+    with pytest.raises(RuntimeError, match="Cannot listen on host"):
+        _find_open_port(5050, 5051, host="no-such-host.invalid")
