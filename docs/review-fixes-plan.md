@@ -1,6 +1,6 @@
 # Plan: fixes from the November 2026 review
 
-Written 2026-11-14 after a security, usability and correctness review of v0.6.0 (commit `ec3e8d3`). Finding numbers (F1–F16) are the ones used in the review. Progress is recorded in the Status section at the end.
+Written 2026-11-14 after a security, usability and correctness review of v0.6.0 (commit `ec3e8d3`). Finding numbers (F1–F16) are the ones used in the review. **If you are picking this work up, read [Handover](#handover-for-whoever-continues-this-work) first, then [Status](#status).** Parts 1 to 3 are the plan as first written; where the implementation differs, the notes in Status are what was built.
 
 ## How to read this plan
 
@@ -198,9 +198,133 @@ A can ship alone. B and C are independent of each other. D needs the outcome mat
 - `uv run pytest`, `uv run mypy`, Biome, Ruff, `quint test` and the conformance tiers pass; `spec/check.sh fixed` passes locally for the invariants in `check.sh`.
 - `CLAUDE.md`, `README.md`, the tutorial and the changelog describe the new behaviour.
 
+## Handover: for whoever continues this work
+
+Written 2026-11-15, at the end of phase C, for an agent (or person) with no memory of the earlier work.
+
+### Where things are
+
+- **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`; 15 commits, the last being this handover. Nothing is pushed. The working tree is clean. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers.
+- **Done:** phases A, B and C (findings F1–F4, F6–F8, F10–F14, part of F9; guards G1–G9; requirement R19).
+- **Remaining:** phase D (F5, the rest of F9), phase E (F15, F16), phase F (documents), and the loose ends listed below.
+- **Version and release:** the version is still 0.6.0 and nothing is tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. Bumping the version and releasing are the user's call; ask, don't do it.
+- **Last verified state** (commit `83cce54`): 1163 tests pass and 14 are skipped (Windows-only tests, on macOS); `mypy`, `ruff check .` and `biome lint` are clean; the Quint scenarios pass for `buggy`, `partial`, `round2` and `fixed`; Apalache reports `allInvariants` holds for `fixed` at 16 steps.
+
+### How the user wants this run
+
+- **Stop at each phase boundary.** Finish the phase to a tested commit, update the Status section of this file, summarise, and ask the user whether to continue. The user asked for this explicitly part-way through.
+- **One commit per step**, test first, full suite before each commit, descriptive message naming the finding (see the existing commits for the style). Don't push.
+- **Every user-visible change gets a `CHANGELOG.md` entry** under "Unreleased", written for users, and the matching `CLAUDE.md` text is updated in the same commit.
+- **Markdown paragraphs are not hard-wrapped** (one line per paragraph).
+- **Nothing newer than 7 days** may be added as a dependency, tool, action or vendored file (`CLAUDE.md`, "Supply-chain policy").
+- **CI minutes cost money:** thorough model checking runs locally, not in CI.
+
+### Running things here
+
+| What | Command | Notes |
+|---|---|---|
+| Restore the environment | `uv sync --locked --all-extras` | **Plain `uv run …` re-syncs the virtualenv without the `web` and `desktop` extras and uninstalls Flask**, after which six web test files fail at collection. If that happens, run this again. |
+| Tests | `.venv/bin/python -m pytest -q` | About 5½ minutes. Doesn't re-sync. |
+| Tests without a browser | add `--ignore=tests/test_web_e2e.py --ignore=tests/test_web_e2e_workflow.py --ignore=tests/test_web_e2e_injection.py --ignore=tests/test_conformance_e2e.py --ignore=tests/test_web_state.py` | About 2 minutes. |
+| Types, lint | `.venv/bin/python -m mypy`, `.venv/bin/ruff check .`, `biome lint` | `biome lint` with no arguments uses the file list in `biome.json`. |
+| Node tests only | `node --test tests/js/*.test.js` | Also run by `tests/test_wizard_core_js.py`. |
+| Quint scenarios | `for v in buggy partial round2 fixed; do spec/node_modules/.bin/quint test --main=$v --max-samples=1 --backend=typescript spec/wizard.qnt; done` | Seconds. |
+| Quint simulation | `spec/node_modules/.bin/quint run spec/wizard.qnt --main=conformance --init=cInit --step=cStep --backend=typescript --invariant=allInvariants --max-samples=3000 --max-steps=60` | Under a minute. |
+| Apalache | `PATH="/opt/homebrew/opt/openjdk/bin:$PATH" QUINT="$PWD/spec/node_modules/.bin/quint" spec/check.sh --all fixed` | About 2 hours according to `docs/quint-model.md` (the run in phase A was not timed); needs Java (the `/usr/bin/java` stub is not a JDK) and local port 8822. Only needed if `spec/wizard.qnt` changes. |
+
+In a sandboxed session: `uv` cannot open its cache, Chromium cannot start, and nothing can bind a local port. So the Playwright tests, `tests/test_log_secrets.py::test_server_access_log_hides_startup_token_and_auth_code` and Apalache must run outside the sandbox.
+
+### Guards that will stop you, and what each wants
+
+Phases A to C added tests that fail when something new is added without a decision. Expect these when doing D, E and F:
+
+| If you… | …this fails | Do this |
+|---|---|---|
+| add a Flask route | `TestRouteTable` (`tests/test_web.py`), `TestRouteAccess` and the inventory tests (`tests/test_spec_coverage.py`) | Add the route to `spec/coverage.toml` with `access = "session"` and its model actions or an `out_of_scope` reason. Only mark a view `@public` with a very good reason. |
+| add a button or listener | the inventory tests in `tests/test_spec_coverage.py` | Buttons use `data-action="name(arg)"`; add the function to `CLICK_ACTIONS` in `app.js` and the entry to `spec/coverage.toml`. No `onclick=` and no inline `<script>`: the Content Security Policy forbids them and `TestNoInlineScript` checks. |
+| write markup to the page | `TestHtmlSinks` | Build it with `` html`…` `` and `setHtml()` from `static/safe-html.js`, or use `textContent`. |
+| show a new server-supplied string in the page | nothing automatically | Add it to the walk in `tests/test_web_e2e_injection.py`. |
+| add a `send_merge()` parameter | `test_every_parameter_has_a_row_or_a_reason` (`tests/test_input_validation.py`) | Add a row to `INVALID` or an entry to `NO_VALIDATION`. |
+| add a job mode or a way Graph can answer | `tests/test_outcomes.py` | Add to `SENDING_MODES` or `ANSWERS`. |
+| make the app write a new file under the home directory | `tests/test_fs_footprint.py` | Create it with `write_private()`, `open_private_append()` or `private_dir()` (`_paths.py`) and add it to that test's allowlist. |
+| log something new | `tests/test_log_secrets.py`, Ruff `LOG`/`G` | Lazy `%`-style arguments; never headers, payloads, tokens or message bodies. Message content that must reach the terminal is logged with `extra={sender.CONSOLE_ONLY: True}`. |
+| change how placeholders or cell values are rendered | `tests/data/template_vectors.json` (run by `tests/test_template.py` and `tests/js/template.test.js`), `CELL_CASES` in `tests/test_excel.py` | Change `template.py` and `static/template-core.js` together and add a vector. |
+| change the model | `tests/test_spec_coverage.py`, `tests/test_conformance.py` | Follow "When you change the code" in `docs/quint-model.md`. A new environment choice needs an entry in `[assumptions]` in `spec/coverage.toml`. |
+| store anything in a cookie | the autouse `_cookies_stay_small` fixture in `tests/conftest.py` | Keep it in the server-side session (`web/sessions.py`). |
+
+### Remaining work, in detail
+
+#### D1. Resume must not skip rows that share an address (F5)
+
+The bug: resume is keyed on the address alone. If two rows have the same address (one person, two personalised emails) and a run is interrupted after the first, the second is never sent.
+
+- **Where:** `src/mail_merge/api.py`, the block under `# --- Resume and batch size (skip for test emails) ---` (builds `successful_emails`, a set, and filters `recipients` with it) and the block under `# --- Merge with previous results when resuming ---` (a dict keyed by lower-cased address, which also collapses duplicates in the final report).
+- **Change, skipping:** count the recorded successes per lower-cased address (`collections.Counter`). Walk the recipients in spreadsheet order; for each row, if the count for its address is above zero, decrement it and skip the row, otherwise keep it. So two successes skip the first two rows with that address and no more.
+- **Change, the final report:** one line per row attempted, never collapsed by address. A workable rule: keep every previous success, add this run's results, and keep a previous failure only if its row was not attempted again in this run (that happens with `--batch-size`, where later rows wait for the next run). Check the rule against the incremental CSV: with `--send`, the CSV is rewritten with the previous results before the first email, each result is appended as it arrives (`report.append_csv`), and it is rewritten at the end; an interrupted run must leave a file the next run reads correctly.
+- **Change, the CSV round trip:** `report._sanitize_csv()` puts a tab before a value starting with `=`, `+`, `@`, `-`, tab or carriage return, and `report.read_csv()` does not take it off, so an address such as `+tag@example.com` never matches on resume. In `read_csv`, strip one leading tab when the next character is one of those. The web page's `saveCsv()` in `app.js` writes the same guard but nothing reads its files back.
+- **Tests:** in `tests/test_api.py`, class `TestInterruptedSend` (line 1396 at the time of writing): add a duplicate-address case (three rows for one address, interrupted after one, resumed: exactly two more go out, and the report has three lines), the same with `--batch-size`, and the BCC-mode path (resume applies to it too). In `tests/test_report.py`: `read_csv(write_csv(x)) == x` for addresses and error texts starting with each guarded character.
+- **Not affected:** the web UI always passes `resume=False`.
+- **Docs:** the `--no-resume` bullet in `CLAUDE.md`, the resume section of `docs/tutorial.md`, the changelog.
+
+#### D2. Don't retry when the email may already have gone (the rest of F9, decision D5)
+
+`sender.send_one()` retries any `requests.RequestException` up to `max_retries` times. After a read timeout the request may have been accepted, so a retry can deliver the email twice; `sendMail` has no idempotency key.
+
+- **Change in `src/mail_merge/sender.py`:** catch `requests.ReadTimeout` before the general `requests.RequestException` clause (`ConnectTimeout` is both a `ConnectionError` and a `Timeout`, and must keep being retried: nothing was sent). On a read timeout, do not retry; return a result that is not a success and is marked as unknown, with an error such as "No answer from Microsoft: the email may or may not have been delivered. Check Sent Items before sending again." Keep retrying connection errors, 429 and 5xx, as decision D5 says.
+- **`SendResult`:** add a field, for example `unknown: bool = False` (`success` stays `False`). Everything that copies or serialises a result needs it: `send_bcc_blast()` (copies the batch's result to each recipient), `report.summarize()` and `print_summary()` (a third count, "Outcome unknown"), `report._row()`/`write_csv()`/`read_csv()` (a new CSV column; read old files, which lack it, with `row.get`), `/api/job/<id>/status` in `web/app.py`, `web/sendlog.py` (`record()` and `interrupted()`), and in `app.js` `showResults()`, `showInterrupted()` and `saveCsv()` (show "Unknown: may have been delivered", not "Failed").
+- **Ask the user first:** what resume should do with a row recorded as unknown. Re-sending it automatically risks the duplicate this change exists to prevent; skipping it silently risks a missed email. Recommended: skip it on resume, with a warning naming the address and saying how to force a retry (remove its line from the CSV). The test email path should say "may have been delivered" in the `SendAborted` it raises.
+- **Tests:** `tests/test_outcomes.py` already has a "read timeout" answer expected to report failure; keep that and add assertions that exactly one request was made and that the result is marked unknown in each interface. Check `tests/test_sender.py` (`TestNetworkErrors`) for tests that assume a timeout is retried. Add a row to `ANSWERS` for a connect timeout that then succeeds.
+- **Model:** not affected. `finishSend(failed)` and `completeJob` do not distinguish kinds of failure, and `Job.ok` is already false for any result that is not a success.
+
+#### E1. The command line says which account it sends from (F15)
+
+- **Now:** `auth.acquire_token()` and `acquire_token_interactive_flow()` use `accounts[0]` from the token cache and log "Found cached account" without naming it. The confirmation prompt in `send_merge()` has no From line. Nothing on the command line signs out; `auth.sign_out()` exists but only the web UI calls it.
+- **Change:** log `Sending as <username>` at INFO once the token is acquired. Add a From line to the confirmation prompt. Note the order in `send_merge()`: the prompt comes before authentication, so either read the account from the cache without the network (constructing `msal.PublicClientApplication` does instance discovery over HTTP, which the test suite's `_no_external_http` fixture will refuse; `msal.SerializableTokenCache` can be searched directly), showing "you will be asked to sign in" when there is none, or move authentication before the prompt and update the orchestration order in `CLAUDE.md`. If the cache holds more than one account, warn and name the one used.
+- **`--sign-out`:** `cli.parse_args()` marks `--spreadsheet`, `--body`, `--subject` and `--email-column` as required, so handle `--sign-out` before they are demanded. It needs a client ID (flag, environment, config file) to call `auth.sign_out()`.
+- **Tests:** `tests/test_msal_contract.py` has the fixtures for real msal against mocked Entra endpoints (`entra`, `_token_response`); `tests/test_cli.py` for the prompt and the flag. The prompt's From line must go through `rich.markup.escape` like the other lines.
+
+#### E2. Accept `.XLSX` (F16)
+
+`web/app.py`, `api_upload_spreadsheet`: `file.filename.endswith(".xlsx")` is case-sensitive. Compare lower-cased. Test in `tests/test_web.py`.
+
+#### E3. Explain a failed test email from its status code, not by searching the text for digits (F16)
+
+`categoriseError()` in `app.js` matches `/400|Bad Request/`, `/5\d\d/` and so on against the whole error text, so a request ID or an address containing those digits gets the wrong advice. Since A1, a rejected test email reaches the page with its results (`SendAborted` carries them, and `/api/job/<id>/status` returns each result's `status_code`), so choose the advice from the failed result's `status_code` (401/403, 400, 429, 5xx, none for a network failure) and show the error text unchanged when there is no result (for example "Not signed in…" or a validation message). Put the function in `wizard-core.js` so it has Node tests. `TestRejectedTestEmail` in `tests/test_web_e2e_workflow.py` expects "Permission denied" for a 403; `test_failed_test_email_offers_sign_in` expects the "Not signed in" text to be shown as it is.
+
+#### E4. Logging options (F16)
+
+`--log-level` in `cli.py` and `web/__init__.py` silently treats an unknown level as INFO: use `choices`. Add `-v`/`--verbose` for DEBUG. The user's standing preference is that a setting is available on the command line, as an environment variable and in the TOML config alike, so also read `MERGEMAIL365_LOG_LEVEL` and a `log-level` key (`config.py` only returns `client_id` and `tenant_id` today). In `cli.main()`, the final `except Exception` logs "Unexpected error" with no traceback: add the traceback at DEBUG (`exc_info=True`).
+
+#### E5. Hidden rows (F16)
+
+Rows hidden or filtered out in Excel are still read and sent to; openpyxl's read-only mode cannot see row visibility. Document it in `README.md` and `docs/tutorial.md` (the web UI's preview shows every row that will be sent). No code.
+
+#### F. Documents
+
+- `docs/tutorial.md` has not been touched by any phase. It needs: the new placeholder rules and the HTML escaping (C1, C2), how dates and numbers appear (C3), address lists and semicolons (C4), `--allow-remote` (B4), what the log file does and doesn't contain (A2), and whatever D and E change.
+- `README.md`: the options listing near line 106 is a copy of `mergemail365 --help`; regenerate it after E1 and E4.
+- `docs/web-ui-plan.md` has a security assessment that predates the Content Security Policy, server-side sessions and route protection.
+- `TODO.md`: add what is left open (below).
+- When everything is done, this plan moves to `archive/` like the earlier ones, with its Status section final.
+
+### Loose ends and things not verified
+
+- **Not run on Windows or Linux.** CI has not run on this branch. The permission tests are skipped on Windows; `os.fchmod` and the `chmod` calls are guarded by platform checks, but that is untested there.
+- **Guards checked against their bug:** `tests/test_outcomes.py` (fails without the `api.py` change), `tests/test_fs_footprint.py` (fails with the old `_save_cache`), the cookie guard and `tests/test_web_sessions.py` (fail with Flask's cookie session), the injection walk (its second test breaks the escaping), and the conformance mutants. **Not checked that way:** `test_running_send_lookup_survives_jobs_being_created_meanwhile` (may pass without the lock; the race is rare), `TestRouteTable` against a deliberately unprotected route, and `tests/test_log_secrets.py` against the original `sender.py` (the leak was confirmed by hand during the review; the test file did fail on the two leaks it found while being written).
+- **Apalache** was run as `--all fixed` (one result for all invariants), not invariant by invariant, and for `round2` only at 12 steps for three invariants.
+- **Browser conformance has no mutant for `jobSucceeded`.** The client and server tiers have one each; the page is covered by `TestRejectedTestEmail` instead, because the few random browser traces would not reliably include a rejected test email.
+- **The 4 MB figure.** `_check_message_size()` and the older per-attachment check assume Microsoft Graph accepts about 4 MB per `sendMail` request. That is not stated in the copies of the documentation in `docs/`; verify it against Microsoft's documentation before relying on the exact limit.
+- **Review findings not in this plan** (minor, left as they are): recipients' addresses are validated before filters are applied, so rows a filter would exclude can still produce "invalid address" warnings; a spreadsheet with two columns of the same name uses the last one's values; two `mergemail365-web` processes running at once each treat the other's running send log as interrupted; the token cache is a plain file rather than the system keychain.
+
+### Questions waiting for the user
+
+1. **`batch_size=0`.** It used to mean "send nothing this time" and an existing test said so; it is now an error, as the accepted plan specified (`batch_size >= 1`). The user was told and has not yet answered whether 0 should stay a no-op.
+2. **Resume and "outcome unknown"** (before starting D2): skip such rows with a warning, or re-send them? See D2.
+3. **Releasing.** Whether phase A should go out on its own as 0.6.1 (it would have to be cherry-picked, since later commits change behaviour) or everything together as 0.7.0.
+
 ## Status
 
-Updated 2026-11-15. Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
+Updated 2026-11-15 (end of phase C; last commit `83cce54` plus the handover notes). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
 **Where things stand:** phases A, B and C are complete. Phases D, E and F have not been started. Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
@@ -235,3 +359,5 @@ Updated 2026-11-15. Work is on the `review-fixes` branch, one commit per step. A
 | C5 (F9 part, G5) | Done | `_check_options()`, `_check_message_size()`, argparse types, `tests/test_input_validation.py` (34 rows). The table found one more: an unknown `--sheet` raised `KeyError`, reported as "Unexpected error". The total-size limit reuses the per-attachment limit's existing assumption (about 4 MB per request to Graph, 3 MB of files once base64-encoded); that figure was already in the code and is not stated in the copies of Microsoft's documentation kept in `docs/`. |
 
 ### Phases D, E, F — not started
+
+What each step involves, file by file, is under [Remaining work, in detail](#remaining-work-in-detail) in the Handover section. Add a table here for each phase as it is done, in the style of the ones above.
