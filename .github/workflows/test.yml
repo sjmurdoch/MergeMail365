@@ -46,6 +46,9 @@ jobs:
       - name: Type check
         run: uv run mypy
 
+      - name: Lint with Ruff (logging and security rules)
+        run: uv run ruff check .
+
   lint-js:
     runs-on: ubuntu-latest
     steps:

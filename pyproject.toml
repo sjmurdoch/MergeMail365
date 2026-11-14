@@ -36,6 +36,7 @@ dev = [
     "playwright>=1.40",
     "pytest-playwright>=0.4",
     "pyinstaller>=6.19.0",
+    "ruff>=0.17.4",
 ]
 
 [tool.pytest.ini_options]
@@ -55,6 +56,23 @@ disallow_incomplete_defs = false
 [[tool.mypy.overrides]]
 module = ["msal", "openpyxl", "flask", "flask.*", "webview"]
 ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Only the rule sets this project relies on as guards, not general style:
+# LOG and G keep logging lazy and through module loggers; S (flake8-bandit)
+# flags risky calls. See docs/review-fixes-plan.md (G2).
+select = ["LOG", "G", "S"]
+# assert is used to narrow Optional types for mypy, not to validate input.
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use fake credentials and local servers; scripts run fixed tools.
+"tests/**" = ["S104", "S105", "S106", "S110", "S310", "S603", "S607"]
+"scripts/**" = ["S603", "S607"]
+"examples/**" = ["S105", "S106"]
 
 [tool.uv]
 exclude-newer = "7 days"
