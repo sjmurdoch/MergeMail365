@@ -32,6 +32,35 @@ def _no_external_http(monkeypatch: pytest.MonkeyPatch):
     assert not attempts, f"Test attempted external HTTP requests: {attempts}"
 
 
+@pytest.fixture(autouse=True)
+def _cookies_stay_small(monkeypatch: pytest.MonkeyPatch):
+    """Fail any test in which the web app sets a cookie over 2 KB.
+
+    A browser silently drops a cookie over about 4 KB, which loses the
+    session. Session data therefore lives on the server (web/sessions.py);
+    this notices if any of it finds its way back into a cookie.
+    """
+    try:
+        import flask
+    except ImportError:  # the web extra isn't installed
+        yield
+        return
+
+    oversized: list[str] = []
+    real = flask.Flask.process_response
+
+    def checking(self, response):  # type: ignore[no-untyped-def]
+        response = real(self, response)
+        for cookie in response.headers.getlist("Set-Cookie"):
+            if len(cookie) > 2048:
+                oversized.append(f"{len(cookie)} bytes: {cookie[:60]}...")
+        return response
+
+    monkeypatch.setattr(flask.Flask, "process_response", checking)
+    yield
+    assert not oversized, f"the web app set a cookie over 2 KB: {oversized}"
+
+
 @pytest.fixture
 def fixtures_dir() -> Path:
     return FIXTURES_DIR

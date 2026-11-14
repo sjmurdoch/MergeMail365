@@ -35,6 +35,7 @@ from mail_merge.config import load_config
 from mail_merge.sender import SendResult
 from mail_merge.web.jobs import FINISHED_STATUSES, JobStore
 from mail_merge.web.sendlog import SendLog
+from mail_merge.web.sessions import ServerSession, ServerSideSessions
 
 logger = logging.getLogger(__name__)
 
@@ -287,9 +288,12 @@ def create_app(
         template_folder=os.path.join(os.path.dirname(__file__), "templates"),
         static_folder=os.path.join(os.path.dirname(__file__), "static"),
     )
-    # Use a stable secret key based on the startup token so that restarting
-    # the server doesn't invalidate the user's session.
+    # Session data stays in this process; the cookie is only an id
+    # (web/sessions.py). Flask still wants a secret key for anything that
+    # signs with it.
     app.secret_key = hashlib.sha256(startup_token.encode()).hexdigest()
+    sessions = ServerSideSessions()
+    app.session_interface = sessions
 
     # Keep running sends' results on disk, and report the sends an earlier
     # process didn't finish (spec/requirements.md, R15). Only the
@@ -330,13 +334,18 @@ def create_app(
         return bool(getattr(view, "_public", False))
 
     # One-time passes for a sign-in that started on 127.0.0.1 and continues
-    # on localhost, where the redirect URI lives: nonce -> expiry time.
-    handoffs: dict[str, float] = {}
+    # on localhost, where the redirect URI lives: nonce -> (expiry time,
+    # session id). The localhost cookie is given the same session, so the
+    # uploaded spreadsheet comes along.
+    handoffs: dict[str, tuple[float, str]] = {}
 
     def _redeem_handoff() -> bool:
         nonce = request.args.get("handoff", "")
-        expiry = handoffs.pop(nonce, None) if nonce else None
-        return expiry is not None and expiry >= time.monotonic()
+        entry = handoffs.pop(nonce, None) if nonce else None
+        if entry is None or entry[0] < time.monotonic():
+            return False
+        assert isinstance(session._get_current_object(), ServerSession)  # type: ignore[attr-defined]
+        return sessions.adopt(session._get_current_object(), entry[1])  # type: ignore[attr-defined]
 
     @app.before_request
     def _check_auth() -> Any:
@@ -345,8 +354,6 @@ def create_app(
 
         # A sign-in handed over from 127.0.0.1 (see auth_login).
         if request.endpoint == "auth_login" and _redeem_handoff():
-            session["authenticated"] = True
-            session.permanent = True
             return None
 
         # Check for startup token in query string
@@ -374,7 +381,9 @@ def create_app(
 
     @app.before_request
     def _ensure_csrf_token() -> None:
-        if "csrf_token" not in session:
+        # Only for a session that got in with the startup token, so that a
+        # request without one (a static file, say) leaves nothing behind.
+        if session.get("authenticated") and "csrf_token" not in session:
             session["csrf_token"] = secrets.token_hex(32)
 
     @app.before_request
@@ -404,10 +413,11 @@ def create_app(
         # one-time pass that lets this (already authenticated) user in.
         if _request_hostname() == "127.0.0.1":
             now = time.monotonic()
-            for stale in [n for n, expiry in handoffs.items() if expiry < now]:
+            for stale in [n for n, (expiry, _sid) in handoffs.items() if expiry < now]:
                 del handoffs[stale]
             nonce = secrets.token_urlsafe(32)
-            handoffs[nonce] = now + _HANDOFF_LIFETIME
+            sid = session._get_current_object().sid  # type: ignore[attr-defined]
+            handoffs[nonce] = (now + _HANDOFF_LIFETIME, sid)
             params = {k: v for k, v in request.args.items() if k != "handoff"}
             params["handoff"] = nonce
             return redirect(f"http://localhost:{app.config['PORT']}/auth/login?{urlencode(params)}")
@@ -672,9 +682,8 @@ def create_app(
 
         session["spreadsheet_path"] = filepath
         session["spreadsheet_tmp_dir"] = tmp_dir
-        # Store only lightweight metadata in the session cookie — preview
-        # rows can be large and would blow the 4 KB cookie size limit,
-        # causing the session to be silently dropped by the browser.
+        # Metadata only: the rows are re-read from the saved file when
+        # needed (the session lives in server memory, web/sessions.py).
         session["spreadsheet_info"] = {
             "columns": columns,
             "sheets": sheets,
