@@ -626,3 +626,29 @@ class TestInterruptedSend:
         page.reload()
         page.wait_for_selector("text=Data")
         expect(report).to_be_hidden()
+
+
+class TestRejectedTestEmail:
+    def test_rejected_test_email_is_shown_as_a_failure(
+        self, wizard: Page, workflow_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Model: rejectedTestEmailTest / testPassHonest (R19).
+
+        The job runs to the end ("completed") although Graph rejected the
+        email, which is how sender.send_one() reports a 403. The page used to
+        show "Test email sent successfully!" and enable Next."""
+        from mail_merge.sender import SendResult
+
+        def rejected(**kwargs: Any) -> list[Any]:
+            return [SendResult(email="me@example.com", success=False, status_code=403,
+                               error="ErrorAccessDenied: Access is denied.")]
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", rejected)
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        page.click("#btn-send-test")
+        expect(page.locator("#test-result")).to_contain_text("Permission denied", timeout=10000)
+        expect(page.locator("#test-result")).not_to_contain_text("successfully")
+        expect(page.locator("#btn-next-4")).to_be_disabled()
+        expect(page.locator("#btn-retry-test")).to_be_visible()
+        assert page.evaluate("state.testPassed") is False

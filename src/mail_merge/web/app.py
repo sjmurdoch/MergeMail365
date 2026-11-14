@@ -929,6 +929,9 @@ def create_app(
 
         result: dict[str, Any] = {
             "status": job.status.value,
+            # Whether the job did what was asked; "completed" only says the
+            # job ran to the end (a rejected email is still "completed").
+            "ok": job.ok,
             "error": job.error,
         }
         if job.results is not None:

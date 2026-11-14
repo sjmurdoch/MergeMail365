@@ -5,9 +5,11 @@
  *
  * ROUND counts the rounds of fixes in archive/quint-model-plan.md that are
  * applied: `buggy` (0) is the code before any of them, bugs included;
- * `partial` (1) has the fixes of steps 2, 2b and 2c (bugs 1-9); `fixed` (2)
- * is the current code, which must satisfy every invariant. FIXED gates the
- * round 1 fixes and FIXED2 the round 2 fixes (bugs 10-15).
+ * `partial` (1) has the fixes of steps 2, 2b and 2c (bugs 1-9); `round2` (2)
+ * adds the round 2 fixes (bugs 10-15); `fixed` (3) is the current code,
+ * which must satisfy every invariant. FIXED gates the round 1 fixes, FIXED2
+ * the round 2 fixes and FIXED3 the fix from docs/review-fixes-plan.md (a
+ * rejected test email shown as sent).
  *
  * Abstractions:
  * - `version` stands for everything that determines what gets sent
@@ -25,6 +27,7 @@ module wizard {
   const ROUND: int
   pure val FIXED = ROUND >= 1
   pure val FIXED2 = ROUND >= 2
+  pure val FIXED3 = ROUND >= 3
 
   type Kind = Test | Verify | Send
 
@@ -237,13 +240,15 @@ module wizard {
     }
   }
 
-  // Completion of job `j` (SSE "done" + /status) with outcome `ok`.
-  pure def complete(st: State, j: Job, ok: bool): State = {
+  // Completion of job `j` (SSE "done" + /status). `ok` is the page's
+  // verdict (app.js runJob: WizardCore.jobSucceeded); `did` is what really
+  // happened: the test email was accepted, or the dry run ran to the end.
+  pure def complete(st: State, j: Job, ok: bool, did: bool): State = {
     val st0 = { ...st, pending: st.pending.exclude(Set(j)) }
     // Ghost: what the server actually did.
     val st1 = { ...st0,
-      testedVersions: if (ok and j.kind == Test) st0.testedVersions.union(Set(j.version)) else st0.testedVersions,
-      verifiedVersions: if (ok and j.kind == Verify) st0.verifiedVersions.union(Set(j.version)) else st0.verifiedVersions,
+      testedVersions: if (did and j.kind == Test) st0.testedVersions.union(Set(j.version)) else st0.testedVersions,
+      verifiedVersions: if (did and j.kind == Verify) st0.verifiedVersions.union(Set(j.version)) else st0.verifiedVersions,
     }
     match j.handler {
       | Test =>
@@ -402,7 +407,7 @@ module wizard {
       else st1
     val failed = s.sendJob.exists(j => j.id == id and j.status == Failed)
     act("startSendResponse",
-      if (done) complete({ ...st2, pending: st2.pending.union(Set(job)) }, job, not(failed))
+      if (done) complete({ ...st2, pending: st2.pending.union(Set(job)) }, job, not(failed), not(failed))
       else { ...st2, pending: st2.pending.union(Set(job)) }),
   }
   // app.js: confirmGoBack(4) (#btn-back-6)
@@ -456,27 +461,45 @@ module wizard {
   // back to the device-code flow: the prompt goes to the job log and the
   // job blocks until the code expires, then fails.
   // FIXED: the provider is silent-only and fails at once.
-  pure def finishJob(st: State, j: Job, ok: bool): State = {
+  //
+  // `ran`: the job ran to the end (its status is "completed"). `accepted`:
+  // Graph accepted the test email (202); a dry run sends nothing, so it has
+  // no such answer. The two are separate facts: send_one() returns a
+  // rejected email as a result, it does not raise.
+  // Bug: the page's verdict was the status alone, so a rejected test email
+  // showed "Test email sent successfully!" and enabled Next.
+  // FIXED3: the verdict is the job's `ok` (web/jobs.py Job.ok: completed
+  // and every email accepted), and send_merge() raises for a rejected test.
+  pure def finishJob(st: State, j: Job, ran: bool, accepted: bool): State = {
     val noToken = j.kind == Test and not(st.signedIn)
     val st1 = { ...st,
       interactiveAuthInJob: st.interactiveAuthInJob or (noToken and not(FIXED)) }
-    markSessionJobDone(complete(st1, j, ok and not(noToken)), j.id)
+    val completed = ran and not(noToken)
+    val did = completed and (j.kind != Test or accepted)
+    markSessionJobDone(complete(st1, j, if (FIXED3) did else completed, did), j.id)
   }
 
   // The server finishes a test or dry-run job; the page's callback (if any)
   // fires. Send jobs finish through the send loop below instead.
-  // environment: web/app.py api_start_job._run_job; app.js streamEvents() completion
-  action completeJob(ok: bool): bool = all {
+  // environment: web/jobs.py JobStore.run; sender.py send_one() (accepted); app.js runJob() completion
+  action completeJob(ok: bool, accepted: bool): bool = all {
     s.pending.exists(p => p.kind != Send),
     nondet j = s.pending.filter(p => p.kind != Send).oneOf()
-    act("complete", finishJob(s, j, ok)),
+    act("complete", finishJob(s, j, ok, accepted)),
   }
 
   // Deterministic completion of a specific job, for scenario tests.
   action completeById(id: int, ok: bool): bool = all {
     s.pending.exists(p => p.id == id and p.kind != Send),
     nondet j = s.pending.filter(p => p.id == id).oneOf()
-    act("complete", finishJob(s, j, ok)),
+    act("complete", finishJob(s, j, ok, true)),
+  }
+
+  // The job ran to the end, but Graph rejected its email.
+  action rejectById(id: int): bool = all {
+    s.pending.exists(p => p.id == id and p.kind != Send),
+    nondet j = s.pending.filter(p => p.id == id).oneOf()
+    act("complete", finishJob(s, j, true, false)),
   }
 
   // The server finishes the session's test or dry-run job with nobody
@@ -524,7 +547,7 @@ module wizard {
   pure def finishSendJob(st: State, j: SendJob, failed: bool): State = {
     val status = if (failed) Failed else if (j.sent == TOTAL) Completed else Stopped
     val st1 = { ...st, sendJob: Set({ ...j, status: status }) }
-    val st2 = st.pending.filter(p => p.id == j.id).fold(st1, (acc, p) => complete(acc, p, not(failed)))
+    val st2 = st.pending.filter(p => p.id == j.id).fold(st1, (acc, p) => complete(acc, p, not(failed), not(failed)))
     markSessionJobDone(st2, j.id)
   }
 
@@ -657,7 +680,7 @@ module wizard {
     nondet a = Bool.oneOf() back5(a), next5,
     typeSend, startSend, startSendResponse, nondet a = Bool.oneOf() back6(a), stopSend, newMerge,
     dismissInterrupted,
-    nondet ok = Bool.oneOf() completeJob(ok),
+    nondet ok = Bool.oneOf() nondet accepted = Bool.oneOf() completeJob(ok, accepted),
     completeOrphan,
     sendNext, nondet failed = Bool.oneOf() finishSend(failed), sendWithoutToken,
     nondet desktop = Bool.oneOf() signIn(desktop), signOut, tokenExpires,
@@ -671,6 +694,10 @@ module wizard {
 
   /// A real send only starts for content that was test-sent and dry-run.
   val noUntestedSend = not(s.untestedSend)
+
+  /// "Test email sent" is only claimed for content whose test email Graph
+  /// accepted (R19). Stronger than next4Honest: it holds on every step.
+  val testPassHonest = s.testPassed implies s.testedVersions.contains(s.version)
 
   /// Next on step 4 (when it actually advances) means the current content was test-sent.
   val next4Honest =
@@ -785,7 +812,7 @@ module wizard {
     testNeedsSignIn, sendNeedsSignIn, noInteractiveAuthInJob, canProgress,
     noStepJump, previewHonest, runningSendVisible, noConcurrentSends,
     failedSendReported, progressHonest, newMergeClears, buttonsDerived,
-    restartReported, interruptedVisible, signedInBeforeMail,
+    restartReported, interruptedVisible, signedInBeforeMail, testPassHonest,
   }
 
   // ---------------------------------------------------------------------
@@ -824,6 +851,9 @@ module wizard {
 
   // For round 2 bugs, which are present in both `buggy` and `partial`.
   pure def bugIff2(inv: bool): bool = if (FIXED2) inv else not(inv)
+
+  // For the round 3 bug, present in every variant before `fixed`.
+  pure def bugIff3(inv: bool): bool = if (FIXED3) inv else not(inv)
 
   // Next on step 2, and the recipient list arrives.
   action preview = next2.then(previewResponse(true))
@@ -954,7 +984,7 @@ module wizard {
   run remainingActionsTest =
     start.then(toStep4).then(passTestAndVerify(0)).then(next5)
       .then(back6(false)).then(back6(true))
-      .then(sendTestEmail).then(completeJob(true))
+      .then(sendTestEmail).then(completeJob(true, true))
       .then(back4(true)).then(back3).then(back2).then(signOut).then(signIn(true))
       .then(next1).then(preview).then(next3).then(sendTestEmail)
       .then(any { all { FIXED, reload.then(completeOrphan) }, all { not(FIXED), reload } })
@@ -1023,6 +1053,23 @@ module wizard {
       .then(if (FIXED2) dismissInterrupted else reload)
       .expect(not(s.interruptedShown) and s.sendLog.size() == 0)
 
+  /// Graph rejects the test email (403, say): the job still runs to the end,
+  /// and the page showed "Test email sent successfully!" (round 3 bug).
+  /// Fixed: the step shows the failure, Next stays disabled, and the test
+  /// can be sent again.
+  run rejectedTestEmailTest =
+    start.then(toStep4).then(sendTestEmail).then(rejectById(0))
+      .expect(bugIff3(testPassHonest and next4Honest)
+        and (FIXED3 implies (not(s.testPassed) and not(s.btnNext4) and sendTestEnabled(s) and allInvariants)))
+
+  /// The same, carried through to a real send of content never test-sent.
+  run rejectedTestThenSendTest =
+    start.then(toStep4).then(sendTestEmail).then(rejectById(0))
+      .then(any { all { not(FIXED3), next4.then(completeById(1, true)).then(next5).then(typeSend).then(send) },
+                  // Fixed: Next is disabled, so all the user can do is retry.
+                  all { FIXED3, sendTestEmail } })
+      .expect(bugIff3(noUntestedSend) and (FIXED3 implies s.step == 4))
+
   /// After New merge, Back on step 6 stays disabled.
   run back6AfterNewMergeTest =
     start.then(toStep4).then(passTestAndVerify(0))
@@ -1039,8 +1086,12 @@ module partial {
   import wizard(ROUND = 1).*
 }
 
-module fixed {
+module round2 {
   import wizard(ROUND = 2).*
+}
+
+module fixed {
+  import wizard(ROUND = 3).*
 }
 
 // Trace generation for the conformance tests (tests/test_conformance.py),
@@ -1051,7 +1102,7 @@ module fixed {
 // depth. Uniform choice among the enabled actions of `step` almost never
 // gets past step 3.
 module conformance {
-  import wizard(ROUND = 2).*
+  import wizard(ROUND = 3).*
 
   var quiet: int  // steps since the last action that undid progress
   pure val GAP = 8
@@ -1073,7 +1124,8 @@ module conformance {
     nondet a = Bool.oneOf() backUp(back5(a)), fwd(next5),
     fwd(typeSend), fwd(startSend), fwd(startSendResponse),
     nondet a = Bool.oneOf() backUp(back6(a)), fwd(stopSend), fwd(newMerge), fwd(dismissInterrupted),
-    nondet ok = Bool.oneOf() if (ok) fwd(completeJob(true)) else undo(completeJob(false)),
+    nondet ok = Bool.oneOf() nondet accepted = Bool.oneOf()
+      if (ok and accepted) fwd(completeJob(true, true)) else undo(completeJob(ok, accepted)),
     fwd(completeOrphan),
     fwd(sendNext), nondet failed = Bool.oneOf() if (failed) undo(finishSend(true)) else fwd(finishSend(false)),
     undo(sendWithoutToken),
@@ -1097,7 +1149,8 @@ module conformance {
     fwd(settled(typeSend)), fwd(settled(startSend)), fwd(startSendResponse),
     nondet a = Bool.oneOf() backUp(settled(back6(a))), fwd(settled(stopSend)), fwd(settled(newMerge)),
     fwd(settled(dismissInterrupted)),
-    nondet ok = Bool.oneOf() if (ok) fwd(settled(completeJob(true))) else undo(settled(completeJob(false))),
+    nondet ok = Bool.oneOf() nondet accepted = Bool.oneOf()
+      if (ok and accepted) fwd(settled(completeJob(true, true))) else undo(settled(completeJob(ok, accepted))),
     fwd(settled(completeOrphan)),
     fwd(settled(sendNext)), nondet failed = Bool.oneOf() if (failed) undo(settled(finishSend(true))) else fwd(settled(finishSend(false))),
     undo(settled(sendWithoutToken)),

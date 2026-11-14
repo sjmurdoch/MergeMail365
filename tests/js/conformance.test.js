@@ -241,8 +241,12 @@ class Replay {
             case "completeJob": {
                 const j = picks.j;
                 const id = this.jobRequests.get(j.id);
-                // finishJob: a test email without a token fails.
-                const ok = picks.ok && !(j.kind === "Test" && !m.signedIn);
+                // finishJob: a test email without a token fails; one that
+                // Graph rejected still ends as "completed". The page's
+                // verdict comes from the /status answer, as in app.js runJob.
+                const completed = picks.ok && !(j.kind === "Test" && !m.signedIn);
+                const did = completed && (j.kind !== "Test" || picks.accepted);
+                const ok = C.jobSucceeded({ status: completed ? "completed" : "failed", ok: did });
                 if (id !== undefined) this.dispatch({ type: "jobCompleted", id, ok, message: "" });
                 break;
             }

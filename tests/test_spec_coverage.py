@@ -109,6 +109,8 @@ def step_actions(text: str) -> list[str]:
     assert body, "could not find `action step = any { ... }` in wizard.qnt"
     # Drop the `nondet x = S.oneOf()` binders, keep the action names.
     cleaned = re.sub(r"nondet\s+\w+\s*=\s*[\w.]+\(\)", "", body[1])
+    # Drop argument lists, so `completeJob(ok, accepted)` yields one name.
+    cleaned = re.sub(r"\(([^()]*)\)", "(", cleaned)
     return re.findall(r"\b([a-z]\w*)\s*(?:\(|,|\n|$)", cleaned)
 
 
@@ -277,6 +279,45 @@ class TestCitations:
             f"action {action} in wizard.qnt needs a comment naming the code it models, "
             "e.g. `// app.js: stopSend(); web/app.py: api_job_stop` or `// environment: ...`"
         )
+
+
+class TestAssumptions:
+    """Every value the environment chooses says what it stands for in the
+    code and names a test that pins it (spec/coverage.toml [assumptions])."""
+
+    @staticmethod
+    def _environment_parameters() -> set[str]:
+        text = spec_text()
+        params = set()
+        for action in coverage()["environment"]["actions"]:
+            m = re.search(rf"^\s*action\s+{action}\(([^)]*)\)", text, re.MULTILINE)
+            if m:
+                params |= {f"{action}.{p.split(':')[0].strip()}" for p in m[1].split(",")}
+        return params
+
+    def test_every_environment_choice_is_explained(self):
+        entries = coverage()["assumptions"]
+        expected = self._environment_parameters()
+        assert expected, "no environment action takes a parameter: has the parser broken?"
+        assert set(entries) == expected, (
+            "spec/coverage.toml [assumptions] must have exactly one entry per parameter of an "
+            f"[environment] action: missing {sorted(expected - set(entries))}, "
+            f"stale {sorted(set(entries) - expected)}"
+        )
+        for key, entry in entries.items():
+            assert entry.get("fact", "").strip(), f"[assumptions] {key} needs a `fact`"
+            assert entry.get("pinned_by"), f"[assumptions] {key} needs a `pinned_by` test"
+
+    def test_pinning_tests_exist(self):
+        root = SPEC.parent.parent
+        for key, entry in coverage()["assumptions"].items():
+            for pin in entry["pinned_by"]:
+                path, _, name = pin.partition("::")
+                source = root / path
+                assert source.is_file(), f"[assumptions] {key}: {path} does not exist"
+                assert re.search(rf"def {re.escape(name)}\b", source.read_text(encoding="utf-8")), (
+                    f"[assumptions] {key}: {path} has no test named {name}"
+                )
 
 
 def all_invariants() -> set[str]:

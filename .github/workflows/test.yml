@@ -85,7 +85,7 @@ jobs:
       - name: Typecheck and scenario tests
         run: |
           spec/node_modules/.bin/quint typecheck spec/wizard.qnt
-          for variant in buggy partial fixed; do
+          for variant in buggy partial round2 fixed; do
             spec/node_modules/.bin/quint test --main=$variant --max-samples=1 --backend=typescript spec/wizard.qnt
           done
 

@@ -536,7 +536,16 @@
         };
     }
 
+    /** Whether a finished test email or dry run did what was asked, from
+     *  its /api/job/<id>/status answer: `ok`, not `status`. A job whose
+     *  email Graph rejected still ends as "completed" (model: the page's
+     *  verdict in finishJob; invariant testPassHonest). */
+    function jobSucceeded(result) {
+        return result.ok === true;
+    }
+
     const WizardCore = {
+        jobSucceeded,
         initialState,
         resetTestAndVerify,
         newMergeState,

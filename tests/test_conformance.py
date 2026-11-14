@@ -122,6 +122,9 @@ MUTANTS = [
     ("send-test-twice",
      "return s.signedIn && !s.testRunning;",
      "return s.signedIn;"),
+    ("completed-means-sent",
+     "return result.ok === true;",
+     "return result.status === \"completed\";"),
     ("back6-after-send",
      "return !s.sendStarted;\n    }\n\n    /** The report of sends",
      "return true;\n    }\n\n    /** The report of sends"),
@@ -142,7 +145,7 @@ def test_client_replay_catches_mutant(traces, tmp_path, name, old, new):
 # Server tier
 # ---------------------------------------------------------------------------
 
-from tests.conformance_support import TOTAL, FakeSendMerge, Handle, load_trace  # noqa: E402
+from tests.conformance_support import TOTAL, FakeSendMerge, Handle, job_command, load_trace  # noqa: E402
 
 from typing import Any  # noqa: E402
 
@@ -272,8 +275,15 @@ class ServerReplay:
             self.set_session_job(self.jobs[picks["id"]][0])
         elif action in ("completeJob", "completeOrphan"):
             model_id = picks["j"]["id"] if action == "completeJob" else picks["sj"]["id"]
-            ok = picks.get("ok", True)
-            self.command(model_id, "ok" if ok else "fail")
+            self.command(model_id, job_command(picks) if action == "completeJob" else "ok")
+            if action == "completeJob":
+                # finishJob's `did`: the status answer's `ok` is what the
+                # page's verdict is made from (testPassHonest).
+                j = picks["j"]
+                did = picks["ok"] and (j["kind"] != "Test" or (picks["accepted"] and m["signedIn"]))
+                status = self.client.get(f"/api/job/{self.jobs[model_id][0]}/status").get_json()
+                assert status["ok"] == did, (
+                    f"job {model_id} ({j['kind']}): /status ok is {status['ok']}, the model says {did}")
         elif action in ("sendNext", "sendWithoutToken"):
             self.command(picks["j"]["id"], "next")
         elif action == "finishSend":
@@ -399,6 +409,8 @@ SERVER_MUTANTS = {
     "reload-resumes-dry-run": ("active_job_id", _any_session_job),
     "stop-not-recorded": ("request_stop", _stop_without_flag),
     "restart-forgets-send-log": ("attach_send_log", _forget_send_log),
+    # The round 3 bug: "completed" taken to mean "every email was accepted".
+    "completed-means-sent": ("Job.ok", property(lambda self: self.status.value == "completed")),
 }
 
 
@@ -406,7 +418,10 @@ SERVER_MUTANTS = {
 def test_server_replay_catches_mutant(traces, monkeypatch, conformance_xlsx, tmp_path, name):
     from mail_merge.web.jobs import JobStore
 
+    from mail_merge.web.jobs import Job
+
     attr, replacement = SERVER_MUTANTS[name]
-    monkeypatch.setattr(JobStore, attr, replacement)
+    cls = Job if attr.startswith("Job.") else JobStore
+    monkeypatch.setattr(cls, attr.removeprefix("Job."), replacement)
     with pytest.raises(AssertionError):
         replay_server(traces, monkeypatch, conformance_xlsx, tmp_path)

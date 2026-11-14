@@ -12,7 +12,7 @@ Contents:
 4. [What the model covers](#4-what-the-model-covers)
 5. [State](#5-state)
 6. [Actions](#6-actions)
-7. [Three variants: buggy, partial, fixed](#7-three-variants-buggy-partial-fixed)
+7. [Four variants: buggy, partial, round2, fixed](#7-four-variants-buggy-partial-round2-fixed)
 8. [Requirements and invariants](#8-requirements-and-invariants)
 9. [Checking the model](#9-checking-the-model)
 10. [How the implementation is kept matching the model](#10-how-the-implementation-is-kept-matching-the-model)
@@ -221,13 +221,15 @@ These are things the user doesn't do: responses arriving, the server finishing w
 |---|---|
 | `previewResponse(ok)` | The recipient list for a pending preview arrives, or the request fails |
 | `startSendResponse` | The start-job response for a send arrives: the page learns the job id |
-| `completeJob(ok)` | A test email or dry run finishes on the server |
+| `completeJob(ok, accepted)` | A test email or dry run finishes on the server: `ok` is whether the job ran to the end, `accepted` whether Graph accepted the test email (two separate facts, see below) |
 | `completeOrphan` | A job finishes with no page listening (its page was reloaded away) |
 | `sendNext` | The send loop sends one email |
 | `finishSend(failed)` | The send loop ends: all sent, stopped, or failed |
 | `sendWithoutToken` | The send loop needs a token and the cache has none |
 | `tokenExpires` | The cached token stops working |
 | `serverRestart` | The server process ends (quit or crash) and a new one starts |
+
+Each value the environment chooses stands for a fact in the code, and the model is only as good as that reading. `completeJob` once took a single `ok`, which the invariants read as "the test email was sent" while the code computed it from "the job ran to the end". A test email that Graph rejected with a 403 still ran to the end, so the page said "Test email sent successfully!", and no invariant could see it: the model had no way to express the difference. `spec/coverage.toml` therefore has an `[assumptions]` table with one entry per parameter of an environment action, stating the fact it stands for and the test that pins that fact; `tests/test_spec_coverage.py` fails if an entry is missing or its test has gone. When adding an environment choice, ask what two different things in the code it could mean, and split it if there are two.
 
 ### Shared guards
 
@@ -286,15 +288,16 @@ The model transcribes this exactly. In the `stopSend` action, a Stop pressed whi
 
 The comment above each action names the code it transcribes, as `app.js: …`, `web/app.py: …` or `environment: …`. A test enforces it ([§10.2](#102-static-checks)). The rule is to copy guards and effects from the code, faults included, not from what the code was meant to do: a model written from intent passes every check and proves nothing.
 
-## 7. Three variants: buggy, partial, fixed
+## 7. Four variants: buggy, partial, round2, fixed
 
-The model describes three versions of the code at once. A constant `ROUND` selects one, and each bug fix is gated on the round that fixed it:
+The model describes four versions of the code at once. A constant `ROUND` selects one, and each bug fix is gated on the round that fixed it:
 
 ```quint
 module wizard {
   const ROUND: int
   pure val FIXED = ROUND >= 1
   pure val FIXED2 = ROUND >= 2
+  pure val FIXED3 = ROUND >= 3
 ```
 
 ```quint
@@ -306,8 +309,12 @@ module partial {
   import wizard(ROUND = 1).*
 }
 
-module fixed {
+module round2 {
   import wizard(ROUND = 2).*
+}
+
+module fixed {
+  import wizard(ROUND = 3).*
 }
 ```
 
@@ -315,6 +322,7 @@ module fixed {
 |---|---|---|
 | `buggy` | Before any fix | Each bug's invariant is violated |
 | `partial` | Round 1 fixes (bugs 1–9) only | Round 2 invariants (bugs 10–15) violated |
+| `round2` | Rounds 1 and 2 | `testPassHonest`, `next4Honest` and `noUntestedSend` violated: a rejected test email is shown as sent |
 | `fixed` | The current code | Every invariant holds |
 
 Keeping the buggy behaviour in the model documents each bug precisely and proves the invariant would catch it. A typical fix reads:
@@ -334,7 +342,7 @@ Keeping the buggy behaviour in the model documents each bug precisely and proves
     val current = not(FIXED2) or (r.gen == s.previewGen and s.step == 2)
 ```
 
-`buggy` and `partial` are frozen: they can't be replayed against today's code, so conformance runs against `fixed` only. A future bug is transcribed into `fixed` as the code has it, shown to break an invariant, then fixed in the code and the model together, with a scenario recording it. Bug 17 (the send log) was done this way, gated on `FIXED2` rather than a new round.
+`buggy`, `partial` and `round2` are frozen: they can't be replayed against today's code, so conformance runs against `fixed` only. A future bug is transcribed into `fixed` as the code has it, shown to break an invariant, then fixed in the code and the model together, with a scenario recording it. Bug 17 (the send log) was done this way, gated on `FIXED2` rather than a new round. The rejected test email (R19) got its own round, `FIXED3`, because it was found after `fixed` had been released as correct, and `round2` keeps that state on record.
 
 ## 8. Requirements and invariants
 
@@ -359,6 +367,7 @@ Keeping the buggy behaviour in the model documents each bug precisely and proves
 | R16 | The sign-in display follows the latest answer | None in the model (holds by construction in the code) |
 | R17 | Buttons on steps 4–6 follow the workflow state alone | `buttonsDerived` |
 | R18 | No email is attempted before the user has signed in | `signedInBeforeMail` |
+| R19 | "Test email sent" only for content whose test email Graph accepted | `testPassHonest` |
 
 The headline invariant uses ghost state to say that a real send only goes out for content that was test-sent and dry-run in its current form. `startSend` records whether that was true:
 
@@ -390,7 +399,7 @@ The dead-end check is computed from the same guards the actions use, so it can't
     and ((s.step == 6 and not(s.sendStarted)) implies (s.authShown or signInOffered(s)))
 ```
 
-All 24 invariants are combined in `allInvariants`, which `spec/check.sh` and the CI simulation check.
+All 26 invariants are combined in `allInvariants`, which `spec/check.sh` and the CI simulation check.
 
 ### Witnesses
 
@@ -402,7 +411,7 @@ Three tools check the model, from fast and shallow to slow and exhaustive.
 
 | Check | Command | What it does | Time |
 |---|---|---|---|
-| Scenarios | `quint test --main=<variant>` | 23 hand-written traces, one per bug plus a happy path | Seconds |
+| Scenarios | `quint test --main=<variant>` | 27 hand-written traces, one per bug plus a happy path | Seconds |
 | Simulation | `quint run --step=cStep --invariant=allInvariants` | Thousands of random traces of 120 steps | ~2 min for 2,000 |
 | Bounded model checking | `spec/check.sh [--all] <variant>` | Apalache proves every invariant for every trace up to 16 steps (19 in the deepest run) | ~2 h (`--all fixed`, 4 cores); each extra step about 2½ times as long |
 
@@ -421,7 +430,7 @@ Each scenario replays one counterexample and asserts that the invariant fails in
         and (FIXED2 implies s.sendJob.forall(j => j.stopRequested)))
 ```
 
-Run them for all three variants: a scenario that passes in `fixed` but also in `buggy` no longer shows the bug.
+Run them for all four variants: a scenario that passes in `fixed` but also in `buggy` no longer shows the bug.
 
 ### Simulation
 
@@ -620,8 +629,8 @@ A replay that always passes could just be a weak harness. Mutation tests seed bu
 
 | Tier | Seeded bugs (each must be noticed) |
 |---|---|
-| Client (`wizard-core.js`, 10) | A completion applied after a reset; Back from 3 to 2 keeping the checks; a queued Stop never posted; a failed send hiding its results; an edit keeping a stale preview; a failed test not refreshing sign-in; an upload keeping the old recipient list; entering step 5 without starting a dry run; Send test email enabled while a test runs; Back enabled after the send started |
-| Server (`JobStore`, 6) | Stop ignored by the loop; emails not counted; a reload missing a send the session doesn't name; a reload resuming a dry run; Stop not recorded; a restart forgetting the send log |
+| Client (`wizard-core.js`, 11) | A completion applied after a reset; Back from 3 to 2 keeping the checks; a queued Stop never posted; a failed send hiding its results; an edit keeping a stale preview; a failed test not refreshing sign-in; an upload keeping the old recipient list; entering step 5 without starting a dry run; Send test email enabled while a test runs; a job's status taken for its outcome (a rejected test email shown as sent); Back enabled after the send started |
+| Server (`JobStore` and `Job`, 7) | Stop ignored by the loop; emails not counted; a reload missing a send the session doesn't name; a reload resuming a dry run; Stop not recorded; a restart forgetting the send log; `Job.ok` true for any completed job |
 | Browser (`app.js`, 4) | Next on step 5 always enabled; no sign-in callout on step 6; a failed test not refreshing sign-in; results not rendered |
 
 Mutants the replay cannot notice by design (for example, a reload already starts from `initialState()`, so clearing flags on reload is redundant) are listed with the reason in `tests/test_conformance.py`.
@@ -632,7 +641,7 @@ The client tier found a real divergence when it was first run: after a new uploa
 
 The `spec` job in `.github/workflows/test.yml` installs the pinned Quint and runs, on every push and pull request:
 
-1. `quint typecheck` and the scenario tests for all three variants;
+1. `quint typecheck` and the scenario tests for all four variants;
 2. a smoke-test simulation of 500 `cStep` traces of 60 steps against `allInvariants` (the thorough one runs locally, §9);
 3. `test_conformance.py`, `test_conformance_e2e.py`, `test_spec_coverage.py` and the `wizard-core.js` unit tests.
 
@@ -654,7 +663,7 @@ If a change touches wizard navigation, job handling, sign-in or reload behaviour
 1. **Update the action** that cites the changed code, transcribing the new behaviour (faults included). Add or change the citation comment.
 2. **Run the static checks** (`uv run pytest tests/test_spec_coverage.py`). They name any new entry point to add to `spec/coverage.toml`, and any action, field or invariant that lost its mapping.
 3. **Update `WizardCore.ACTIONS`** and `abstractPage()` (client) or `JobStore.abstract()` (server) if an action or field was added.
-4. **Run the scenarios** for all three variants, and the simulation.
+4. **Run the scenarios** for all four variants, and the simulation.
 5. **Run conformance** (`uv run pytest tests/test_conformance.py tests/test_conformance_e2e.py`). A failure names the trace step, the action and the field that differ. Decide whether the code or the model is wrong; don't adjust the harness to make it pass.
 6. **Run Apalache** (`spec/check.sh --all fixed`, about 2 hours) before merging a change to `spec/wizard.qnt`.
 
@@ -688,5 +697,5 @@ If a change touches wizard navigation, job handling, sign-in or reload behaviour
 | ITF | Informal Trace Format, the JSON format of Quint traces |
 | Conformance | Replaying model traces against the code and comparing state after every step |
 | Abstraction function | Code that reports real state under the model's field names (`abstractPage`, `JobStore.abstract`) |
-| `ROUND`, `FIXED`, `FIXED2` | Which rounds of fixes a variant includes |
+| `ROUND`, `FIXED`, `FIXED2`, `FIXED3` | Which rounds of fixes a variant includes |
 | Apalache | The symbolic model checker behind `quint verify`; checks every trace up to a bound |

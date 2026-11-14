@@ -52,6 +52,18 @@ class Job:
     # Creation order in the store: the model's job id.
     seq: int = 0
 
+    @property
+    def ok(self) -> bool:
+        """The job did what was asked: it ran to the end and every email
+        was accepted (spec/wizard.qnt, testPassHonest). The one answer the
+        page uses for "did it work?"; status alone says only how the job
+        ended."""
+        return (
+            self.status == JobStatus.COMPLETED
+            and self.results is not None
+            and all(r.success for r in self.results)
+        )
+
 
 class JobLogHandler(logging.Handler):
     """Captures mail_merge logger output into a job's event queue."""

@@ -490,3 +490,25 @@ test("a config without interrupted sends shows none", () => {
     assert.equal(C.interruptedShown(r.state), false);
     assert.deepEqual(r.effects, []);
 });
+
+test("a job succeeded only if /status says ok, whatever its status (model: testPassHonest)", () => {
+    // Graph rejected the test email: the job still ran to the end.
+    assert.equal(C.jobSucceeded({ status: "completed", ok: false, results: [{ success: false, status_code: 403 }] }), false);
+    assert.equal(C.jobSucceeded({ status: "completed", ok: true }), true);
+    assert.equal(C.jobSucceeded({ status: "failed", ok: false, error: "x" }), false);
+    // The answer made up when the connection is lost has no `ok`.
+    assert.equal(C.jobSucceeded({ status: "failed", error: "Connection lost" }), false);
+    assert.equal(C.jobSucceeded({ status: "completed" }), false);
+});
+
+test("a rejected test email leaves step 4 failed, with Next disabled and Retry shown", () => {
+    let s = Object.assign(C.initialState(), { currentStep: 4, signedIn: true });
+    s = C.reduce(s, { type: "sendTestEmail", addressOk: true }).state;
+    const id = C.pendingRequest(s, "test");
+    const result = { status: "completed", ok: false, results: [{ success: false, status_code: 403 }] };
+    s = C.reduce(s, { type: "jobCompleted", id, ok: C.jobSucceeded(result), message: "rejected" }).state;
+    assert.equal(s.testPassed, false);
+    assert.equal(C.nextEnabled(s, 4), false);
+    assert.equal(C.retryVisible(s), true);
+    assert.equal(s.testResult.success, false);
+});

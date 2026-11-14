@@ -3,6 +3,7 @@
 #
 #   spec/check.sh buggy        # code before any fixes: each bug's invariant is violated
 #   spec/check.sh partial      # code before the round 2 fixes (bugs 10-15)
+#   spec/check.sh round2       # code before the round 3 fix (a rejected test email shown as sent)
 #   spec/check.sh fixed        # current code: every invariant must hold
 #   spec/check.sh --all fixed  # same, as one run of allInvariants: about as long
 #                              # as a single invariant, but names no culprit
@@ -22,18 +23,18 @@ while [ $# -gt 0 ]; do
         --quint) QUINT="$2"; shift 2 ;;
         --max-steps) MAX_STEPS="$2"; shift 2 ;;
         --all) together=1; shift ;;
-        buggy|partial|fixed) target="$1"; shift ;;
-        *) echo "usage: $0 [--quint PATH] [--max-steps N] [--all] buggy|partial|fixed" >&2; exit 2 ;;
+        buggy|partial|round2|fixed) target="$1"; shift ;;
+        *) echo "usage: $0 [--quint PATH] [--max-steps N] [--all] buggy|partial|round2|fixed" >&2; exit 2 ;;
     esac
 done
 if [ -z "$target" ]; then
-    echo "usage: $0 [--quint PATH] [--max-steps N] [--all] buggy|partial|fixed" >&2
+    echo "usage: $0 [--quint PATH] [--max-steps N] [--all] buggy|partial|round2|fixed" >&2
     exit 2
 fi
 
 cd "$(dirname "$0")"
 
-invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData stopHonoured stoppedReported testNeedsSignIn sendNeedsSignIn noInteractiveAuthInJob canProgress noStepJump previewHonest runningSendVisible noConcurrentSends failedSendReported progressHonest newMergeClears buttonsDerived restartReported interruptedVisible signedInBeforeMail"
+invariants="noUntestedSend next4Honest next5Honest buttonsMatchFlags back6Usable sendScreenHonest sendScreenNotStuck stepNeedsData stopHonoured stoppedReported testNeedsSignIn sendNeedsSignIn noInteractiveAuthInJob canProgress noStepJump previewHonest runningSendVisible noConcurrentSends failedSendReported progressHonest newMergeClears buttonsDerived restartReported interruptedVisible signedInBeforeMail testPassHonest"
 if [ -n "$together" ]; then
     invariants="allInvariants"
 fi

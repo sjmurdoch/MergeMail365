@@ -32,7 +32,7 @@ from playwright.sync_api import Page
 import mail_merge.web.app as web_app
 from mail_merge.web.app import create_app
 from mail_merge.web.jobs import JobStore
-from tests.conformance_support import TOTAL, FakeSendMerge, Handle, load_trace
+from tests.conformance_support import TOTAL, FakeSendMerge, Handle, job_command, load_trace
 from tests.test_conformance import QUINT, generate
 
 pytestmark = pytest.mark.skipif(QUINT is None, reason="Quint is not installed")
@@ -318,7 +318,7 @@ class BrowserReplay:
         elif action == "stopSend":
             self.click("#btn-stop-send")
         elif action == "completeJob":
-            self.command(picks["j"]["id"], "ok" if picks["ok"] else "fail")
+            self.command(picks["j"]["id"], job_command(picks))
         elif action == "completeOrphan":
             self.command(picks["sj"]["id"], "ok")
         elif action in ("sendNext", "sendWithoutToken"):

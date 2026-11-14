@@ -18,6 +18,7 @@ from mail_merge.sender import (
     EmailAddress,
     MAX_RECIPIENTS_PER_MESSAGE,
     MessageOptions,
+    SendAborted,
     SendResult,
     send_all,
     send_bcc_blast,
@@ -168,6 +169,23 @@ def _wrap_html_for_email(body: str) -> str:
     return _EMAIL_HTML_HEAD + body + _EMAIL_HTML_TAIL
 
 
+def _require_test_sent(test_email: str, results: list[SendResult]) -> None:
+    """Raise if the test email was not accepted.
+
+    A test email exists to answer "can I send this?", so a rejected one is
+    a failure of the call, not a result to inspect: every caller (CLI, API,
+    web job) then reports it the same way.
+    """
+    failed = next((r for r in results if not r.success), None)
+    if failed is None:
+        return
+    status = f"HTTP {failed.status_code}" if failed.status_code else "no response"
+    detail = f": {failed.error}" if failed.error else ""
+    raise SendAborted(
+        f"Test email to {test_email} was not sent ({status}){detail}", results,
+    )
+
+
 def _parse_filter(expr: str) -> tuple[str, str, str]:
     """Parse a filter expression into (column, operator, value).
 
@@ -293,7 +311,8 @@ def send_merge(
             ``MERGEMAIL365_TENANT_ID``, config file, or defaults to ``"common"``.
         sheet: Worksheet name (default: first sheet).
         test_email: Send one email to this address using first recipient's data,
-            then return. Always sends regardless of ``send`` flag.
+            then return. Always sends regardless of ``send`` flag. Raises
+            ``SendAborted`` if the email is not accepted.
         send: If ``True``, authenticate and send emails. If ``False``
             (the default), validate and render only (dry run).
         output: Path to write a CSV report of results.
@@ -614,10 +633,12 @@ def send_merge(
                 "📧 BCC blast test: sending to %s via %s",
                 test_email, blast_to.address,
             )
-            return send_bcc_blast(
+            results = send_bcc_blast(
                 get_token, [test_email], blast_to, subject, body_template,
                 dry_run=False, opts=msg_opts,
             )
+            _require_test_sent(test_email, results)
+            return results
 
         sample = recipients[0]
         rendered_subject = render(subject, sample)
@@ -631,6 +652,7 @@ def send_merge(
         result = send_one(
             get_token, test_to, rendered_subject, rendered_body, opts=msg_opts,
         )
+        _require_test_sent(test_email, [result])
         return [result]
 
     # --- Output CSV, written as the send goes ---

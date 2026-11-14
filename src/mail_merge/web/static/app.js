@@ -1338,16 +1338,27 @@ async function runJob(mode, id) {
         }
         await dispatch({ type: "jobStarted", id, jobId: data.job_id });
         streamEvents(data.job_id, logPanel, (result) => {
-            const ok = result.status === "completed";
+            // result.ok, not the status: a job whose email was rejected
+            // still runs to the end (spec/wizard.qnt, testPassHonest).
+            const ok = WizardCore.jobSucceeded(result);
             if (mode === "test_email") {
-                completed(ok, ok ? "Test email sent successfully!" : categoriseError(result.error || "Test email failed"));
+                completed(ok, ok ? "Test email sent successfully!" : categoriseError(jobFailureText(result, "Test email failed")));
             } else {
-                completed(ok, ok ? dryRunSummary() : result.error || "Verification failed");
+                completed(ok, ok ? dryRunSummary() : jobFailureText(result, "Verification failed"));
             }
         }, null, isCurrent);
     } catch (e) {
         if (isCurrent()) await completed(false, `Error: ${e.message}`);
     }
+}
+
+// Why a job that didn't succeed failed: its error, or the first rejected
+// email's, or `fallback`.
+function jobFailureText(result, fallback) {
+    if (result.error) return result.error;
+    const failed = (result.results || []).find(r => !r.success);
+    if (failed) return `${failed.status_code || ""} ${failed.error || ""}`.trim() || fallback;
+    return fallback;
 }
 
 // What a passed dry run reports: the count, the time it will take, and a
