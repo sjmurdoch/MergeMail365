@@ -202,9 +202,9 @@ A can ship alone. B and C are independent of each other. D needs the outcome mat
 
 Updated 2026-11-15. Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A and B are complete. Phase C is in progress: C1 and C2 are done; C3, C4 and C5 are next. Phases D, E and F have not been started. Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A, B and C are complete. Phases D, E and F have not been started. Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
-**Checks at the last commit:** 1038 tests pass (14 skipped: Windows-only), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
+**Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
 
 ### Phase A: urgent fixes — complete
 
@@ -224,14 +224,14 @@ Updated 2026-11-15. Work is on the `review-fixes` branch, one commit per step. A
 | B4 (F12) | Done | `--allow-remote`; `_find_open_port(host=...)`. |
 | B5 | Done | `MAX_CONTENT_LENGTH` with a JSON 413, `_json_object()`, `running_send()` under a re-entrant lock, attachments deleted when their job ends. The `auth_login` error redirect was done with B1. |
 
-### Phase C: what goes into the email — in progress
+### Phase C: what goes into the email — complete
 
 | Step | State | Notes |
 |---|---|---|
-| C1 (F4, G4) | Done, one test outstanding | New grammar in `template.py` and `static/template-core.js`; 36 shared vectors and 18 chip columns in `tests/data/template_vectors.json`; `tests/test_placeholders_end_to_end.py`. The web UI blocks Next on step 2 for a placeholder naming no column and warns about stray braces. Two decisions made while implementing: character references in an HTML placeholder name are limited to a fixed list (`&amp; &lt; &gt; &quot; &apos; &nbsp;` and numeric ones) so that Python and JavaScript can agree exactly; and a column whose name contains a brace gets no chip and is listed as unusable. Outstanding: a browser test that the step 2 block and the stray-brace warning appear (the logic is covered by Node and Python tests). |
-| C2 (F8) | Done, one test outstanding | Values are escaped in HTML bodies by both renderers; line breaks in a cell become `<br>`, which the plan did not mention. Outstanding: a browser test that the HTML preview shows the escaped value. |
-| C3 (F6) | Not started | Dates, percentages and large integers in cells. |
-| C4 (F7) | Not started | `addresses.py`; validation of CC, BCC, reply-to, the BCC-mode To address and the test address. |
-| C5 (F9, part) | Not started | Numeric option checks; total attachment size; the invalid-input table (G5). |
+| C1 (F4, G4) | Done | New grammar in `template.py` and `static/template-core.js`; 36 shared vectors and 18 chip columns in `tests/data/template_vectors.json`; `tests/test_placeholders_end_to_end.py`; browser tests in `TestPlaceholderGrammarInThePage`. The web UI blocks Next on step 2 for a placeholder naming no column and warns about stray braces. Two decisions made while implementing: character references in an HTML placeholder name are limited to a fixed list (`&amp; &lt; &gt; &quot; &apos; &nbsp;` and numeric ones) so that Python and JavaScript can agree exactly; and a column whose name contains a brace gets no chip and is listed as unusable. |
+| C2 (F8) | Done | Values are escaped in HTML bodies by both renderers; line breaks in a cell become `<br>`, which the plan did not mention. |
+| C3 (F6) | Done | `excel.cell_text()` and `CELL_CASES`. openpyxl's read-only cells do expose `number_format`. Durations (`[hh]:mm`) and times are handled as well as dates. The note about unapplied formats is on the upload step (`#number-format-note`) and a warning in `send_merge()` when the message uses such a column. |
+| C4 (F7) | Done | `addresses.py`, `tests/test_addresses.py`. Not an RFC 5322 parser, on purpose: a strict one refuses names people write unquoted, such as `[Team] Lead <x@y>`, which an existing test covers. Semicolons and newlines separate addresses as well as commas. `/api/get-recipients` checks the Compose step's addresses. |
+| C5 (F9 part, G5) | Done | `_check_options()`, `_check_message_size()`, argparse types, `tests/test_input_validation.py` (34 rows). The table found one more: an unknown `--sheet` raised `KeyError`, reported as "Unexpected error". The total-size limit reuses the per-attachment limit's existing assumption (about 4 MB per request to Graph, 3 MB of files once base64-encoded); that figure was already in the code and is not stated in the copies of Microsoft's documentation kept in `docs/`. |
 
 ### Phases D, E, F — not started

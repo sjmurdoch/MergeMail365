@@ -22,6 +22,11 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Fixed
 
+- CC, BCC and reply-to addresses are checked before anything is sent, like the recipients' addresses. A mistyped address used to be discovered only when Microsoft rejected the email, once for every recipient. The web UI reports it when you leave the Compose step. The test address and BCC mode's To address are checked too.
+- A display name containing a comma now works when quoted: `"Doe, Jane" <jane@example.com>` used to be split into the "addresses" `Doe` and `Jane`. Addresses may also be separated by semicolons, as in Outlook.
+- `--batch-size`, `--delay` and `--max-retries` refuse values that make no sense. `--batch-size -1` used to send to everyone except the last recipient. `--batch-size 0`, which did nothing, is now an error too.
+- Several attachments that each fit but together exceed what one message can carry (about 3 MB) are refused before sending, instead of failing for every recipient.
+- `--sheet` with a name that isn't in the workbook gives a message listing the sheets, instead of "Unexpected error".
 - **A test email that Microsoft rejected was reported as sent.** In the web UI, step 4 showed "Test email sent successfully!" and let you continue even when Microsoft Graph refused the email (for example, a permission error or an invalid address). It now shows the failure and offers Retry. On the command line, a rejected `--test-email` exited with status 1 but printed nothing; it now says why. In the Python API, `send_merge(test_email=...)` raises `SendAborted` if the test email is not accepted, instead of returning a failed result.
 - Web UI: signing in after opening the app at `127.0.0.1` (rather than `localhost`) ended on a "Forbidden" page, although the sign-in itself had worked. It now returns to the app.
 - Web UI: a sign-in that can't start (no network, a mistyped tenant ID) shows the reason on the page instead of an "Internal Server Error" page.

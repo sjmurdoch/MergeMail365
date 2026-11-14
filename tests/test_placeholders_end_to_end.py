@@ -149,3 +149,26 @@ def test_formatted_number_column_in_use_is_warned_about(tmp_path: Path, caplog: 
     assert "'amount'" in warnings[0] and "1250.5" in warnings[0] and "Text" in warnings[0]
     # What is sent: the date and the percentage as Excel shows them.
     assert any("Subject: Due 2026-12-01" in r.getMessage() for r in caplog.records)
+
+
+# ---- Addresses through send_merge() (F7) ----
+
+
+@responses.activate
+def test_quoted_comma_and_semicolons_in_cc_reach_graph_as_typed(xlsx: Path) -> None:
+    responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+    [message] = run(xlsx, "Hi", "Body", cc='"Doe, Jane" <jane@example.com>; boss@example.com',
+                    reply_to=["[Team] Lead <lead@example.com>"])
+    assert message["ccRecipients"] == [
+        {"emailAddress": {"address": "jane@example.com", "name": "Doe, Jane"}},
+        {"emailAddress": {"address": "boss@example.com"}},
+    ]
+    assert message["replyTo"] == [{"emailAddress": {"address": "lead@example.com", "name": "[Team] Lead"}}]
+
+
+@responses.activate
+def test_test_email_address_may_carry_a_name(xlsx: Path) -> None:
+    responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+    send_merge(spreadsheet=xlsx, subject="Hi", body_text="Body", email_column="E-mail",
+               test_email="Me Myself <me@example.com>", token_provider=lambda: "tok")
+    assert sent_messages()[0]["toRecipients"] == [{"emailAddress": {"address": "me@example.com", "name": "Me Myself"}}]

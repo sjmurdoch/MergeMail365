@@ -7,10 +7,10 @@ import os
 import re
 from collections.abc import Callable
 from datetime import datetime, timezone
-from email.utils import parseaddr
 from pathlib import Path
 
 from mail_merge import config as _config
+from mail_merge.addresses import parse_address, parse_addresses
 from mail_merge.config import load_config
 from mail_merge.excel import number_format_columns, read_recipients
 from mail_merge.template import (
@@ -41,26 +41,20 @@ def _format_addrs(entries: list[EmailAddress]) -> str:
     return ", ".join(str(e) for e in entries)
 
 
-def _parse_one_addr(raw: str) -> EmailAddress:
-    """Parse 'Display Name <email>' or plain email into an EmailAddress."""
-    name, addr = parseaddr(raw.strip())
-    return EmailAddress(address=addr or raw.strip(), name=name or None)
+def _parse_one_addr(raw: str, label: str = "email") -> EmailAddress:
+    """Parse and validate one 'Display Name <email>' or plain address."""
+    return parse_address(raw, label)
 
 
 def _parse_address_entries(
-    value: str | list[str] | None,
+    value: str | list[str] | None, label: str = "email",
 ) -> list[EmailAddress] | None:
-    """Parse addresses (supporting 'Display Name <email>' format) into EmailAddress objects.
+    """Parse and validate addresses (see mail_merge.addresses).
 
-    Accepts a comma-separated string or list. Returns ``None`` when empty.
+    Returns ``None`` when there are none; raises ``ValueError`` for an entry
+    that isn't a valid address.
     """
-    if value is None:
-        return None
-    parts = value.split(",") if isinstance(value, str) else value
-    items = [s for a in parts if (s := a.strip())]
-    if not items:
-        return None
-    return [_parse_one_addr(raw) for raw in items]
+    return parse_addresses(value, label) or None
 
 
 def _normalize_column(
@@ -106,6 +100,45 @@ def _process_attachments(
             "contentBytes": base64.b64encode(content_bytes).decode("ascii"),
         })
     return attachment_list
+
+
+# The whole request, as sent: the same ~4 MB that the per-attachment limit
+# above assumes (3 MB of file is 4 MB once base64-encoded).
+_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+
+
+def _check_message_size(attachments: list[dict[str, str]] | None, body: str) -> None:
+    """Refuse attachments that fit one by one but not together.
+
+    Each is checked alone in _process_attachments(); several can still add
+    up to more than one message may carry, which Graph would then reject
+    for every recipient in turn.
+    """
+    if not attachments:
+        return
+    encoded = sum(len(a["contentBytes"]) for a in attachments)
+    total = encoded + len(body.encode("utf-8"))
+    if total > _MAX_MESSAGE_BYTES:
+        raise ValueError(
+            f"Attachments too large together: {len(attachments)} files come to "
+            f"{encoded * 3 / 4 / (1024 * 1024):.1f} MB; the limit for all attachments "
+            f"in one message is about 3 MB"
+        )
+
+
+def _check_options(batch_size: int | None, delay: float, max_retries: int, importance: str | None) -> None:
+    """Options with a fixed range, checked before anything is read or sent."""
+    if batch_size is not None and batch_size < 1:
+        # A negative slice would silently drop recipients from the end.
+        raise ValueError(f"batch_size must be at least 1, not {batch_size}")
+    if delay < 0:
+        raise ValueError(f"delay must not be negative, not {delay}")
+    if max_retries < 0:
+        raise ValueError(f"max_retries must not be negative, not {max_retries}")
+    if importance is not None and importance not in ("low", "normal", "high"):
+        raise ValueError(
+            f"Invalid importance {importance!r}; expected 'low', 'normal', or 'high'"
+        )
 
 
 _FULL_HTML_DOC_RE = re.compile(r"<!DOCTYPE|<html\b", re.IGNORECASE)
@@ -395,6 +428,10 @@ def send_merge(
             or "common"
         )
 
+    _check_options(batch_size, delay, max_retries, importance)
+    if not email_column:
+        raise ValueError("email_column is required")
+
     # --- BCC blast conflict checks and To address parsing ---
     blast_to: EmailAddress | None = None
     if bcc_blast:
@@ -406,7 +443,14 @@ def send_merge(
         if not bcc_blast_to:
             raise ValueError("bcc_blast_to is required when bcc_blast=True")
         # Support "Display Name <email>" format (RFC 2822)
-        blast_to = _parse_one_addr(bcc_blast_to)
+        blast_to = _parse_one_addr(bcc_blast_to, "BCC-mode To")
+
+    # --- Addresses the user typed: checked now, before anything is read or
+    # sent, like every other input (tests/test_input_validation.py) ---
+    cc_list = _parse_address_entries(cc, "CC")
+    bcc_list = _parse_address_entries(bcc, "BCC")
+    reply_to_list = _parse_address_entries(reply_to, "reply-to")
+    test_to_address = parse_address(test_email, "test email") if test_email else None
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -461,10 +505,7 @@ def send_merge(
                     return previous_results
 
         if batch_size is not None:
-            recipients = recipients[:batch_size]
-            if not recipients:
-                logger.info("✅ No recipients in this batch")
-                return previous_results
+            recipients = recipients[:batch_size]  # at least 1: _check_options()
 
     # --- Read body template ---
     if body_text is not None:
@@ -524,19 +565,9 @@ def send_merge(
                 "it will be sent as written", label,
             )
 
-    # --- Validate importance ---
-    if importance is not None and importance not in ("low", "normal", "high"):
-        raise ValueError(
-            f"Invalid importance {importance!r}; expected 'low', 'normal', or 'high'"
-        )
-
-    # --- Parse CC / BCC / reply-to ---
-    cc_list = _parse_address_entries(cc)
-    bcc_list = _parse_address_entries(bcc)
-    reply_to_list = _parse_address_entries(reply_to)
-
     # --- Process attachments ---
     attachment_list = _process_attachments(attachment)
+    _check_message_size(attachment_list, body_template)
 
     # --- Wrap HTML body for email compatibility ---
     if html:
@@ -667,8 +698,9 @@ def send_merge(
                 "📧 BCC blast test: sending to %s via %s",
                 test_email, blast_to.address,
             )
+            assert test_to_address is not None
             results = send_bcc_blast(
-                get_token, [test_email], blast_to, subject, body_template,
+                get_token, [test_to_address.address], blast_to, subject, body_template,
                 dry_run=False, opts=msg_opts,
             )
             _require_test_sent(test_email, results)
@@ -677,8 +709,9 @@ def send_merge(
         sample = recipients[0]
         rendered_subject = render(subject, sample)
         rendered_body = render(body_template, sample, html=html)
+        assert test_to_address is not None
         test_to_name = sample.get(name_column, "").strip() or None if name_column else None
-        test_to = EmailAddress(address=test_email, name=test_to_name)
+        test_to = EmailAddress(address=test_to_address.address, name=test_to_name or test_to_address.name)
         logger.info(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),

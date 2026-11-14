@@ -1161,6 +1161,15 @@ async function loadPreview(isCurrent = () => true) {
         if ($("sheet-select").value) {
             form.set("sheet", $("sheet-select").value);
         }
+        // Checked by the server with the recipients, so a mistyped address
+        // is reported now.
+        form.set("cc", $("cc-input").value);
+        form.set("bcc", $("bcc-input").value);
+        form.set("reply_to", $("reply-to-input").value);
+        if (state.sendMode === "bcc") {
+            form.set("bcc_blast", "true");
+            form.set("bcc_blast_to", $("bcc-blast-to").value);
+        }
 
         const resp = await apiFetch("/api/get-recipients", {
             method: "POST",

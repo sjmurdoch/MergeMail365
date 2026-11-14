@@ -796,10 +796,18 @@ def create_app(
 
         filters = [f.strip() for f in filters_raw.split("\n") if f.strip()]
 
+        from mail_merge.addresses import parse_address, parse_addresses
         from mail_merge.api import apply_filters
         from mail_merge.excel import read_recipients
 
         try:
+            # The addresses typed on the Compose step, so a mistake is
+            # reported here and not by the test email two steps later.
+            parse_addresses(request.form.get("cc"), "CC")
+            parse_addresses(request.form.get("bcc"), "BCC")
+            parse_addresses(request.form.get("reply_to"), "reply-to")
+            if request.form.get("bcc_blast") == "true":
+                parse_address(request.form.get("bcc_blast_to", ""), "BCC-mode To")
             recipients = read_recipients(filepath, email_column, sheet_name=sheet)
             total_before = len(recipients)
             valid, invalid = _partition_emails(recipients, email_column)

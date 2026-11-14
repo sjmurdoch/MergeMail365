@@ -2293,3 +2293,46 @@ class TestCellFormattingInTheWizard:
         message = _json.loads(responses.calls[0].request.body)["message"]
         assert message["subject"] == "Due 2026-12-01"
         assert message["body"]["content"] == "You owe 1250.5, 25% of the total."
+
+
+class TestComposeAddressesAreCheckedWithTheRecipients:
+    """docs/review-fixes-plan.md, F7: leaving the Compose step reports a
+    mistyped CC, BCC, reply-to or BCC-mode To address."""
+
+    @pytest.fixture
+    def uploaded(self, web_client, sample_xlsx_web):
+        headers = {"X-CSRF-Token": get_csrf(web_client)}
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "test.xlsx")}, headers=headers)
+        return web_client, headers
+
+    @pytest.mark.parametrize(("field", "value", "label"), [
+        ("cc", "boss@example.com, not-an-address", "CC"),
+        ("bcc", "a@", "BCC"),
+        ("reply_to", "Doe, Jane <jane@example.com>", "reply-to"),
+    ])
+    def test_bad_address_is_reported(self, uploaded, field, value, label):
+        client, headers = uploaded
+        resp = client.post("/api/get-recipients", data={"email_column": "email", field: value}, headers=headers)
+        assert resp.status_code == 400
+        assert resp.get_json()["error"].startswith(f"Invalid {label} address")
+
+    def test_bcc_mode_needs_a_valid_to_address(self, uploaded):
+        client, headers = uploaded
+        for to in ("", "nobody", "a@example.com, b@example.com"):
+            resp = client.post("/api/get-recipients", headers=headers,
+                               data={"email_column": "email", "bcc_blast": "true", "bcc_blast_to": to})
+            assert resp.status_code == 400 and "BCC-mode To" in resp.get_json()["error"], to
+        # Not in BCC mode, the field is ignored.
+        resp = client.post("/api/get-recipients", headers=headers,
+                           data={"email_column": "email", "bcc_blast_to": "nobody"})
+        assert resp.status_code == 200
+
+    def test_good_addresses_pass(self, uploaded):
+        client, headers = uploaded
+        resp = client.post("/api/get-recipients", headers=headers, data={
+            "email_column": "email", "cc": '"Doe, Jane" <jane@example.com>; boss@example.com',
+            "bcc": "", "reply_to": "[Team] Lead <lead@example.com>",
+            "bcc_blast": "true", "bcc_blast_to": "List <list@example.com>",
+        })
+        assert resp.status_code == 200 and len(resp.get_json()["recipients"]) == 2

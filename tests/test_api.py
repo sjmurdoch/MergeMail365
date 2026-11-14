@@ -289,25 +289,26 @@ class TestParseAddressEntries:
 
 
 class TestBatchSizeEmptyBatch:
-    def test_batch_size_zero_returns_previous(self, sample_xlsx, body_template_file, tmp_path):
-        """batch_size=0 means no recipients in this batch."""
+    def test_batch_size_zero_is_refused(self, sample_xlsx, body_template_file, tmp_path):
+        """batch_size=0 used to mean "send nothing this time". Since the
+        November 2026 review (docs/review-fixes-plan.md, G5) a batch size
+        below 1 is an error: 0 does nothing useful, and a negative one
+        silently dropped recipients from the end of the list."""
         output = tmp_path / "report.csv"
         write_csv([
             SendResult(email="alice@example.com", success=True, status_code=202),
         ], output)
 
-        results = send_merge(
-            spreadsheet=sample_xlsx,
-            body=body_template_file,
-            subject="Hello {{name}}",
-            email_column="email",
-            output=output,
-            resume=True,
-            batch_size=0,
-        )
-        # Only the previous result (Alice), no new sends
-        assert len(results) == 1
-        assert results[0].email == "alice@example.com"
+        with pytest.raises(ValueError, match="batch_size must be at least 1"):
+            send_merge(
+                spreadsheet=sample_xlsx,
+                body=body_template_file,
+                subject="Hello {{name}}",
+                email_column="email",
+                output=output,
+                resume=True,
+                batch_size=0,
+            )
 
 
 class TestAuthFailure:

@@ -89,6 +89,17 @@ def cell_text(value: object, number_format: str = "General") -> str:
     return str(value).strip()
 
 
+def _sheet(wb: "openpyxl.Workbook", sheet_name: str | None):  # type: ignore[no-untyped-def]
+    """The named worksheet, or the active one."""
+    if not sheet_name:
+        return wb.active
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(
+            f"Sheet {sheet_name!r} not found (available: {', '.join(wb.sheetnames)})"
+        )
+    return wb[sheet_name]
+
+
 def _cell_str(cell: object) -> str:
     """A cell's text (see cell_text)."""
     return cell_text(cell.value, getattr(cell, "number_format", None) or "General")  # type: ignore[attr-defined]
@@ -115,7 +126,7 @@ def number_format_columns(
     _check_file_size(path)
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
-        ws = wb[sheet_name] if sheet_name else wb.active
+        ws = _sheet(wb, sheet_name)
         rows = ws.iter_rows()
         header_row = next(rows, None)
         if header_row is None:
@@ -152,11 +163,8 @@ def read_preview(
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         sheet_names = wb.sheetnames
-        if sheet_name:
-            ws = wb[sheet_name]
-        else:
-            ws = wb.active
-            sheet_name = ws.title
+        ws = _sheet(wb, sheet_name)
+        sheet_name = ws.title
 
         # Count total rows (excluding header)
         total_rows = ws.max_row - 1 if ws.max_row else 0
@@ -196,7 +204,7 @@ def read_recipients(
     _check_file_size(path)
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
-        ws = wb[sheet_name] if sheet_name else wb.active
+        ws = _sheet(wb, sheet_name)
 
         rows = ws.iter_rows()
         header_row = next(rows, None)

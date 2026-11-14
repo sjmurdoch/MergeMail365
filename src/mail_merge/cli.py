@@ -6,6 +6,27 @@ from mail_merge.api import send_merge
 from mail_merge.console import setup_logging
 
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+    return value
+
+
+def _non_negative_int(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must not be negative, not {value}")
+    return value
+
+
+def _non_negative_float(text: str) -> float:
+    value = float(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must not be negative, not {value}")
+    return value
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="mergemail365",
@@ -31,8 +52,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--send", action="store_true", help="Actually send emails (default is dry-run)")
     parser.add_argument("--device-code", action="store_true", help="Use device code flow for headless/SSH environments (default: opens system browser)")
     parser.add_argument("--output", default=None, help="Path to write CSV report")
-    parser.add_argument("--delay", type=float, default=2.0, help="Base seconds between sends (default 2s; Exchange Online allows ~30 msgs/min; adaptive throttling increases this on rate limits)")
-    parser.add_argument("--max-retries", type=int, default=3, help="Max retries per recipient for 5xx errors")
+    parser.add_argument("--delay", type=_non_negative_float, default=2.0, help="Base seconds between sends (default 2s; Exchange Online allows ~30 msgs/min; adaptive throttling increases this on rate limits)")
+    parser.add_argument("--max-retries", type=_non_negative_int, default=3, help="Max retries per recipient for 5xx errors")
     parser.add_argument("--importance", choices=["low", "normal", "high"], default=None, help="Email importance level")
     parser.add_argument("--cc", default=None, help="Comma-separated CC addresses")
     parser.add_argument("--bcc", default=None, help="Comma-separated BCC addresses")
@@ -42,7 +63,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--reply-to", default=None, help="Comma-separated reply-to addresses")
     parser.add_argument("--filter", dest="filters", action="append", default=None, help="Filter recipients: 'column=value' or 'column!=value' (repeatable, AND logic)")
     parser.add_argument("--no-resume", action="store_true", help="Send to all recipients even if --output CSV shows previous successes")
-    parser.add_argument("--batch-size", type=int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")
+    parser.add_argument("--batch-size", type=_positive_int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     parser.add_argument("--log-file", action="store_true", help="Enable debug logging to a file")
