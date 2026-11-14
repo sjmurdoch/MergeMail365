@@ -1109,3 +1109,90 @@ class TestFullWizardFlow:
         # Data should be preserved
         assert page.locator("#subject-input").input_value() == "Subject test 123"
         assert page.locator("#body-input").input_value() == "Body test"
+
+
+class TestPlaceholderGrammarInThePage:
+    """docs/review-fixes-plan.md, F4 and F8: the page uses the same grammar
+    as the email (tests/data/template_vectors.json covers the grammar; these
+    check that the page applies it)."""
+
+    def test_punctuated_columns_and_spaces_inside_braces_preview_as_values(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "For {{ first name }}")
+        page.fill("#body-input", "Budget {{R&D budget}}, price {{Price <GBP>}}, {{O'Brien \"Q\"}}")
+        page.wait_for_timeout(700)  # the debounced check
+        expect(page.locator("#placeholder-errors")).to_be_hidden()
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        expect(page.locator("#preview-subject")).to_have_text("For Alice")
+        expect(page.locator("#preview-body")).to_have_text("Budget £5k & up, price <10, Q1")
+
+    def test_next_is_refused_for_a_placeholder_naming_no_column(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Hello {{Firstname}}")
+        page.fill("#body-input", "Body")
+        alerts: list[str] = []
+        page.on("dialog", lambda dialog: (alerts.append(dialog.message), dialog.accept()))
+        page.click("#btn-next-2")
+        page.wait_for_timeout(1000)
+        expect(page.locator("#step-2")).to_have_class(re.compile("active"))
+        assert len(alerts) == 1 and "{{Firstname}}" in alerts[0]
+        expect(page.locator("#placeholder-errors")).to_contain_text("No column named {{Firstname}}")
+
+    def test_unfinished_placeholder_is_warned_about_but_not_blocked(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Hello {{First Name}")
+        page.fill("#body-input", "Body")
+        expect(page.locator("#placeholder-errors")).to_contain_text("The subject has a {{ or }}", timeout=5000)
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        expect(page.locator("#preview-subject")).to_have_text("Hello {{First Name}")
+
+    def test_html_preview_shows_cell_values_escaped(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        """A cell is data: in the HTML preview "<10" is text, not a tag."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Price {{Price <GBP>}}")
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        page.check("#source-toggle")
+        source = "<p>Price: <b id=\"mine\">{{Price &lt;GBP&gt;}}</b> and {{R&D budget}}</p>"
+        page.fill("#html-source", source)
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        # The subject is plain text: not escaped.
+        expect(page.locator("#preview-subject")).to_have_text("Price <10")
+        srcdoc = page.get_attribute("#preview-body-html", "srcdoc")
+        assert '<b id="mine">&lt;10</b> and £5k &amp; up</p>' in srcdoc
+        frame = page.frame_locator("#preview-body-html")
+        expect(frame.locator("#mine")).to_have_text("<10")
+
+    def test_rich_text_editor_placeholder_for_a_column_with_markup_characters(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        """The editor stores {{R&D budget}} as {{R&amp;D budget}}; it must
+        still be that column."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Hi")
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        page.evaluate("state.trixEditor.insertString('Budget: {{R&D budget}} / {{Price <GBP>}}')")
+        page.wait_for_function("() => document.getElementById('body-input').value.includes('&amp;D')")
+        page.wait_for_timeout(700)
+        expect(page.locator("#placeholder-errors")).to_be_hidden()
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        srcdoc = page.get_attribute("#preview-body-html", "srcdoc")
+        assert "Budget: £5k &amp; up / &lt;10" in srcdoc
