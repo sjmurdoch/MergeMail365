@@ -10,7 +10,7 @@ from typing import Any
 
 import msal
 
-from mail_merge._paths import data_dir
+from mail_merge._paths import data_dir, write_private
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +30,26 @@ else:
 def _load_cache() -> msal.SerializableTokenCache:
     cache = msal.SerializableTokenCache()
     if CACHE_PATH.exists():
-        cache.deserialize(CACHE_PATH.read_text(encoding="utf-8"))
+        try:
+            cache.deserialize(CACHE_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # An unreadable cache would otherwise fail every sign-in check
+            # and every attempt to sign in again. Signing in rewrites it.
+            logger.warning(
+                "⚠️  Ignoring the token cache %s, which could not be read; sign in again",
+                CACHE_PATH, exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
+            cache = msal.SerializableTokenCache()
     return cache
 
 
 def _save_cache(cache: msal.SerializableTokenCache) -> None:
     if cache.has_state_changed:
+        # Created if missing (%LOCALAPPDATA%/mergemail365 on Windows), but
+        # never chmod'ed: elsewhere the cache is a dotfile in the home
+        # directory, which is not the app's to change.
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if sys.platform != "win32":
-            CACHE_PATH.parent.chmod(0o700)
-        CACHE_PATH.write_text(cache.serialize(), encoding="utf-8")
-        if sys.platform != "win32":
-            CACHE_PATH.chmod(0o600)
+        write_private(CACHE_PATH, cache.serialize())
 
 
 def _extract_msal_error(result: dict[str, Any]) -> str:

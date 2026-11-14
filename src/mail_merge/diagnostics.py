@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
+from mail_merge._paths import open_private_append
+
 logger = logging.getLogger(__name__)
 
 STALL_DUMP_FILENAME = "mergemail365-stalls.log"
@@ -120,7 +122,7 @@ def start_diagnostics(dump_dir: Path) -> StallWatchdog:
     log_environment()
     dump_file: TextIO | None
     try:
-        dump_file = open(dump_dir / STALL_DUMP_FILENAME, "a", encoding="utf-8")  # noqa: SIM115
+        dump_file = open_private_append(dump_dir / STALL_DUMP_FILENAME)
     except OSError:
         logger.debug("Could not open stall dump file", exc_info=True)
         dump_file = None

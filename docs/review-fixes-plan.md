@@ -1,6 +1,6 @@
 # Plan: fixes from the November 2026 review
 
-Written 2026-11-14 after a security, usability and correctness review of v0.6.0 (commit `ec3e8d3`). Nothing here is implemented yet. Finding numbers (F1–F16) are the ones used in the review.
+Written 2026-11-14 after a security, usability and correctness review of v0.6.0 (commit `ec3e8d3`). Finding numbers (F1–F16) are the ones used in the review. Progress is recorded in the Status section at the end.
 
 ## How to read this plan
 
@@ -197,3 +197,11 @@ A can ship alone. B and C are independent of each other. D needs the outcome mat
 - Each guard G1–G9 exists and fails when its bug is put back (check by reverting the fix locally).
 - `uv run pytest`, `uv run mypy`, Biome, Ruff, `quint test` and the conformance tiers pass; `spec/check.sh fixed` passes locally for the invariants in `check.sh`.
 - `CLAUDE.md`, `README.md`, the tutorial and the changelog describe the new behaviour.
+
+## Status
+
+| Phase | State | Notes |
+|---|---|---|
+| A1 (F1, G1, G9, R19) | Done | `Job.ok`, `WizardCore.jobSucceeded()`, `send_merge()` raises for a rejected test email; `tests/test_outcomes.py`; model round 3 with `testPassHonest`; `[assumptions]` in `spec/coverage.toml`. Apalache: the three test-email invariants hold in `fixed` and `testPassHonest` and `next4Honest` are violated in `round2` at 12 steps. |
+| A2 (F2, F13, G2) | Done | Implemented as a `RedactingFormatter` rather than a filter (a filter would rewrite records the console also prints). The canary tests found two leaks the review had missed: a DEBUG dry run logged every rendered body, and msal's DEBUG records include the OAuth code and PKCE verifier. Ruff added with `LOG`, `G`, `S`. |
+| A3 (F3, G3) | Done | `write_private()`, `open_private_append()`, `private_dir()`; `tests/test_fs_footprint.py`. |

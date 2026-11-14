@@ -118,14 +118,25 @@ def setup_file_logging(level: int = logging.DEBUG) -> Path | None:
     """
     from logging.handlers import RotatingFileHandler
 
-    from mail_merge._paths import log_dir
+    from mail_merge import _paths
+
+    class PrivateRotatingFileHandler(RotatingFileHandler):
+        """Log files are for the user only: they hold recipient addresses."""
+
+        def _open(self) -> io.TextIOWrapper:
+            return _paths.open_private_append(  # type: ignore[return-value]
+                Path(self.baseFilename), encoding=self.encoding or "utf-8", errors=self.errors,
+            )
 
     try:
-        log_path = log_dir()
-        log_path.mkdir(parents=True, exist_ok=True)
+        log_path = _paths.private_dir(_paths.log_dir())
         log_file = log_path / "mergemail365.log"
+        # Rotated files written by earlier versions were world-readable.
+        if sys.platform != "win32":
+            for old in log_path.glob("mergemail365*.log*"):
+                old.chmod(0o600)
 
-        handler = RotatingFileHandler(
+        handler = PrivateRotatingFileHandler(
             log_file,
             maxBytes=5 * 1024 * 1024,  # 5 MB
             backupCount=3,
@@ -148,7 +159,7 @@ def setup_file_logging(level: int = logging.DEBUG) -> Path | None:
             root.setLevel(level)
 
         return log_file
-    except OSError:
+    except (OSError, ValueError):
         return None
 
 
