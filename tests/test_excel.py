@@ -127,3 +127,102 @@ class TestReadPreview:
         )
         with pytest.raises(ValueError, match="too large"):
             read_preview(path)
+
+
+# ---------------------------------------------------------------------------
+# What a cell becomes in the email (docs/review-fixes-plan.md, F6, D4)
+# ---------------------------------------------------------------------------
+
+import datetime as _dt  # noqa: E402
+
+import openpyxl  # noqa: E402
+
+import pytest as _pytest  # noqa: E402
+
+from mail_merge.excel import cell_text, number_format_columns, read_preview  # noqa: E402
+
+CELL_CASES = [
+    # (value, Excel number format, text in the email)
+    (None, "General", ""),
+    ("  Alice  ", "General", "Alice"),
+    ("007", "General", "007"),
+    ("", "General", ""),
+    (_dt.datetime(2026, 12, 1), "yyyy-mm-dd h:mm:ss", "2026-12-01"),
+    (_dt.datetime(2026, 12, 1), "dd/mm/yyyy", "2026-12-01"),
+    (_dt.datetime(2026, 12, 1, 14, 30), "yyyy-mm-dd h:mm:ss", "2026-12-01 14:30"),
+    (_dt.datetime(2026, 12, 1, 14, 30, 15), "General", "2026-12-01 14:30:15"),
+    (_dt.datetime(2026, 12, 1, 0, 0, 1), "General", "2026-12-01 00:00:01"),
+    (_dt.date(2026, 12, 2), "yyyy-mm-dd", "2026-12-02"),
+    (_dt.time(9, 5), "h:mm:ss", "09:05"),
+    (_dt.time(23, 59, 59), "h:mm:ss", "23:59:59"),
+    (_dt.timedelta(hours=26), "[hh]:mm:ss", "26:00"),
+    (_dt.timedelta(minutes=90, seconds=5), "[hh]:mm:ss", "01:30:05"),
+    (0.25, "0%", "25%"),
+    (0.125, "0.0%", "12.5%"),
+    (0.125, "0%", "12%"),
+    (1, "0%", "100%"),
+    (0.07, "0.00%", "7.00%"),
+    (3.0, "General", "3"),
+    (3, "General", "3"),
+    (-2.50, "General", "-2.5"),
+    (0.1 + 0.2, "General", "0.3"),
+    (1250.5, "£#,##0.00", "1250.5"),
+    (42, "0.00", "42"),
+    (12345678901234567890, "General", "12345678901234567890"),
+    (1.2345678901234567e19, "General", "12345678901234600000"),
+    (1e-7, "General", "0.0000001"),
+    (-0.0, "General", "0"),
+    (1e21, "General", "1000000000000000000000"),
+    (True, "General", "True"),
+    (False, "General", "False"),
+]
+
+
+@_pytest.mark.parametrize(("value", "number_format", "expected"), CELL_CASES,
+                          ids=[f"{v!r} as {f}" for v, f, _ in CELL_CASES])
+def test_cell_text(value, number_format, expected):
+    assert cell_text(value, number_format) == expected
+
+
+def test_no_cell_text_has_an_exponent_or_a_midnight_time():
+    for value, number_format, _ in CELL_CASES:
+        text = cell_text(value, number_format)
+        assert "e+" not in text and "e-" not in text, text
+        assert "00:00:00" not in text, text
+
+
+@_pytest.fixture
+def formatted_xlsx(tmp_path):
+    path = tmp_path / "formatted.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["email", "due", "share", "amount", "count", "id"])
+    ws.append(["a@example.com", _dt.datetime(2026, 12, 1), 0.25, 1250.5, 3, "007"])
+    ws.append(["b@example.com", _dt.date(2026, 12, 24), 0.5, 99.0, 4, "008"])
+    for row in (2, 3):
+        ws.cell(row=row, column=3).number_format = "0%"
+        ws.cell(row=row, column=4).number_format = "£#,##0.00"
+    wb.save(path)
+    return path
+
+
+def test_recipients_and_preview_get_the_same_readable_text(formatted_xlsx):
+    recipients = read_recipients(formatted_xlsx, "email")
+    assert recipients[0] == {
+        "email": "a@example.com", "due": "2026-12-01", "share": "25%",
+        "amount": "1250.5", "count": "3", "id": "007",
+    }
+    assert recipients[1]["due"] == "2026-12-24" and recipients[1]["amount"] == "99"
+    _columns, rows, *_ = read_preview(formatted_xlsx)
+    assert rows == recipients, "the preview must show exactly what is sent"
+
+
+def test_number_format_columns_names_what_is_sent_without_its_format(formatted_xlsx):
+    # Dates and percentages are handled; plain numbers have no format to lose.
+    assert number_format_columns(formatted_xlsx) == {"amount": "1250.5"}
+
+
+def test_number_format_columns_of_an_empty_sheet(tmp_path):
+    path = tmp_path / "empty.xlsx"
+    openpyxl.Workbook().save(path)
+    assert number_format_columns(path) == {}

@@ -719,10 +719,11 @@ def create_app(
         filepath = os.path.join(tmp_dir, "upload.xlsx")
         file.save(filepath)
 
-        from mail_merge.excel import read_preview
+        from mail_merge.excel import number_format_columns, read_preview
 
         try:
             columns, rows, sheets, total_rows, active_sheet = read_preview(filepath)
+            unformatted = number_format_columns(filepath, active_sheet)
         except Exception as exc:
             logger.debug("upload-spreadsheet: read_preview failed", exc_info=True)
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -739,6 +740,9 @@ def create_app(
             "total_rows": total_rows,
             "file_name": file.filename,
             "active_sheet": active_sheet,
+            # Columns of numbers sent without their Excel formatting, each
+            # with an example, for a note on the page (excel.cell_text).
+            "unformatted_numbers": unformatted,
         }
 
         return jsonify({**session["spreadsheet_info"], "rows": rows})
@@ -756,12 +760,13 @@ def create_app(
         if sheet_name is not None and not isinstance(sheet_name, str):
             return jsonify({"error": "sheet must be a string"}), 400  # type: ignore[return-value]
 
-        from mail_merge.excel import read_preview
+        from mail_merge.excel import number_format_columns, read_preview
 
         try:
             columns, rows, sheets, total_rows, active_sheet = read_preview(
                 filepath, sheet_name=sheet_name,
             )
+            unformatted = number_format_columns(filepath, active_sheet)
         except Exception as exc:
             logger.debug("change-sheet: read_preview failed", exc_info=True)
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
@@ -774,6 +779,7 @@ def create_app(
             "total_rows": total_rows,
             "file_name": info.get("file_name", "upload.xlsx"),
             "active_sheet": active_sheet,
+            "unformatted_numbers": unformatted,
         }
 
         return jsonify({**session["spreadsheet_info"], "rows": rows})

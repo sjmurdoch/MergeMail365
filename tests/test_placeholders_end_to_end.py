@@ -125,3 +125,27 @@ def test_cli_dry_run_reports_the_unknown_placeholder(xlsx: Path, tmp_path: Path,
         code = main(["--spreadsheet", str(xlsx), "--body", str(body), "--subject", "Hi", "--email-column", "E-mail"])
     assert code == 1
     assert any("Unresolvable placeholders: Firstname" in r.getMessage() for r in caplog.records)
+
+
+def test_formatted_number_column_in_use_is_warned_about(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """F6, D4: currency and custom formats are not applied; the user is told
+    which column, with an example, but only if the message uses it."""
+    import datetime
+
+    path = tmp_path / "invoices.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["email", "amount", "paid", "due", "share"])
+    ws.append(["a@example.com", 1250.5, 99.0, datetime.datetime(2026, 12, 1), 0.25])
+    ws["B2"].number_format = "£#,##0.00"
+    ws["C2"].number_format = "£#,##0.00"
+    ws["E2"].number_format = "0%"
+    wb.save(path)
+
+    with caplog.at_level(logging.INFO):
+        send_merge(spreadsheet=path, subject="Due {{due}}", body_text="{{amount}} ({{share}})", email_column="email")
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, warnings
+    assert "'amount'" in warnings[0] and "1250.5" in warnings[0] and "Text" in warnings[0]
+    # What is sent: the date and the percentage as Excel shows them.
+    assert any("Subject: Due 2026-12-01" in r.getMessage() for r in caplog.records)

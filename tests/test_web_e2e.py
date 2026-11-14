@@ -1196,3 +1196,31 @@ class TestPlaceholderGrammarInThePage:
         page.wait_for_selector("#step-3.active", timeout=5000)
         srcdoc = page.get_attribute("#preview-body-html", "srcdoc")
         assert "Budget: £5k &amp; up / &lt;10" in srcdoc
+
+
+class TestNumberFormatNote:
+    def test_note_names_columns_sent_without_their_excel_format(
+        self, authenticated_page: Page, tmp_path: Path, sample_xlsx: Path,
+    ):
+        """docs/review-fixes-plan.md, F6 (D4)."""
+        import datetime
+
+        path = tmp_path / "invoices.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["email", "due", "amount <GBP>"])
+        ws.append(["a@example.com", datetime.datetime(2026, 12, 1), 1250.5])
+        ws["C2"].number_format = "£#,##0.00"
+        wb.save(path)
+
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(path))
+        note = page.locator("#number-format-note")
+        expect(note).to_be_visible(timeout=5000)
+        expect(note).to_contain_text("amount <GBP> (for example 1250.5)")
+        expect(page.locator("#preview-table tbody")).to_contain_text("2026-12-01")
+        expect(page.locator("#preview-table tbody")).not_to_contain_text("00:00:00")
+
+        # A spreadsheet with nothing to say: the note goes.
+        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
+        expect(note).to_be_hidden(timeout=5000)

@@ -12,12 +12,13 @@ from pathlib import Path
 
 from mail_merge import config as _config
 from mail_merge.config import load_config
-from mail_merge.excel import read_recipients
+from mail_merge.excel import number_format_columns, read_recipients
 from mail_merge.template import (
     extract_placeholders,
     has_stray_braces,
     render,
     unusable_columns,
+    used_columns,
     validate_template,
 )
 from mail_merge.sender import (
@@ -501,6 +502,18 @@ def send_merge(
                 "⚠️  Column names containing { or } cannot be used as placeholders: %s",
                 ", ".join(braced),
             )
+
+        # Numbers that Excel shows with a format (currency, separators,
+        # fixed decimals) go out as plain numbers: say so for the columns
+        # this message uses, since the spreadsheet looks different.
+        used = used_columns(subject, columns) | used_columns(body_template, columns, html=html)
+        for column, example in number_format_columns(spreadsheet_path, sheet).items():
+            if column in used:
+                logger.warning(
+                    "⚠️  Column %r is formatted as a number in Excel, but is sent without that "
+                    "formatting (for example: %s). Format the column as Text in Excel to "
+                    "control exactly what is sent.", column, example,
+                )
 
     # A "{{" or "}}" left over is probably an unfinished placeholder
     # ("{{name}"), which would otherwise go out exactly as typed.

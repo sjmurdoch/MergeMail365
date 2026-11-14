@@ -168,12 +168,28 @@ function updateStepUI(n) {
 
 function renderSpreadsheetSummary(data) {
     $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${data.total_rows} rows.`;
+    renderNumberFormatNote(data);
     if (data.total_rows > 99) {
         const badge = document.createElement("span");
         badge.className = "badge badge-warning";
         badge.textContent = "Large file — filters required";
         $("spreadsheet-summary").append(" ", badge);
     }
+}
+
+// Dates and percentages are sent as Excel shows them, but other number
+// formats (currency symbols, thousands separators, fixed decimals) are not
+// applied: say which columns that affects. The tables below already show
+// exactly what will be sent.
+function renderNumberFormatNote(data) {
+    const el = $("number-format-note");
+    const columns = Object.entries(data.unformatted_numbers || {});
+    toggle(el, columns.length > 0);
+    if (columns.length === 0) return;
+    const examples = columns.map(([name, example]) => `${name} (for example ${example})`).join(", ");
+    el.textContent = `Numbers in ${columns.length === 1 ? "this column" : "these columns"} are sent without their Excel `
+        + `formatting, such as currency symbols, separators or fixed decimals: ${examples}. The table below shows `
+        + "exactly what will be sent. To control it, format the column as Text in Excel.";
 }
 
 function populateSheetSelect(sheets) {

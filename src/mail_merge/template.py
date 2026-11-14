@@ -100,6 +100,14 @@ def validate_template(template: str, columns: list[str], html: bool = False) -> 
     })
 
 
+def used_columns(template: str, columns: list[str], html: bool = False) -> set[str]:
+    """The columns (as named in the spreadsheet) that the template's
+    placeholders refer to."""
+    known = {normalize_name(c): c for c in columns}
+    found = {_lookup(known, raw, html) for raw in PLACEHOLDER_RE.findall(template)}
+    return {c for c in found if c is not None}
+
+
 def has_stray_braces(template: str) -> bool:
     """Whether a ``{{`` or ``}}`` is left once the placeholders are taken
     out: an unfinished placeholder such as ``{{name}``."""

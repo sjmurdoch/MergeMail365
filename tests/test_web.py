@@ -2231,3 +2231,65 @@ class TestSecurityHeaders:
         assert f'<meta name="csrf-token" content="{token}">' in page
         assert page.count(token) == 1
         assert "<script>" not in page
+
+
+class TestCellFormattingInTheWizard:
+    """docs/review-fixes-plan.md, F6: the page shows, and the job sends, the
+    same readable text for dates and percentages, and names the columns
+    whose Excel number format is not applied."""
+
+    @pytest.fixture
+    def formatted_xlsx(self, tmp_path):
+        import datetime
+
+        path = tmp_path / "invoices.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["email", "due", "share", "amount"])
+        ws.append(["a@example.com", datetime.datetime(2026, 12, 1), 0.25, 1250.5])
+        ws["C2"].number_format = "0%"
+        ws["D2"].number_format = "£#,##0.00"
+        ws2 = wb.create_sheet("Plain")
+        ws2.append(["email", "n"])
+        ws2.append(["b@example.com", 5])
+        wb.save(path)
+        return path
+
+    def test_upload_preview_recipients_and_config_agree(self, web_client, formatted_xlsx):
+        headers = {"X-CSRF-Token": get_csrf(web_client)}
+        with open(formatted_xlsx, "rb") as f:
+            data = web_client.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "invoices.xlsx")},
+                                   headers=headers).get_json()
+        expected = {"email": "a@example.com", "due": "2026-12-01", "share": "25%", "amount": "1250.5"}
+        assert data["rows"] == [expected]
+        assert data["unformatted_numbers"] == {"amount": "1250.5"}
+
+        recipients = web_client.post("/api/get-recipients", data={"email_column": "email"},
+                                     headers=headers).get_json()["recipients"]
+        assert recipients == [expected]
+
+        config = web_client.get("/api/config").get_json()["spreadsheet"]
+        assert config["rows"] == [expected] and config["unformatted_numbers"] == {"amount": "1250.5"}
+
+        other = web_client.post("/api/change-sheet", json={"sheet": "Plain"}, headers=headers).get_json()
+        assert other["unformatted_numbers"] == {}
+
+    @responses.activate
+    def test_sent_email_has_the_same_text_as_the_preview(self, web_client, formatted_xlsx, monkeypatch):
+        import json as _json
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token_silent", lambda *a, **kw: "tok")
+        monkeypatch.setattr("mail_merge.web.app.WEB_SEND_DELAY", 0)
+        web_client.application.config["FIXED_CLIENT_ID"] = "cid"
+        headers = {"X-CSRF-Token": get_csrf(web_client)}
+        with open(formatted_xlsx, "rb") as f:
+            web_client.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "invoices.xlsx")}, headers=headers)
+        job_id = web_client.post("/api/start-job", data={
+            "mode": "send", "email_column": "email", "subject": "Due {{due}}",
+            "body": "You owe {{amount}}, {{share}} of the total.",
+        }, headers=headers).get_json()["job_id"]
+        assert wait_for_job(web_client, job_id)["ok"]
+        message = _json.loads(responses.calls[0].request.body)["message"]
+        assert message["subject"] == "Due 2026-12-01"
+        assert message["body"]["content"] == "You owe 1250.5, 25% of the total."
