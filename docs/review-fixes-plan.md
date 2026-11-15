@@ -448,7 +448,7 @@ The command-line tool is not part of what the release workflow builds. If the us
 
 Updated 2026-11-15 (end of phase F; last commit `734da86`). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A to F are complete. Phases G and H have not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A to F are complete. Phase G has its inventory and verdicts (G1, G2) and waits for the user's decision (G3); phase H has not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
 **Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
 
@@ -513,6 +513,35 @@ Checks at `feebd91` (E3, the last code change): 1237 passed, 14 skipped; mypy, R
 | `spec/*`, `docs/quint-model.md` | No change needed | The model did not change after A1, which updated them. |
 | Move this plan to `archive/` | Not yet | After G and H. |
 
-### Phases G, H — not started
+### Phase G: dependencies — G1 and G2 done, waiting for the user (G3)
+
+Checked 2026-11-15. "Allowed" is the newest version public for at least 7 days (released on or before 2026-11-08): for Python packages, what `uv lock --upgrade` chose in a scratch copy of the project, with `exclude-newer` applied; for the rest, release dates read from npm and GitHub. Advisories are from osv.dev for every locked package at its current version, and `npm audit` for Quint.
+
+**Already current, no change:** msal 1.39.0, requests 2.34.2, openpyxl 3.1.5, email-validator 2.3.0, rich 15.0.0, flask 3.1.3, pywebview 6.2.1, pyinstaller 6.22.3, responses, ruff; Trix 2.1.19 and Pico CSS 2.1.1 (newest on npm); `actions/checkout` v7.0.1, `biomejs/setup-biome` v2.7.1.
+
+**Security advisories against the current versions:**
+
+| Package | Advisory | Affects this app? | Fixed in |
+|---|---|---|---|
+| certifi 2026.7.22 | GHSA-6q48-6c7w-9gw2: the bundle trusts a root whose intermediates' keys were compromised; an on-path attacker could intercept TLS | **Yes**: `requests` uses certifi for every call to Graph and Entra (msal uses `requests`) | 2026.10.18 (allowed: 2026.10.23) |
+| werkzeug 3.1.8 | GHSA-g6x2-hccm-hh4m: `safe_join` lets through Windows device names such as `NUL:` | **Yes, on Windows**: static files are served with `send_from_directory`, and `/static/` needs no session (the Host allowlist still applies) | 3.1.9 |
+| pyjwt 2.14.0 | GHSA-42vr-xj54-vc7v (recursion DoS in `PyJWKClient`), GHSA-x33g-cr3x-6449 (inconsistent OKP JWKs) | No: msal uses PyJWT only for confidential-client assertions; this app is a public client and verifies no JWKs | 2.15.0 (allowed: 2.15.1) |
+| dnspython 2.8.0 | GHSA-45c3-73f7-pv4m, GHSA-vvf4-9x63-8xvv (CPU and memory on crafted DNS data) | No: reached only through email-validator's deliverability check, which the app turns off (`check_deliverability=False`) | 2.9.2 |
+| setuptools 84.0.0 | GHSA-xmj3-9gf7-h52w (Windows path escape installing a legacy wheel) | No: a build-time dependency of PyInstaller; nothing installs wheels through it | 84.1.0 (allowed: 84.2.1) |
+| Quint 0.32.0 (`adm-zip`) | Two high-severity zip-parsing issues | No: used only to unpack the Apalache download | Quint 0.33.1 (`adm-zip` 0.6) |
+
+**Inventory and verdicts**, grouped as they would be committed:
+
+| Group | Now → allowed (release date) | What changed | Tests that would notice | Verdict |
+|---|---|---|---|---|
+| 1. Runtime, with security fixes | certifi 2026.7.22 → 2026.10.23 (10-23); werkzeug 3.1.8 → 3.1.9 (09-27); pyjwt 2.14.0 → 2.15.1 (09-28); dnspython 2.8.0 → 2.9.2 (11-03); cryptography 50.0.1 → 50.0.2 (09-30); charset-normalizer 3.5.1 → 3.5.2; click 8.5.0 → 8.5.1; markupsafe 3.0.3 → 3.0.4; pycparser 3.0 → 3.12; setuptools 84.0.0 → 84.2.1 | Werkzeug 3.1.9 also: `get_host` checks the port range, URL-encoded form data limited only by `max_content_length`, Python 3.15 support. PyJWT 2.15: errors wrapped in `DecodeError`, Python 3.15. The rest are patch releases | `tests/test_web*.py` (sessions, `TestRouteTable`, security headers, robustness), `tests/test_msal_contract.py`, the outcome matrix | **Update.** certifi and werkzeug fix issues that reach this app |
+| 2. Desktop window backends | pyobjc-* 12.2.2 → 13.0 (10-30; macOS); pythonnet 3.1.0 → 3.2.1 (10-08; Windows) | pyobjc 13: macOS 27 SDK, drops Python 3.10, some framework functions no longer take keyword arguments, `objc.native_selector` can't create selectors. pythonnet 3.2: thread-safety fixes in the runtime and binding (possibly relevant to the Windows stall in `TODO.md`), drops Python 3.10 (the reason it was held last time; the minimum is now 3.14). No pywebview issue reports pyobjc 13 trouble | **None automated**: no test runs the real web view. Phase H items 1, 2, 7, 12 and 17 | **Update, checked in phase H.** Holding them would ship old backends that phase H tests anyway; if H finds a problem, pin back |
+| 3. Test and type tooling | mypy 2.3.1 → 2.4.1 (native parser now default); pytest 9.1.1 → 9.2.0 (deprecations only); playwright 1.63.0 → 1.64.1 (Chromium 156; elements in hidden iframes now count as hidden); pytest-playwright 0.9.0 → 0.10.0 (drops `pytest-base-url`, whose fixture no test uses); coverage 7.17.2, pluggy 1.7.0, iniconfig 2.3.1, mypy-extensions 1.2.0, librt 0.16.0, ast-serialize 0.13.1, types-requests, python-slugify 9.1.3, pyee 14.0.0 (newest playwright allows), pyinstaller-hooks-contrib 2026.9 | Not shipped, apart from the PyInstaller hooks | The suite itself; mypy may report new errors | **Update** |
+| 4. Quint | 0.32.0 → 0.33.1 (10-28) | Fixes the `adm-zip` audit finding. Apalache 0.62 needs Java 21 (Java 27 is installed; CI doesn't run Apalache). 0.33 rejects `and`/`or` combining assignments, which `spec/wizard.qnt` doesn't do. A fix to `mbt::actionTaken` on initial states of Rust-evaluator traces (this project uses the TypeScript backend) | Scenario tests for all four variants, the simulation, `tests/test_conformance.py`, `tests/test_conformance_e2e.py`; `spec/check.sh` for Apalache | **Update**, with the scenarios, simulation and conformance tiers; an Apalache run (about 2 hours) is advisable but the model is unchanged |
+| 5. CI tools | setup-python v7.0.0 → v7.1.0 (10-22); setup-uv v10.2.0 → v10.3.3 (10-28); uv 0.12.18 → 0.13.6 (10-27), not 0.13.7: setup-uv 10.3.3's embedded checksums end at 0.13.6 | uv 0.13's breaking changes (3.15 default when nothing is pinned; hash and editable rules in constraints files; native ARM64 Python on Windows) don't apply: Python is pinned to 3.14 everywhere and no constraints files are used. Local uv is 0.12.21 | Only a CI run (phase H1) | **Update**, pinned by commit SHA, and confirmed by H1 |
+| 6. Biome | 2.5.14 → 2.6.6 (11-06) | 2.6 promotes 59 rules to stable, most recommended, among them `useDomNodeTextContent` and `useIframeSandbox`, which may report findings in `app.js` | `biome lint` | **Needs a trial first**: running Biome 2.6.6 through `npx` was blocked by the session's permission check (downloading and running a new tool). Run it once (with your approval, or install it with Homebrew yourself), fix or configure what it reports, then pin it in CI and `biome.json` |
+| 7. Python | 3.14 (CI and release get the latest patch, 3.14.10) | 3.15.0 released 2026-10-09, now 3.15.2. Every dependency above supports it | — | **Hold** at 3.14; adding 3.15 to the CI matrix is your call (it doubles the test jobs' minutes) |
+
+### Phase H — not started
 
 What each step involves, file by file, is under [Remaining work, in detail](#remaining-work-in-detail) in the Handover section. Add a table here for each phase as it is done, in the style of the ones above.
