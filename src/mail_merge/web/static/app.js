@@ -1221,6 +1221,18 @@ async function loadPreview(isCurrent = () => true) {
     }
 }
 
+// Show an HTML email in the preview frame. Each preview gets a new frame,
+// a copy of the empty one in index.html (so still sandbox=""): on Windows,
+// WebView2 left the reused frame blank after New merge, for every recipient
+// (phase H), which Chromium doesn't reproduce.
+function showPreviewHtml(doc) {
+    const old = $("preview-body-html");
+    const frame = old.cloneNode(false);
+    frame.removeAttribute("srcdoc");
+    frame.srcdoc = doc;  // sandbox="" (no script, no forms)
+    old.replaceWith(frame);
+}
+
 function renderPreviewRecipient() {
     const recipients = getRecipients();
     if (!recipients || recipients.length === 0) return;
@@ -1240,9 +1252,7 @@ function renderPreviewRecipient() {
         hide("preview-body");
         show("preview-body-html");
         const w = state.emailWrapper;
-        $("preview-body-html").srcdoc = w
-            ? w.head + stripHtmlDocTags(rendered_body) + w.tail
-            : rendered_body;
+        showPreviewHtml(w ? w.head + stripHtmlDocTags(rendered_body) + w.tail : rendered_body);
     } else {
         show("preview-body");
         hide("preview-body-html");

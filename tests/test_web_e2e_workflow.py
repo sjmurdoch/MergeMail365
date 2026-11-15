@@ -343,6 +343,40 @@ class TestButtonState:
         expect(page.locator("#verify-log")).to_be_visible()
 
 
+class TestHtmlPreview:
+    def test_preview_frame_after_new_merge(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, Windows: after New merge the HTML preview stayed blank in
+        WebView2. Each preview now gets a new frame; it must stay sandboxed,
+        be the only one, and hold the recipient's email."""
+        page = wizard
+
+        def preview_html() -> None:
+            page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+            page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+            page.click("#btn-next-1")
+            page.wait_for_selector("#step-2.active", timeout=5000)
+            page.fill("#subject-input", "Hello {{name}}")
+            page.check("#html-toggle")
+            page.check("#source-toggle")
+            page.fill("#html-source", "<p>Dear <b>{{name}}</b></p>")
+            page.click("#btn-next-2")
+            page.wait_for_selector("#step-3.active", timeout=5000)
+            for name in ("Alice", "Bob"):
+                frames = page.locator("iframe#preview-body-html")
+                expect(frames).to_have_count(1)
+                expect(frames).to_be_visible()
+                assert frames.get_attribute("sandbox") == ""
+                assert f"<p>Dear <b>{name}</b></p>" in (frames.get_attribute("srcdoc") or "")
+                expect(page.frame_locator("#preview-body-html").locator("b")).to_have_text(name)
+                if name == "Alice":
+                    page.click("[data-action='changePreviewRecipient(1)']")
+
+        preview_html()
+        page.evaluate("newMerge()")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        preview_html()
+
+
 class TestRestoreAfterRestart:
     def test_saved_columns_are_chosen_after_upload(self, wizard: Page, workflow_xlsx: Path):
         """Phase H, Windows: after quitting and reopening the desktop app,

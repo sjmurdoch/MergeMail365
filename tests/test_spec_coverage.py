@@ -308,7 +308,7 @@ class TestHtmlSinks:
         # or runs, before Trix sanitises it (CLAUDE.md, "Untrusted content").
         "div.innerHTML = paste.html;  // inert document: nothing loads or runs",
         # The email preview: an iframe with sandbox="" (no script, no forms).
-        '$("preview-body-html").srcdoc = w',
+        'frame.srcdoc = doc;  // sandbox="" (no script, no forms)',
     }
 
     def test_app_js_has_no_other_sink(self):
