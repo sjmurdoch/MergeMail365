@@ -442,13 +442,13 @@ The command-line tool is not part of what the release workflow builds. If the us
 2. ~~Resume and "outcome unknown"~~: answered 2026-11-15, skip with a warning (done in D2).
 3. **Releasing.** Whether phase A should go out on its own as 0.6.1 (it would have to be cherry-picked, since later commits change behaviour) or everything together as 0.7.0.
 4. ~~Phase G~~: answered 2026-11-15 (groups 1–5 and Biome updated; Python stays 3.14).
-5. **Phase H:** approval to push the branch, open a pull request and publish a pre-release; the candidate's version number; which Microsoft 365 account and which recipient mailboxes to use; who operates the Windows machine.
+5. ~~Phase H~~: answered 2026-11-15 (push, pull request and pre-release approved; the user named the account and recipients; the user runs the desktop-app agent on macOS, then Windows).
 
 ## Status
 
 Updated 2026-11-15 (end of phase G). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A to G are complete. Phase H has not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A to G are complete. Phase H: CI is green (H1) and the release candidate `v0.7.0rc1` is built (H2); the real-system tests (H3) are next (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
 **Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
 
@@ -546,6 +546,14 @@ Checked 2026-11-15. "Allowed" is the newest version public for at least 7 days (
 | 6. Biome | 2.5.14 → 2.6.6 (11-06) | 2.6 promotes 59 rules to stable, most recommended, among them `useDomNodeTextContent` and `useIframeSandbox`, which may report findings in `app.js` | `biome lint` | **Needs a trial first**: running Biome 2.6.6 through `npx` was blocked by the session's permission check (downloading and running a new tool). Run it once (with your approval, or install it with Homebrew yourself), fix or configure what it reports, then pin it in CI and `biome.json` |
 | 7. Python | 3.14 (CI and release get the latest patch, 3.14.10) | 3.15.0 released 2026-10-09, now 3.15.2. Every dependency above supports it | — | **Hold** at 3.14; adding 3.15 to the CI matrix is your call (it doubles the test jobs' minutes) |
 
-### Phase H — not started
+### Phase H: released build on real systems — in progress
+
+| Step | State | Notes |
+|---|---|---|
+| H1 | Done | Pull request #4. The first CI run failed three tests on Windows, all from this branch: the `{abs}` traversal case (a Windows path, whose backslashes Werkzeug 3.1.9 unescapes) and the two default-path tests in `tests/test_windows.py` (the `_no_user_settings` fixture replaced the paths they check; `conftest.py` now records the originals as `real_user_paths`). Fixed in `c50e0de`; the second run passed on Linux, macOS and Windows, with `spec` and `lint-js`. |
+| H2 | Done | Pre-release `v0.7.0rc1` at `c50e0de`, published 2026-11-15; the release workflow built and attached `MergeMail365-macOS.zip` and `MergeMail365-Windows.zip`. The macOS bundle's `Info.plist` and package metadata say `0.7.0rc1`. |
+| H3 | Waiting | Run by Claude Code in the Claude desktop app (computer use), macOS first, then Windows, from instructions kept outside the repository because they name the sending account and the recipients' domain (the user has them, with the test spreadsheet). Results come back as one file per platform. |
+| H4, H5 | Not started | |
+
 
 What each step involves, file by file, is under [Remaining work, in detail](#remaining-work-in-detail) in the Handover section. Add a table here for each phase as it is done, in the style of the ones above.
