@@ -6,11 +6,11 @@ This tool allows you to send mail merge campaigns using your Office 365 account.
 
 ## Features
 
-- **Personalized Emails**: Use `{{column_name}}` placeholders in the subject and body to insert data from your spreadsheet.
+- **Personalized Emails**: Use `{{column_name}}` placeholders in the subject and body to insert data from your spreadsheet. Any column name works (`{{First Name}}`, `{{E-mail}}`), case and spaces inside the braces don't matter, and a placeholder that names no column stops the send. Dates are written `2026-12-01` and percentages `25%`; other number formats, such as currency, are not applied (see the [tutorial](docs/tutorial.md#5-write-your-email-template)).
 - **Flexible Data Source**: Reads recipients from an `.xlsx` file.
 - **Safe by Default**: Performs a dry run by default. You must explicitly pass `--send` to deliver emails.
-- **Authentication**: Uses a secure, interactive device authorization flow to get permissions. Tokens are cached for future use.
-- **HTML & Attachments**: Send HTML emails (`--html`) and include multiple attachments (`--attachment`).
+- **Authentication**: Signs in through your web browser (or with a device code, `--device-code`, on a machine without one). Tokens are cached for future use; each run says which account it sends as, and `--sign-out` signs out.
+- **HTML & Attachments**: Send HTML emails (`--html`), with spreadsheet values inserted as text rather than markup, and include multiple attachments (`--attachment`).
 - **CC & BCC**: Add static CC and BCC recipients to every email.
 - **Test Before Sending**: Send a test email to yourself (`--test-email`) to verify formatting.
 - **Rate Limit Aware**: Automatically handles Microsoft Graph API rate limiting with adaptive backoff.
@@ -95,49 +95,53 @@ For detailed instructions and advanced features, see the [**Tutorial**](docs/tut
 ## Usage
 
 ```
-usage: mergemail365 [-h] --spreadsheet SPREADSHEET --body BODY --subject SUBJECT --email-column EMAIL_COLUMN [--client-id CLIENT_ID] [--tenant-id TENANT_ID] [--sheet SHEET]
-                    [--test-email TEST_EMAIL] [--send] [--output OUTPUT] [--delay DELAY] [--max-retries MAX_RETRIES] [--importance {low,normal,high}] [--cc CC] [--bcc BCC]
-                    [--html] [--no-save-to-sent] [--attachment ATTACHMENT] [--reply-to REPLY_TO] [--filter FILTERS] [--no-resume] [--batch-size BATCH_SIZE] [-y]
-                    [--log-level LOG_LEVEL] [--bcc-blast] [--bcc-blast-to BCC_BLAST_TO]
+usage: mergemail365 --spreadsheet SPREADSHEET --body BODY --subject SUBJECT --email-column EMAIL_COLUMN [options]
+       mergemail365 --sign-out [--client-id CLIENT_ID] [--tenant-id TENANT_ID]
 
 Send personalised emails via Microsoft Graph API
 
 options:
   -h, --help            show this help message and exit
   --spreadsheet SPREADSHEET
-                        Path to .xlsx file with recipients
-  --body BODY           Path to body template file (plain text by default; use --html for HTML)
-  --subject SUBJECT     Email subject (supports {{placeholders}})
+                        Path to .xlsx file with recipients (required)
+  --body BODY           Path to body template file (plain text by default; use --html for HTML) (required)
+  --subject SUBJECT     Email subject (supports {{placeholders}}) (required)
   --email-column EMAIL_COLUMN
-                        Column name containing email addresses
+                        Column name containing email addresses (required)
   --client-id CLIENT_ID
                         Azure AD application (client) ID (or set MERGEMAIL365_CLIENT_ID env var, or config file)
   --tenant-id TENANT_ID
                         Azure AD tenant ID (or set MERGEMAIL365_TENANT_ID env var, or config file; default: 'common')
   --sheet SHEET         Sheet name (default: first sheet)
+  --name-column NAME_COLUMN
+                        Column name containing recipient display names (included in the To: header)
   --test-email TEST_EMAIL
                         Send a single test email to this address using the first recipient's data, then exit
   --send                Actually send emails (default is dry-run)
+  --device-code         Use device code flow for headless/SSH environments (default: opens system browser)
   --output OUTPUT       Path to write CSV report
   --delay DELAY         Base seconds between sends (default 2s; Exchange Online allows ~30 msgs/min; adaptive throttling increases this on rate limits)
   --max-retries MAX_RETRIES
-                        Max retries per recipient for 5xx errors
+                        Max retries per recipient for server (5xx) and connection errors (default 3; a timeout after sending is never retried)
   --importance {low,normal,high}
                         Email importance level
-  --cc CC               Comma-separated CC addresses
-  --bcc BCC             Comma-separated BCC addresses
+  --cc CC               CC addresses, separated by commas or semicolons; each 'Name <address>' or a bare address
+  --bcc BCC             BCC addresses, as for --cc
   --html                Treat body as HTML (default: plain text)
   --no-save-to-sent     Do not save sent messages to Sent Items folder
   --attachment ATTACHMENT
                         Path to file attachment (repeatable)
-  --reply-to REPLY_TO   Comma-separated reply-to addresses
+  --reply-to REPLY_TO   Reply-to addresses, as for --cc
   --filter FILTERS      Filter recipients: 'column=value' or 'column!=value' (repeatable, AND logic)
   --no-resume           Send to all recipients even if --output CSV shows previous successes
   --batch-size BATCH_SIZE
                         Max emails to send per invocation (use with --output for resumable batching)
   -y, --yes             Skip confirmation prompt
-  --log-level LOG_LEVEL
-                        Logging level
+  --sign-out            Sign out of every cached Microsoft account, then exit (needs only the client ID)
+  --log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}
+                        Logging level (or set MERGEMAIL365_LOG_LEVEL, or log-level in the config file; default: INFO)
+  -v, --verbose         Same as --log-level DEBUG
+  --log-file            Enable debug logging to a file
   --bcc-blast           Send all recipients via BCC in batches (recipients cannot see each other)
   --bcc-blast-to BCC_BLAST_TO
                         The To: address used in BCC blast mode (required with --bcc-blast)

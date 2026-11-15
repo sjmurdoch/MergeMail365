@@ -107,7 +107,7 @@ def read_csv(path: str | Path) -> list[SendResult]:
                 success=row["success"] == "True",
                 status_code=int(status_raw) if status_raw else None,
                 error=_unsanitize_csv(row.get("error") or ""),
-                # Reports from before 0.7.0 have no "unknown" column.
+                # Reports from 0.6.0 and earlier have no "unknown" column.
                 unknown=row.get("unknown") == "True",
             ))
     return results

@@ -31,11 +31,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mergemail365",
         description="Send personalised emails via Microsoft Graph API",
+        # The four send arguments are required unless --sign-out is given
+        # (_parse), which argparse's generated usage line can't show.
+        usage=(
+            "%(prog)s --spreadsheet SPREADSHEET --body BODY --subject SUBJECT "
+            "--email-column EMAIL_COLUMN [options]\n"
+            "       %(prog)s --sign-out [--client-id CLIENT_ID] [--tenant-id TENANT_ID]"
+        ),
     )
-    parser.add_argument("--spreadsheet", default=None, help="Path to .xlsx file with recipients")
-    parser.add_argument("--body", default=None, help="Path to body template file (plain text by default; use --html for HTML)")
-    parser.add_argument("--subject", default=None, help="Email subject (supports {{placeholders}})")
-    parser.add_argument("--email-column", default=None, help="Column name containing email addresses")
+    parser.add_argument("--spreadsheet", default=None, help="Path to .xlsx file with recipients (required)")
+    parser.add_argument("--body", default=None, help="Path to body template file (plain text by default; use --html for HTML) (required)")
+    parser.add_argument("--subject", default=None, help="Email subject (supports {{placeholders}}) (required)")
+    parser.add_argument("--email-column", default=None, help="Column name containing email addresses (required)")
     parser.add_argument(
         "--client-id",
         default=None,
@@ -53,14 +60,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device-code", action="store_true", help="Use device code flow for headless/SSH environments (default: opens system browser)")
     parser.add_argument("--output", default=None, help="Path to write CSV report")
     parser.add_argument("--delay", type=_non_negative_float, default=2.0, help="Base seconds between sends (default 2s; Exchange Online allows ~30 msgs/min; adaptive throttling increases this on rate limits)")
-    parser.add_argument("--max-retries", type=_non_negative_int, default=3, help="Max retries per recipient for 5xx errors")
+    parser.add_argument("--max-retries", type=_non_negative_int, default=3, help="Max retries per recipient for server (5xx) and connection errors (default 3; a timeout after sending is never retried)")
     parser.add_argument("--importance", choices=["low", "normal", "high"], default=None, help="Email importance level")
-    parser.add_argument("--cc", default=None, help="Comma-separated CC addresses")
-    parser.add_argument("--bcc", default=None, help="Comma-separated BCC addresses")
+    parser.add_argument("--cc", default=None, help="CC addresses, separated by commas or semicolons; each 'Name <address>' or a bare address")
+    parser.add_argument("--bcc", default=None, help="BCC addresses, as for --cc")
     parser.add_argument("--html", action="store_true", help="Treat body as HTML (default: plain text)")
     parser.add_argument("--no-save-to-sent", action="store_true", help="Do not save sent messages to Sent Items folder")
     parser.add_argument("--attachment", action="append", default=None, help="Path to file attachment (repeatable)")
-    parser.add_argument("--reply-to", default=None, help="Comma-separated reply-to addresses")
+    parser.add_argument("--reply-to", default=None, help="Reply-to addresses, as for --cc")
     parser.add_argument("--filter", dest="filters", action="append", default=None, help="Filter recipients: 'column=value' or 'column!=value' (repeatable, AND logic)")
     parser.add_argument("--no-resume", action="store_true", help="Send to all recipients even if --output CSV shows previous successes")
     parser.add_argument("--batch-size", type=_positive_int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")

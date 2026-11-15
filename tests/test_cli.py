@@ -874,3 +874,11 @@ class TestSignOut:
             main(["--subject", "x"])
         assert info.value.code == 2
         assert "--spreadsheet" in capsys.readouterr().err
+
+
+def test_help_shows_both_forms(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    assert "mergemail365 --spreadsheet SPREADSHEET --body BODY --subject SUBJECT --email-column EMAIL_COLUMN [options]" in out
+    assert "mergemail365 --sign-out [--client-id CLIENT_ID]" in out
