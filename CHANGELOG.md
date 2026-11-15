@@ -44,6 +44,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Added
 
+- The command line says which account it sends from: `Sending as you@example.com` once signed in, and a `From:` line in the confirmation prompt before a send (or "you will be asked to sign in"). If more than one account is signed in, a warning lists them and names the one used.
+- `mergemail365 --sign-out` signs out of every cached account. Before, only the web UI could sign out.
 - `-v` / `--verbose` (short for `--log-level DEBUG`) on `mergemail365` and `mergemail365-web`, and the log level can be set with the `MERGEMAIL365_LOG_LEVEL` environment variable or `log-level` in `~/.mergemail365.toml`.
 - Web UI: a footer showing the running version, e.g. "MergeMail365 v0.6.0".
 

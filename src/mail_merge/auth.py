@@ -52,6 +52,34 @@ def _save_cache(cache: msal.SerializableTokenCache) -> None:
         write_private(CACHE_PATH, cache.serialize())
 
 
+def cached_account_names() -> list[str]:
+    """The usernames of the accounts in the token cache, in the order
+    ``PublicClientApplication.get_accounts()`` lists them (it groups the
+    cache's account entries by ``home_account_id``), so the first is the
+    one the acquire functions use.
+
+    Reads the cache file only: building an msal app would fetch the
+    authority's metadata over the network."""
+    cache = _load_cache()
+    grouped: dict[object, str] = {}
+    for account in cache.search(msal.TokenCache.CredentialType.ACCOUNT):
+        grouped[account.get("home_account_id")] = str(account.get("username") or "")
+    return [name for name in grouped.values() if name]
+
+
+def account_name(token: str) -> str | None:
+    """Who a token sends as: its ``upn`` / ``preferred_username`` claim,
+    or, for a token that isn't a readable JWT (personal Microsoft accounts
+    get opaque ones), the first cached account."""
+    claims = _jwt_claims(token)
+    for claim in ("upn", "preferred_username", "unique_name"):
+        value = claims.get(claim)
+        if isinstance(value, str) and value:
+            return value
+    names = cached_account_names()
+    return names[0] if names else None
+
+
 def _extract_msal_error(result: dict[str, Any]) -> str:
     """Extract a human-readable error message from an MSAL result dict."""
     return str(result.get("error_description", result.get("error", "Unknown error")))
@@ -94,7 +122,7 @@ def acquire_token_interactive_flow(
     result: dict[str, Any] | None = None
 
     if accounts:
-        logger.info("🔑 Found cached account, attempting silent token acquisition")
+        logger.debug("🔑 Found cached account, attempting silent token acquisition")
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
 
     if not result:
@@ -127,7 +155,7 @@ def acquire_token(client_id: str, tenant_id: str = "common") -> str:
     result: dict[str, Any] | None = None
 
     if accounts:
-        logger.info("🔑 Found cached account, attempting silent token acquisition")
+        logger.debug("🔑 Found cached account, attempting silent token acquisition")
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
 
     if not result:
@@ -281,25 +309,29 @@ def diagnose_auth(client_id: str, tenant_id: str = "common") -> dict[str, Any]:
     return info
 
 
+def _jwt_claims(token: str) -> dict[str, Any]:
+    """A JWT's payload, without verifying it; {} if it isn't one."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
 def token_expires_at(token: str) -> datetime | None:
     """Decode JWT exp claim without signature verification.
 
     Returns a timezone-aware UTC datetime, or None if the token
     cannot be parsed.
     """
+    exp = _jwt_claims(token).get("exp")
+    if exp is None:
+        return None
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-        # base64url decode the payload (segment 1)
-        payload_b64 = parts[1]
-        # Add padding if needed
-        payload_b64 += "=" * (-len(payload_b64) % 4)
-        payload_bytes = base64.urlsafe_b64decode(payload_b64)
-        claims = json.loads(payload_bytes)
-        exp = claims.get("exp")
-        if exp is None:
-            return None
         return datetime.fromtimestamp(int(exp), tz=timezone.utc)
-    except Exception:
+    except (TypeError, ValueError, OverflowError, OSError):
         return None

@@ -61,6 +61,21 @@ def _cookies_stay_small(monkeypatch: pytest.MonkeyPatch):
     assert not oversized, f"the web app set a cookie over 2 KB: {oversized}"
 
 
+@pytest.fixture(autouse=True)
+def _no_user_settings(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory):
+    """Keep the developer's own token cache, config file and environment out
+    of every test: the confirmation prompt names the cached account, and the
+    config file can set the log level. Tests that need a cache or a config
+    file point these at their own."""
+    import mail_merge.auth
+
+    settings = tmp_path_factory.mktemp("user-settings")
+    monkeypatch.setattr(mail_merge.auth, "CACHE_PATH", settings / "token-cache.json")
+    monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", settings / "config.toml")
+    for name in ("MERGEMAIL365_CLIENT_ID", "MERGEMAIL365_TENANT_ID", "MERGEMAIL365_LOG_LEVEL"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def fixtures_dir() -> Path:
     return FIXTURES_DIR

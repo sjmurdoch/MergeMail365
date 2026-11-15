@@ -32,10 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
         prog="mergemail365",
         description="Send personalised emails via Microsoft Graph API",
     )
-    parser.add_argument("--spreadsheet", required=True, help="Path to .xlsx file with recipients")
-    parser.add_argument("--body", required=True, help="Path to body template file (plain text by default; use --html for HTML)")
-    parser.add_argument("--subject", required=True, help="Email subject (supports {{placeholders}})")
-    parser.add_argument("--email-column", required=True, help="Column name containing email addresses")
+    parser.add_argument("--spreadsheet", default=None, help="Path to .xlsx file with recipients")
+    parser.add_argument("--body", default=None, help="Path to body template file (plain text by default; use --html for HTML)")
+    parser.add_argument("--subject", default=None, help="Email subject (supports {{placeholders}})")
+    parser.add_argument("--email-column", default=None, help="Column name containing email addresses")
     parser.add_argument(
         "--client-id",
         default=None,
@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-resume", action="store_true", help="Send to all recipients even if --output CSV shows previous successes")
     parser.add_argument("--batch-size", type=_positive_int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--sign-out", action="store_true", help="Sign out of every cached Microsoft account, then exit (needs only the client ID)")
     add_log_level_arguments(parser)
     parser.add_argument("--log-file", action="store_true", help="Enable debug logging to a file")
     parser.add_argument(
@@ -80,16 +81,49 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Required unless --sign-out is given (argparse's required=True can't say so).
+_REQUIRED = ("spreadsheet", "body", "subject", "email_column")
+
+
+def _parse(parser: argparse.ArgumentParser, argv: list[str] | None) -> argparse.Namespace:
+    args = parser.parse_args(argv)
+    if not args.sign_out:
+        missing = [f"--{name.replace('_', '-')}" for name in _REQUIRED if getattr(args, name) is None]
+        if missing:
+            parser.error(f"the following arguments are required: {', '.join(missing)}")
+    return args
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_parser().parse_args(argv)
+    return _parse(build_parser(), argv)
+
+
+def _sign_out(args: argparse.Namespace) -> int:
+    from mail_merge import auth
+    from mail_merge.api import resolve_ids
+
+    logger = logging.getLogger(__name__)
+    client_id, tenant_id = resolve_ids(args.client_id, args.tenant_id)
+    if not client_id:
+        logger.error("--sign-out needs the client ID: --client-id, MERGEMAIL365_CLIENT_ID or the config file")
+        return 1
+    names = auth.cached_account_names()
+    if auth.sign_out(client_id, tenant_id):
+        logger.info("Signed out of %s", ", ".join(names) or "the cached account")
+    else:
+        logger.info("Signed out: no account was signed in")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = _parse(parser, argv)
 
     configure_console_logging(parser, args)
     logger = logging.getLogger(__name__)
+
+    if args.sign_out:
+        return _sign_out(args)
 
     from mail_merge.console import maybe_enable_file_logging
     maybe_enable_file_logging(args.log_file)

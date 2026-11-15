@@ -309,6 +309,39 @@ def apply_filters(
     return result
 
 
+def resolve_ids(client_id: str | None, tenant_id: str | None) -> tuple[str | None, str]:
+    """The client and tenant IDs: argument, then MERGEMAIL365_CLIENT_ID /
+    MERGEMAIL365_TENANT_ID, then the config file; the tenant defaults to
+    "common"."""
+    config = load_config()
+    if not client_id:
+        client_id = os.environ.get("MERGEMAIL365_CLIENT_ID") or config.get("client_id")
+    if not tenant_id:
+        tenant_id = (
+            os.environ.get("MERGEMAIL365_TENANT_ID")
+            or config.get("tenant_id")
+            or "common"
+        )
+    return client_id, tenant_id
+
+
+def _log_sender(token: str) -> None:
+    """Say which account the emails go from, and warn if the cache holds
+    several (the acquire functions use the first)."""
+    from mail_merge.auth import account_name, cached_account_names
+
+    name = account_name(token)
+    if name:
+        logger.info("📤 Sending as %s", name)
+    names = cached_account_names()
+    if len(names) > 1:
+        logger.warning(
+            "%d accounts are signed in (%s); sending as %s. To send from another, "
+            "run mergemail365 --sign-out and sign in again with that account.",
+            len(names), ", ".join(names), name or names[0],
+        )
+
+
 def _skip_previously_sent(
     recipients: list[dict[str, str]],
     email_column: str,
@@ -474,17 +507,7 @@ def send_merge(
             of an error; its ``results`` lists the emails attempted so far.
     """
     # --- Resolve client_id / tenant_id via config precedence ---
-    config = load_config()
-
-    if not client_id:
-        client_id = os.environ.get("MERGEMAIL365_CLIENT_ID") or config.get("client_id")
-
-    if not tenant_id:
-        tenant_id = (
-            os.environ.get("MERGEMAIL365_TENANT_ID")
-            or config.get("tenant_id")
-            or "common"
-        )
+    client_id, tenant_id = resolve_ids(client_id, tenant_id)
 
     _check_options(batch_size, delay, max_retries, importance)
     if not email_column:
@@ -663,7 +686,12 @@ def send_merge(
 
         from mail_merge.console import console
 
+        from mail_merge.auth import cached_account_names
+
+        signed_in = cached_account_names() if token_provider is None else []
+        sender_line = signed_in[0] if signed_in else "(you will be asked to sign in)"
         console.print()
+        console.print(f"[bold]From:[/bold]     {escape(sender_line)}")
         if bcc_blast:
             assert blast_to is not None
             reserved = 1 + len(msg_opts.cc or []) + len(msg_opts.bcc or [])
@@ -725,6 +753,8 @@ def send_merge(
                         token = acquire_token(client_id, tenant_id)
             except Exception as exc:
                 raise RuntimeError(f"Authentication failed: {exc}") from exc
+
+            _log_sender(token)
 
             # Subsequent calls will use silent acquisition (cached refresh token)
             def get_token() -> str:

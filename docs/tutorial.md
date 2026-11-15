@@ -109,14 +109,22 @@ uv run mergemail365 \
 
 If your Azure AD app is registered as single-tenant (the most common setup), you must provide `--tenant-id` with your directory (tenant) ID. You can find this in the Azure portal under **App registrations** > your app > **Overview**. You can also set it via the `MERGEMAIL365_TENANT_ID` environment variable. Multi-tenant apps can omit this flag (it defaults to `common`).
 
-On first run, you'll see a device code prompt like:
+On first run, your web browser opens at Microsoft's sign-in page; sign in with your Microsoft 365 account. On a machine without a browser (over SSH, say), add `--device-code`, and you'll see a prompt like:
 
 ```
 To sign in, use a web browser to open https://microsoft.com/devicelogin
 and enter the code XXXXXXXXX to authenticate.
 ```
 
-Open the URL, enter the code, and sign in with your Microsoft 365 account. The token is cached at `~/.mergemail365-token-cache.json` so subsequent runs won't require this step.
+Open the URL on any device, enter the code, and sign in. The token is cached at `~/.mergemail365-token-cache.json` so subsequent runs won't require this step. Once signed in, each run logs `Sending as <your account>`, and the confirmation prompt before a send starts with a `From:` line naming it. If you have signed in with more than one account, the first is used and a warning lists them all.
+
+To sign out (to switch accounts, or on a shared computer), run:
+
+```bash
+uv run mergemail365 --sign-out --client-id YOUR_CLIENT_ID
+```
+
+`--sign-out` needs only the client ID (from the flag, `MERGEMAIL365_CLIENT_ID` or the config file) and removes every cached account.
 
 Check your inbox. If the email looks right, proceed to the full send.
 
