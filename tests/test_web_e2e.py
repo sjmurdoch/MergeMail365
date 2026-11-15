@@ -548,18 +548,32 @@ class TestComposeStep:
     def test_trix_paste_does_not_run_pasted_handlers(
         self, authenticated_page: Page, sample_xlsx: Path,
     ):
-        """Event handlers in pasted HTML must not run while it is being cleaned."""
+        """Event handlers in pasted HTML must not run while it is being cleaned,
+        and its images must not load (the inert document in app.js)."""
         page = authenticated_page
         _upload_and_go_to_compose(page, sample_xlsx)
         page.check("#html-toggle")
         page.wait_for_function("() => window.state.trixEditor !== null")
+        requested: list[str] = []
+        page.on("request", lambda request: requested.append(request.url))
+        # Chromium 156 reports a policy violation as soon as an inline
+        # handler attribute is parsed into a document that shares the page's
+        # policy, inert or not, although nothing runs: probed with and
+        # without the policy, the image is never fetched and no error event
+        # fires. So reports of that one kind are expected here, and the
+        # test checks the fetch and the handler instead.
+        page.expect_csp_violations = True  # type: ignore[attr-defined]
         self._before_paste(
             page,
-            '<p>Hi</p><img src="x" onerror="window._xssFired=1">'
-            '<svg><image href="x" onerror="window._xssFired=2"></image></svg>',
+            '<p>Hi</p><img src="pasted-image.png" onerror="window._xssFired=1">'
+            '<svg><image href="pasted-svg.png" onerror="window._xssFired=2"></image></svg>',
         )
         page.wait_for_timeout(500)
         assert page.evaluate("() => window._xssFired === undefined")
+        assert not [u for u in requested if "pasted-" in u], requested
+        other = [v for v in page.csp_violations  # type: ignore[attr-defined]
+                 if "inline event handler" not in v]
+        assert not other, other
 
     def _open_trix(self, page: Page, sample_xlsx: Path) -> None:
         _upload_and_go_to_compose(page, sample_xlsx)
