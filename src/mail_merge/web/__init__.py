@@ -9,7 +9,7 @@ import sys
 import threading
 import webbrowser
 
-from mail_merge.console import setup_logging
+from mail_merge.console import add_log_level_arguments, configure_console_logging
 
 
 def _find_open_port(start: int = 5050, end: int = 5099, host: str = "127.0.0.1") -> int:
@@ -54,11 +54,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--desktop", action="store_true", help="Open in a native desktop window (requires pywebview)")
     parser.add_argument("--client-id", default="", help="Azure AD client ID (pre-fills and locks the field in the UI)")
     parser.add_argument("--tenant-id", default="", help="Azure AD tenant ID (pre-fills and locks the field in the UI)")
-    parser.add_argument("--log-level", default="INFO", help="Logging level")
+    add_log_level_arguments(parser)
     parser.add_argument("--log-file", action="store_true", help="Enable debug logging to a file")
     args = parser.parse_args(argv)
 
-    setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
+    configure_console_logging(parser, args)
     logger = logging.getLogger(__name__)
 
     from mail_merge.console import maybe_enable_file_logging

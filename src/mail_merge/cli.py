@@ -3,7 +3,7 @@ import logging
 import sys
 
 from mail_merge.api import send_merge
-from mail_merge.console import setup_logging
+from mail_merge.console import add_log_level_arguments, configure_console_logging
 
 
 def _positive_int(text: str) -> int:
@@ -27,7 +27,7 @@ def _non_negative_float(text: str) -> float:
     return value
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mergemail365",
         description="Send personalised emails via Microsoft Graph API",
@@ -65,7 +65,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-resume", action="store_true", help="Send to all recipients even if --output CSV shows previous successes")
     parser.add_argument("--batch-size", type=_positive_int, default=None, help="Max emails to send per invocation (use with --output for resumable batching)")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
-    parser.add_argument("--log-level", default="INFO", help="Logging level")
+    add_log_level_arguments(parser)
     parser.add_argument("--log-file", action="store_true", help="Enable debug logging to a file")
     parser.add_argument(
         "--bcc-blast",
@@ -77,13 +77,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="The To: address used in BCC blast mode (required with --bcc-blast)",
     )
-    return parser.parse_args(argv)
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
-    setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
+    configure_console_logging(parser, args)
     logger = logging.getLogger(__name__)
 
     from mail_merge.console import maybe_enable_file_logging
@@ -124,9 +129,11 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         logger.error("%s", exc)
+        logger.debug("Traceback", exc_info=True)
         return 1
     except Exception as exc:
         logger.error("Unexpected error: %s", exc)
+        logger.debug("Traceback of the unexpected error", exc_info=True)
         return 1
 
     has_failures = any(not r.success for r in results)

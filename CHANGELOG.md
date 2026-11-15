@@ -22,6 +22,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Fixed
 
+- `--log-level` with a misspelt level (`--log-level DEGUB`) is refused; it used to be quietly treated as `INFO`. At `DEBUG`, an unexpected error on the command line is now followed by its traceback.
 - Web UI: a spreadsheet whose name ends in upper-case `.XLSX` was refused as "Only .xlsx files are supported".
 - **A network timeout could send an email twice.** When Microsoft received a request but no answer came back in time (a read timeout), the email was sent again, up to `--max-retries` times, although the first attempt may well have been delivered. It is now not retried, and is reported as "outcome unknown: may have been delivered" rather than as failed: in the summary, in a new `unknown` column of the `--output` report, and in the web UI's results. Resuming from the report doesn't send it again, and says so; delete its line from the report to send it anyway. Connection errors, where nothing reached Microsoft, are still retried.
 - **Resuming a send skipped rows that share an address.** If the spreadsheet had several rows for one address (one person, several personalised emails) and a run stopped after the first of them, re-running with `--output` never sent the others, because any recorded success for the address skipped every row with it. Rows are now counted: each recorded success skips one row. The report also keeps one line per row instead of one per address.
@@ -43,6 +44,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Added
 
+- `-v` / `--verbose` (short for `--log-level DEBUG`) on `mergemail365` and `mergemail365-web`, and the log level can be set with the `MERGEMAIL365_LOG_LEVEL` environment variable or `log-level` in `~/.mergemail365.toml`.
 - Web UI: a footer showing the running version, e.g. "MergeMail365 v0.6.0".
 
 ## [0.6.0] — 2026-10-04

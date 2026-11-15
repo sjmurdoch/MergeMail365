@@ -1,7 +1,9 @@
 """Shared rich console and logging configuration."""
 
+import argparse
 import io
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -96,6 +98,55 @@ class _NoMsalDebug(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         return record.levelno >= logging.INFO or not record.name.startswith("msal")
+
+
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+LOG_LEVEL_ENV = "MERGEMAIL365_LOG_LEVEL"
+
+
+def add_log_level_arguments(parser: argparse.ArgumentParser) -> None:
+    """--log-level and -v/--verbose, shared by both entry points."""
+    parser.add_argument(
+        "--log-level", type=str.upper, choices=LOG_LEVELS, default=None,
+        help=f"Logging level (or set {LOG_LEVEL_ENV}, or log-level in the config file; default: INFO)",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Same as --log-level DEBUG")
+
+
+def resolve_log_level(cli_value: str | None, verbose: bool) -> tuple[int, str]:
+    """The console log level and where it came from: -v or --log-level,
+    then MERGEMAIL365_LOG_LEVEL, then the config file's log-level, then
+    INFO. A value outside LOG_LEVELS from the environment or the config
+    file raises ValueError (argparse already checks the command line)."""
+    from mail_merge import config
+
+    if verbose:
+        return logging.DEBUG, "-v/--verbose"
+    if cli_value:
+        return logging.getLevelNamesMapping()[cli_value.upper()], "--log-level"
+    candidates = [(os.environ.get(LOG_LEVEL_ENV), LOG_LEVEL_ENV),
+                  (config.load_config().get("log_level"), str(config.DEFAULT_PATH))]
+    for value, source in candidates:
+        if value:
+            if value.upper() not in LOG_LEVELS:
+                raise ValueError(
+                    f"{source}: log level {value!r} is not one of {', '.join(LOG_LEVELS)}"
+                )
+            return logging.getLevelNamesMapping()[value.upper()], source
+    return logging.INFO, "default"
+
+
+def configure_console_logging(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Set up console logging at the level the user asked for; an invalid
+    level from the environment or config file is a usage error (exit 2)."""
+    try:
+        level, source = resolve_log_level(args.log_level, args.verbose)
+    except ValueError as exc:
+        parser.error(str(exc))
+    setup_logging(level)
+    logging.getLogger(__name__).debug(
+        "Log level %s (from %s)", logging.getLevelName(level), source,
+    )
 
 
 def setup_logging(level: int) -> None:

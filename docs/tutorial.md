@@ -535,8 +535,16 @@ Control console log verbosity with `--log-level` (available on both `mergemail36
 
 ```bash
 uv run mergemail365 --log-level DEBUG ...
-uv run mergemail365-web --log-level DEBUG
+uv run mergemail365-web -v    # -v / --verbose is short for --log-level DEBUG
 ```
+
+The levels are `DEBUG`, `INFO` (the default), `WARNING`, `ERROR` and `CRITICAL`, in upper or lower case; anything else is refused. To set it once instead of on every run, use the `MERGEMAIL365_LOG_LEVEL` environment variable or a `log-level` line in `~/.mergemail365.toml`:
+
+```toml
+log-level = "WARNING"
+```
+
+As with the client ID, the command line wins over the environment variable, which wins over the config file. At `DEBUG`, the first line logged says which level is in effect and where it came from, and an unexpected error is followed by its traceback.
 
 ### File logging
 
