@@ -61,6 +61,18 @@ def _cookies_stay_small(monkeypatch: pytest.MonkeyPatch):
     assert not oversized, f"the web app set a cookie over 2 KB: {oversized}"
 
 
+# The paths the app would really use, recorded before _no_user_settings
+# first replaces them (tests of the defaults read them from here).
+_REAL_USER_PATHS: dict[str, Path] = {}
+
+
+@pytest.fixture
+def real_user_paths() -> dict[str, Path]:
+    """{"cache": auth.CACHE_PATH, "config": config.DEFAULT_PATH} as the
+    modules set them, not as _no_user_settings replaced them."""
+    return dict(_REAL_USER_PATHS)
+
+
 @pytest.fixture(autouse=True)
 def _no_user_settings(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory):
     """Keep the developer's own token cache, config file and environment out
@@ -68,7 +80,10 @@ def _no_user_settings(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.
     config file can set the log level. Tests that need a cache or a config
     file point these at their own."""
     import mail_merge.auth
+    import mail_merge.config
 
+    _REAL_USER_PATHS.setdefault("cache", mail_merge.auth.CACHE_PATH)
+    _REAL_USER_PATHS.setdefault("config", mail_merge.config.DEFAULT_PATH)
     settings = tmp_path_factory.mktemp("user-settings")
     monkeypatch.setattr(mail_merge.auth, "CACHE_PATH", settings / "token-cache.json")
     monkeypatch.setattr("mail_merge.config.DEFAULT_PATH", settings / "config.toml")

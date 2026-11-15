@@ -38,17 +38,15 @@ class TestDataDir:
 class TestWindowsDefaultPaths:
     """Config and token cache paths live under data_dir() on Windows."""
 
-    def test_config_default_path_under_data_dir(self):
+    def test_config_default_path_under_data_dir(self, real_user_paths):
         from mail_merge._paths import data_dir
-        from mail_merge.config import DEFAULT_PATH
 
-        assert DEFAULT_PATH == data_dir() / "config.toml"
+        assert real_user_paths["config"] == data_dir() / "config.toml"
 
-    def test_cache_path_under_data_dir(self):
+    def test_cache_path_under_data_dir(self, real_user_paths):
         from mail_merge._paths import data_dir
-        from mail_merge.auth import CACHE_PATH
 
-        assert CACHE_PATH == data_dir() / "token-cache.json"
+        assert real_user_paths["cache"] == data_dir() / "token-cache.json"
 
 
 class TestSaveCacheOnWindows:

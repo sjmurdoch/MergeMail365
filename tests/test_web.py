@@ -1542,7 +1542,9 @@ class TestAttachmentSaving:
         """A filename with path components can't write outside the temp dir."""
         abs_target = tmp_path / "outside" / "escaped.txt"
         abs_target.parent.mkdir()
-        evil_name = evil_name.format(abs=abs_target)
+        # Escaped like the backslash cases above, so a Windows path keeps
+        # its separators on the way through the multipart header.
+        evil_name = evil_name.format(abs=str(abs_target).replace("\\", "\\\\"))
         resp, captured, tmp_dir = self._start_with_attachments(
             web_client, sample_xlsx_web, [(evil_name, b"payload")], monkeypatch)
         assert resp.status_code == 200
