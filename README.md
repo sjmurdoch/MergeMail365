@@ -48,6 +48,8 @@ This tool allows you to send mail merge campaigns using your Office 365 account.
     | Alice | alice@example.com |
     | Bob   | bob@example.com   |
 
+    Every row is sent to, including rows hidden or filtered out in Excel: delete the rows you want left out, or use `--filter`.
+
 3.  **Create a body file** (`body.txt`):
     ```
     Hi {{name}},

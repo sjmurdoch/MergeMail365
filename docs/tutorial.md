@@ -61,6 +61,8 @@ Example `recipients.xlsx`:
 | Alice   | alice@example.com | Acme Corp  |
 | Bob     | bob@example.com   | Widgets Co |
 
+**Hidden and filtered-out rows are still sent to.** MergeMail365 reads every row of the sheet, including rows you have hidden or that an Excel filter is hiding. To leave people out, delete their rows (or move them to another sheet), or use `--filter` (in the web UI, Filters under "Additional options" on the Compose step). The dry run, and in the web UI the recipient preview, list every row that will be sent to, so check them there.
+
 ## 5. Write your email template
 
 Create a plain-text file for the email body. Use `{{column_name}}` to insert per-recipient values. Placeholder names are case-insensitive (`{{Name}}` and `{{name}}` both work).
