@@ -22,6 +22,9 @@ def _find_open_port(start: int = 5050, end: int = 5099, host: str = "127.0.0.1")
     it binds exclusively: Werkzeug sets SO_REUSEADDR, with which Windows lets
     a second socket bind a port that is already listening, so a plain probe
     would succeed there and two copies of the app would share one port.
+    Elsewhere it sets SO_REUSEADDR like Werkzeug, so that a restart just
+    after a quit keeps the same port (and origin, where the page's saved
+    fields are).
     """
     from werkzeug.serving import get_sockaddr, select_address_family
 
@@ -31,6 +34,11 @@ def _find_open_port(start: int = 5050, end: int = 5099, host: str = "127.0.0.1")
         with socket.socket(family, socket.SOCK_STREAM) as s:
             if sys.platform == "win32":
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                # As Werkzeug binds: a port whose only sockets are closing
+                # connections (TIME_WAIT, just after the app quit) is free;
+                # one with a listening socket is still refused.
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(address)
                 return port

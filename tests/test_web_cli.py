@@ -316,6 +316,29 @@ def test_find_open_port_checks_the_address_the_server_binds():
         assert port < found <= port + 20
 
 
+def test_find_open_port_reuses_a_port_left_by_a_closed_server():
+    """Phase H, macOS rc3: reopened just after quitting mid-send, the app
+    moved to port 5051, a different origin, so the saved compose fields
+    weren't restored. The quit server's connections were still closing
+    (TIME_WAIT); Werkzeug binds such a port with SO_REUSEADDR, so the probe
+    must accept it too."""
+    import socket
+
+    from mail_merge.web import _find_open_port
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    client = socket.create_connection(("127.0.0.1", port))
+    accepted, _ = server.accept()
+    accepted.close()  # the server side closes first: its end is in TIME_WAIT
+    client.recv(1)
+    client.close()
+    server.close()
+    assert _find_open_port(port, port + 20, host="localhost") == port
+
+
 def test_find_open_port_reports_an_unusable_host():
     from mail_merge.web import _find_open_port
 
