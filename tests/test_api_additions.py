@@ -85,6 +85,27 @@ class TestTokenProvider:
         assert len(token_calls) > 0
 
     @responses.activate
+    def test_token_provider_logs_the_account_once(self, sample_xlsx, monkeypatch, caplog):
+        """The web UI's jobs name the sending account too (phase H, macOS)."""
+        import logging
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.cached_account_names", lambda: ["alice@contoso.com"])
+        with caplog.at_level(logging.INFO, logger="mail_merge"):
+            results = send_merge(
+                spreadsheet=sample_xlsx,
+                subject="Hello {{name}}",
+                email_column="email",
+                body_text="Body for {{name}}.",
+                send=True,
+                confirm=False,
+                delay=0,
+                token_provider=lambda: "opaque-token",
+            )
+        assert all(r.success for r in results)
+        assert caplog.messages.count("📤 Sending as alice@contoso.com") == 1
+
+    @responses.activate
     def test_token_provider_skips_auth_block(self, sample_xlsx):
         """Auth module is not imported when token_provider is provided."""
         responses.add(responses.POST, GRAPH_SEND_URL, status=202)

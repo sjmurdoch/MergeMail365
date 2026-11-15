@@ -723,7 +723,16 @@ def send_merge(
     get_token = None
     if send or test_email:
         if token_provider is not None:
-            get_token = token_provider
+            provider = token_provider
+            logged_sender = False
+
+            def get_token() -> str:
+                nonlocal logged_sender
+                token = provider()
+                if not logged_sender:
+                    _log_sender(token)
+                    logged_sender = True
+                return token
         else:
             if not client_id:
                 raise RuntimeError(
@@ -858,7 +867,7 @@ def send_merge(
     results = previous_results + results
 
     # --- Report ---
-    print_summary(results)
+    print_summary(results, dry_run=not send and not test_email)
     if send and output:
         write_csv(results, output)
 
