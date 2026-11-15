@@ -233,8 +233,8 @@ Written 2026-11-15, at the end of phase C, for an agent (or person) with no memo
 ### Where things are
 
 - **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`; 15 commits, the last being this handover. Nothing is pushed. The working tree is clean. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers.
-- **Done:** phases A to E (findings F1–F16; guards G1–G9; requirement R19).
-- **Remaining:** phase F (documents), phase G (whether the dependencies and vendored code can safely be updated), phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
+- **Done:** phases A to F (findings F1–F16; guards G1–G9; requirement R19; documents).
+- **Remaining:** phase G (whether the dependencies and vendored code can safely be updated), phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
 - **Version and release:** the version is still 0.6.0 and nothing is tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. Bumping the version and releasing are the user's call; ask, don't do it.
 - **Last verified state** (commit `83cce54`): 1163 tests pass and 14 are skipped (Windows-only tests, on macOS); `mypy`, `ruff check .` and `biome lint` are clean; the Quint scenarios pass for `buggy`, `partial`, `round2` and `fixed`; Apalache reports `allInvariants` holds for `fixed` at 16 steps.
 
@@ -446,9 +446,9 @@ The command-line tool is not part of what the release workflow builds. If the us
 
 ## Status
 
-Updated 2026-11-15 (end of phase E; last commit `81f91d1`). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
+Updated 2026-11-15 (end of phase F; last commit `734da86`). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A to E are complete. Phases F, G and H have not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A to F are complete. Phases G and H have not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
 **Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
 
@@ -501,6 +501,18 @@ Checks at `a92d399`: 1206 passed, 14 skipped; mypy, Ruff and Biome clean. The mo
 
 Checks at `feebd91` (E3, the last code change): 1237 passed, 14 skipped; mypy, Ruff and Biome clean. E5 is documentation only. The model was not changed.
 
-### Phases F, G, H — not started
+### Phase F: documents — complete
+
+| What | State | Notes |
+|---|---|---|
+| `README.md` | Done | Options listing regenerated from `--help`; feature list updated. `--help` itself changed: an explicit two-form usage line (a send, and `--sign-out`), since argparse's generated one showed the send arguments as optional; the address options' and `--max-retries`' help corrected. |
+| `docs/tutorial.md` | Done | Placeholders, cell values, HTML escaping, address lists, the attachment total, what the log file holds, `--allow-remote`. D and E were documented as they were done. |
+| `docs/web-ui-plan.md` | Done | Security assessment revised. |
+| `TODO.md` | Done | The loose ends below, plus the web UI CSV's differences from `--output` reports. |
+| `CLAUDE.md`, `CHANGELOG.md` | Done | Kept up to date in each step's commit. |
+| `spec/*`, `docs/quint-model.md` | No change needed | The model did not change after A1, which updated them. |
+| Move this plan to `archive/` | Not yet | After G and H. |
+
+### Phases G, H — not started
 
 What each step involves, file by file, is under [Remaining work, in detail](#remaining-work-in-detail) in the Handover section. Add a table here for each phase as it is done, in the style of the ones above.
