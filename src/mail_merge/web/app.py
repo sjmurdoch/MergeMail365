@@ -706,7 +706,7 @@ def create_app(
         if not file or not file.filename:
             return jsonify({"error": "No file uploaded"}), 400  # type: ignore[return-value]
 
-        if not file.filename.endswith(".xlsx"):
+        if not file.filename.lower().endswith(".xlsx"):
             return jsonify({"error": "Only .xlsx files are supported"}), 400  # type: ignore[return-value]
 
         # Clean up previous upload if re-uploading

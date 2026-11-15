@@ -261,6 +261,19 @@ class TestUpload:
         assert len(data["rows"]) == 2
         assert data["rows"][0]["name"] == "Alice"
 
+    def test_upload_accepts_upper_case_extension(self, web_client, sample_xlsx_web):
+        """Windows and some exports name files RECIPIENTS.XLSX (F16)."""
+        csrf = get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            resp = web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "RECIPIENTS.XLSX")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["file_name"] == "RECIPIENTS.XLSX"
+
     def test_upload_non_xlsx_rejected(self, web_client, tmp_path):
         csrf = get_csrf(web_client)
         txt_file = tmp_path / "bad.txt"
