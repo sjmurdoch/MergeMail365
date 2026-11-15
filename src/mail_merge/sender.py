@@ -55,6 +55,15 @@ class SendResult:
     status_code: int | None = None
     error: str = ""
     throttled: bool = False
+    # No answer from Graph after the request was sent (a read timeout): the
+    # email may or may not have been delivered. ``success`` is False.
+    unknown: bool = False
+
+
+NO_ANSWER = (
+    "No answer from Microsoft: the email may or may not have been delivered. "
+    "Check Sent Items before sending it again."
+)
 
 
 def send_one(
@@ -115,6 +124,12 @@ def send_one(
                 to.address, len(subject), len(body), len(opts.attachments or []),
             )
             resp = requests.post(GRAPH_SEND_URL, json=payload, headers=headers, timeout=30)
+        except requests.ReadTimeout as exc:
+            # The request reached Graph, which may have accepted it; sendMail
+            # has no idempotency key, so a retry could deliver it twice.
+            # (A ConnectTimeout is retried below: nothing was sent.)
+            logger.debug("Read timeout sending to %s: %s", to.address, exc)
+            return SendResult(email=to.address, success=False, error=NO_ANSWER, unknown=True)
         except requests.RequestException as exc:
             retries += 1
             if retries > opts.max_retries:
@@ -242,6 +257,7 @@ def send_bcc_blast(
                 status_code=result.status_code,
                 error=result.error,
                 throttled=result.throttled,
+                unknown=result.unknown,
             )
             for addr in batch
         ]
@@ -315,7 +331,9 @@ def send_all(
             results.append(result)
             if on_result is not None:
                 on_result(result)
-            if not result.success:
+            if result.unknown:
+                logger.error("❓ No answer for %s: the email may have been delivered", to.address)
+            elif not result.success:
                 logger.error("❌ Failed to send to %s: %s", to.address, result.error)
 
             # Adaptive delay: back off on throttling, recover when clear

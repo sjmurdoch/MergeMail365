@@ -1562,6 +1562,25 @@ class TestInterruptedSend:
             ("bob@example.com", True), ("carol@example.com", False),
         ]
 
+    def test_resume_skips_an_unknown_outcome_with_a_warning(
+        self, sample_xlsx, body_template_file, tmp_path, auth, sent, caplog,
+    ):
+        """Re-sending could deliver the email twice; the warning says how to
+        send it again if it didn't arrive (decision recorded in
+        docs/review-fixes-plan.md, D2)."""
+        from mail_merge.report import read_csv
+
+        output = tmp_path / "report.csv"
+        write_csv([SendResult(email="alice@example.com", success=False, error="no answer", unknown=True)], output)
+        with caplog.at_level(logging.WARNING):
+            self._send(sample_xlsx, body_template_file, output)
+        assert sent == ["bob@example.com"]
+        [warning] = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Not sending to alice@example.com")]
+        assert "may have been delivered" in warning and str(output) in warning
+        assert [(r.email, r.success, r.unknown) for r in read_csv(output)] == [
+            ("alice@example.com", False, True), ("bob@example.com", True, False),
+        ]
+
     def test_bcc_mode_resume_counts_rows_that_share_an_address(
         self, shared_xlsx, tmp_path, monkeypatch,
     ):

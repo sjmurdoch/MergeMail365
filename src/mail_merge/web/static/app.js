@@ -1500,14 +1500,32 @@ function showResults(data) {
     } else if (data.status === "failed") {
         parts.push(html`<div class="callout callout-danger">Sending failed: ${data.error || "unknown error"}. Recipients not listed below were not sent an email.</div>`);
     }
-    parts.push(html`<p><strong>Total:</strong> ${summary.total || 0} | <span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | <span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`);
+    const unknownCount = summary.unknown
+        ? html` | <span class="unknown"><strong>Unknown:</strong> ${summary.unknown}</span>`
+        : "";
+    parts.push(html`<p><strong>Total:</strong> ${summary.total || 0} | <span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | <span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span>${unknownCount}</p>`);
+    if (summary.unknown) {
+        parts.push(html`<div class="callout callout-warning">Microsoft did not answer for ${summary.unknown === 1 ? "one email" : `${summary.unknown} emails`}, which may have been delivered. Check Sent Items before sending ${summary.unknown === 1 ? "it" : "them"} again.</div>`);
+    }
 
     if (state.sendResults.length > 0) {
-        const rows = state.sendResults.map(r => html`<tr class="${r.success ? "success" : "failure"}"><td>${r.email}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${r.error || ""}</td></tr>`);
+        const rows = state.sendResults.map(r => html`<tr class="${resultClass(r)}"><td>${r.email}</td><td>${resultLabel(r)} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${r.error || ""}</td></tr>`);
         parts.push(html`<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table>`);
     }
 
     setHtml($("send-result"), parts);
+}
+
+// One send result, as the results tables show it. An unknown outcome (no
+// answer from Microsoft) may have been delivered, so it is not "Failed".
+function resultClass(r) {
+    if (r.success) return "success";
+    return r.unknown ? "unknown" : "failure";
+}
+
+function resultLabel(r) {
+    if (r.success) return "Sent";
+    return r.unknown ? "Unknown: may have been delivered" : "Failed";
 }
 
 // The "showSendError" effect.
@@ -1536,7 +1554,7 @@ function showInterrupted() {
         const sent = send.results.filter(r => r.success).length;
         parts.push(html`<p><strong>The app closed while sending</strong> (started ${send.started || "at an unknown time"}). ${sent} email${sent === 1 ? " was" : "s were"} recorded as sent. Recipients not listed were not sent an email, except perhaps the one being sent when the app stopped.</p>`);
         if (send.results.length > 0) {
-            const rows = send.results.map(r => html`<tr class="${r.success ? "success" : "failure"}"><td>${r.email}</td><td>${r.success ? "Sent" : `Failed: ${r.error || ""}`}</td></tr>`);
+            const rows = send.results.map(r => html`<tr class="${resultClass(r)}"><td>${r.email}</td><td>${r.success || r.unknown ? resultLabel(r) : `Failed: ${r.error || ""}`}</td></tr>`);
             parts.push(html`<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`);
         }
     }
@@ -1553,9 +1571,9 @@ function dismissInterrupted() {
 }
 
 function saveCsv(results, fileName) {
-    let csv = "email,success,status_code,error\n";
+    let csv = "email,success,status_code,error,unknown\n";
     for (const r of results) {
-        csv += `"${sanitizeCsvValue(r.email)}",${r.success},${r.status_code || ""},"${sanitizeCsvValue((r.error || "").replace(/"/g, '""'))}"\n`;
+        csv += `"${sanitizeCsvValue(r.email)}",${r.success},${r.status_code || ""},"${sanitizeCsvValue((r.error || "").replace(/"/g, '""'))}",${Boolean(r.unknown)}\n`;
     }
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);

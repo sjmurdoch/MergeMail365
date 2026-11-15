@@ -192,6 +192,8 @@ Control how many times a failed send (5xx server error) is retried:
 
 Rate-limit responses (HTTP 429) are retried automatically (up to 20 times), honouring the server's `Retry-After` header.
 
+Network errors where the request never reached Microsoft (no connection, a connection timeout) are retried the same way as server errors. If the request was sent but no answer came back (a read timeout), it is **not** retried: Microsoft may already have accepted the email, and retrying could deliver it twice. That email is reported as "outcome unknown", not as failed, in the summary, the `--output` CSV (`unknown` column) and the web UI's results. Check Sent Items to find out whether it went.
+
 ### Importance
 
 Set the email importance flag (visible to recipients in most email clients):
@@ -316,6 +318,8 @@ uv run mergemail365 \
 ```
 
 When all recipients have succeeded, the tool logs "All emails already sent" and exits 0. Use `--no-resume` to disable automatic resume and send to all recipients fresh.
+
+Rows recorded as "outcome unknown" are not sent again on resume, since the email may have been delivered; a warning names each one. If you have checked that it didn't arrive, delete its line from the CSV and run again.
 
 Resume counts rows, not addresses. If the spreadsheet has several rows for the same address (one person getting several different emails) and the CSV records one success for it, only the first of those rows is skipped; the rest are still sent. The rows are matched in spreadsheet order, so don't reorder or delete rows between runs. The CSV keeps one line per row sent, plus earlier failures that haven't been retried yet.
 

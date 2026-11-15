@@ -220,6 +220,12 @@ def _require_test_sent(test_email: str, results: list[SendResult]) -> None:
     failed = next((r for r in results if not r.success), None)
     if failed is None:
         return
+    if failed.unknown:
+        raise SendAborted(
+            f"No answer from Microsoft for the test email to {test_email}: it may have "
+            "been delivered. Check your inbox and Sent Items before trying again.",
+            results,
+        )
     status = f"HTTP {failed.status_code}" if failed.status_code else "no response"
     detail = f": {failed.error}" if failed.error else ""
     raise SendAborted(
@@ -307,17 +313,30 @@ def _skip_previously_sent(
     recipients: list[dict[str, str]],
     email_column: str,
     previous: list[SendResult],
+    output: Path,
 ) -> list[dict[str, str]]:
     """Drop the rows a previous run sent. Rows are matched by address and
     counted, not looked up: two recorded successes for an address skip the
     first two rows with it, so a person with several rows (several emails)
-    still gets the ones not yet sent."""
+    still gets the ones not yet sent.
+
+    A row whose outcome is unknown (no answer from Graph) is skipped too,
+    with a warning: re-sending it could deliver the email twice."""
     sent = Counter(r.email.lower() for r in previous if r.success)
+    unknown = Counter(r.email.lower() for r in previous if r.unknown)
     remaining = []
     for row in recipients:
         address = row[email_column].lower()
         if sent[address] > 0:
             sent[address] -= 1
+        elif unknown[address] > 0:
+            unknown[address] -= 1
+            logger.warning(
+                "Not sending to %s again: %s records no answer from Microsoft, so the "
+                "email may have been delivered. If it wasn't, delete that line from "
+                "the report and run again.",
+                row[email_column], output,
+            )
         else:
             remaining.append(row)
     return remaining
@@ -334,7 +353,7 @@ def _previous_results_to_keep(
     kept = []
     for r in previous:
         address = r.email.lower()
-        if not r.success and retrying[address] > 0:
+        if not r.success and not r.unknown and retrying[address] > 0:
             retrying[address] -= 1
             continue
         kept.append(r)
@@ -527,7 +546,7 @@ def send_merge(
                 previous_results = read_csv(output_path)
                 total_before = len(recipients)
                 recipients = _skip_previously_sent(
-                    recipients, email_column, previous_results,
+                    recipients, email_column, previous_results, output_path,
                 )
                 logger.info(
                     "📋 %d previously sent, %d remaining of %d total",

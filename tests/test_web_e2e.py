@@ -1029,9 +1029,9 @@ class TestReportDownload:
             page.evaluate("downloadCsv()")
         assert download.value.suggested_filename == "mergemail365-results.csv"
         assert Path(download.value.path()).read_text(encoding="utf-8") == (
-            "email,success,status_code,error\n"
-            '"a@example.com",true,202,""\n'
-            '"\t=b@example.com",false,400,"Bad ""request"""\n'
+            "email,success,status_code,error,unknown\n"
+            '"a@example.com",true,202,"",false\n'
+            '"\t=b@example.com",false,400,"Bad ""request""",false\n'
         )
         # A download, not a navigation: the wizard is still on screen.
         expect(page.locator("#step-1")).to_be_visible()

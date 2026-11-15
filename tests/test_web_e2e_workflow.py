@@ -547,6 +547,34 @@ class TestSendOutcome:
         expect(page.locator("#send-result")).to_contain_text("Not signed in")
         expect(page.locator("#send-result .results-table")).to_contain_text("alice@example.com")
 
+    def test_unknown_outcome_is_not_shown_as_failed(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A read timeout: the email may have gone (docs/review-fixes-plan.md, D2)."""
+        from mail_merge.sender import NO_ANSWER, SendResult
+
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+
+        def one_unknown(**kwargs: Any) -> list[Any]:
+            return [SendResult(email="alice@example.com", success=True, status_code=202),
+                    SendResult(email="bob@example.com", success=False, error=NO_ANSWER, unknown=True)]
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", one_unknown)
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=10000)
+        result = page.locator("#send-result")
+        expect(result).to_contain_text("Failed: 0")
+        expect(result).to_contain_text("Unknown: 1")
+        row = result.locator("tr", has_text="bob@example.com")
+        expect(row).to_contain_text("Unknown: may have been delivered")
+        expect(row).not_to_contain_text("Failed")
+
     def test_second_send_starts_with_fresh_progress(
         self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
     ):
@@ -600,6 +628,7 @@ class TestInterruptedSend:
         # Spreadsheet content is untrusted: it must not reach the page as HTML.
         log.record("old", SendResult(email="<img src=x onerror=window.pwned=1>@example.com",
                                      success=False, status_code=400, error="<b>bad</b>"))
+        log.record("old", SendResult(email="c@example.com", success=False, error="no answer", unknown=True))
         store = web_app._job_store
         monkeypatch.setattr(store, "send_log", None)
         monkeypatch.setattr(store, "interrupted", [])
@@ -611,10 +640,14 @@ class TestInterruptedSend:
         expect(report).to_contain_text("1 email was recorded as sent")
         expect(report).to_contain_text("<img src=x onerror=window.pwned=1>@example.com")
         assert page.evaluate("window.pwned") is None
+        expect(report.locator("tr", has_text="c@example.com")).to_contain_text("may have been delivered")
 
         with page.expect_download() as download:
             page.click("#btn-interrupted-csv")
-        assert "a@example.com" in Path(download.value.path()).read_text(encoding="utf-8")
+        csv_text = Path(download.value.path()).read_text(encoding="utf-8")
+        assert "a@example.com" in csv_text
+        assert csv_text.splitlines()[0] == "email,success,status_code,error,unknown"
+        assert csv_text.splitlines()[3].endswith(",true")
 
         page.click("#btn-dismiss-interrupted")
         expect(report).to_be_hidden()

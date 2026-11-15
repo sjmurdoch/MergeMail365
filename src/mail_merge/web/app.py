@@ -1086,6 +1086,7 @@ def create_app(
                     "success": r.success,
                     "status_code": r.status_code,
                     "error": r.error,
+                    "unknown": r.unknown,
                 }
                 for r in job.results
             ]

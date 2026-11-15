@@ -45,6 +45,7 @@ class SendLog:
             self._append(job_id, {
                 "email": result.email, "success": result.success,
                 "status_code": result.status_code, "error": result.error,
+                "unknown": result.unknown,
             })
         except OSError:
             logger.warning("Could not write the send log in %s", self.directory, exc_info=True)

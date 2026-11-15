@@ -64,6 +64,7 @@ ANSWERS: dict[str, tuple[Callable[[responses.RequestsMock], None], bool]] = {
     "429 until the cap": (_status(429), False),
     "500 until the cap": (_status(500), False),
     "connection error": (_raises(requests.ConnectionError("connection refused")), False),
+    "connect timeout then 202": (_then(_raises(requests.ConnectTimeout("connect timed out")), _status(202)), True),
     "read timeout": (_raises(requests.ReadTimeout("read timed out")), False),
 }
 
@@ -133,8 +134,8 @@ def via_cli(mode: str, xlsx: Path, caplog: pytest.LogCaptureFixture) -> bool:
     argv += ["--test-email", TEST_ADDRESS] if mode.endswith("test") or mode == "test_email" else ["--send"]
     with caplog.at_level(logging.INFO):
         exit_code = main(argv)
-    problems = [r for r in caplog.records if r.levelno >= logging.WARNING and "not sent" in r.getMessage().lower()
-                or r.levelno >= logging.WARNING and "failed" in r.getMessage().lower()]
+    problems = [r for r in caplog.records if r.levelno >= logging.WARNING and any(
+        phrase in r.getMessage().lower() for phrase in ("not sent", "failed", "may have been delivered"))]
     if exit_code == 0:
         assert not problems, f"exit 0 but the log reports a failure: {[r.getMessage() for r in problems]}"
         return True
@@ -144,7 +145,8 @@ def via_cli(mode: str, xlsx: Path, caplog: pytest.LogCaptureFixture) -> bool:
     return False
 
 
-def via_web(mode: str, xlsx: Path, caplog: pytest.LogCaptureFixture) -> bool:
+def web_job_status(mode: str, xlsx: Path) -> dict:
+    """Run one web job to the end; its final /api/job/<id>/status."""
     pytest.importorskip("flask")
     from mail_merge.web.app import create_app
 
@@ -171,11 +173,16 @@ def via_web(mode: str, xlsx: Path, caplog: pytest.LogCaptureFixture) -> bool:
             break
         assert time.monotonic() < deadline, "job did not finish"
         time.sleep(0.01)
+    return status
+
+
+def via_web(mode: str, xlsx: Path, caplog: pytest.LogCaptureFixture) -> bool:
+    status = web_job_status(mode, xlsx)
     if status["ok"]:
         assert status["status"] == "completed" and status["summary"]["failed"] == 0
     else:
         # Something on the page must say why: the job's error or a failed row.
-        assert status["error"] or status["summary"]["failed"] > 0
+        assert status["error"] or status["summary"]["failed"] > 0 or status["summary"]["unknown"] > 0
     return bool(status["ok"])
 
 
@@ -197,6 +204,56 @@ def test_reported_outcome_matches_graph(
         f"{interface}/{mode}: Graph answered {answer!r} (accepted={accepted}) "
         f"but the user was told {'success' if reported_ok else 'failure'}"
     )
+
+
+@pytest.mark.parametrize("interface", INTERFACES)
+@pytest.mark.parametrize("mode", SENDING_MODES)
+def test_read_timeout_is_sent_once_and_reported_as_unknown(
+    mode: str, interface: str, one_recipient: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """After a read timeout Graph may have accepted the email, so it is not
+    retried, and the user is told it may have been delivered rather than
+    that it failed (docs/review-fixes-plan.md, D2)."""
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        _raises(requests.ReadTimeout("read timed out"))(rsps)
+        _status(202)(rsps)
+        assert INTERFACES[interface](mode, one_recipient, caplog) is False
+        assert len(rsps.calls) == 1, "a read timeout must not be retried"
+    if interface == "web":
+        return  # the page's data: test_web_status_marks_unknown
+    said = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    if interface == "cli":
+        assert "may have been delivered" in said
+
+
+def test_api_results_mark_unknown(one_recipient: Path) -> None:
+    with responses.RequestsMock() as rsps:
+        _raises(requests.ReadTimeout("read timed out"))(rsps)
+        results = send_merge(
+            spreadsheet=one_recipient, body_text="Body", subject="Hi", email_column="email",
+            token_provider=lambda: "fake-token", confirm=False, delay=0, send=True,
+        )
+    assert [(r.success, r.unknown) for r in results] == [(False, True)]
+
+
+def test_api_test_email_says_it_may_have_been_delivered(one_recipient: Path) -> None:
+    with responses.RequestsMock() as rsps:
+        _raises(requests.ReadTimeout("read timed out"))(rsps)
+        with pytest.raises(SendAborted, match="may have been delivered") as info:
+            send_merge(
+                spreadsheet=one_recipient, body_text="Body", subject="Hi", email_column="email",
+                token_provider=lambda: "fake-token", confirm=False, test_email=TEST_ADDRESS,
+            )
+    assert [r.unknown for r in info.value.results] == [True]
+
+
+@pytest.mark.parametrize("mode", ["test_email", "send"])
+def test_web_status_marks_unknown(mode: str, one_recipient: Path) -> None:
+    with responses.RequestsMock() as rsps:
+        _raises(requests.ReadTimeout("read timed out"))(rsps)
+        status = web_job_status(mode, one_recipient)
+    assert [r["unknown"] for r in status["results"]] == [True]
+    assert status["summary"]["unknown"] == 1
 
 
 @pytest.mark.parametrize("interface", INTERFACES)
