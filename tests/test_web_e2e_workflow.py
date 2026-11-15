@@ -377,6 +377,28 @@ class TestHtmlPreview:
         preview_html()
 
 
+class TestTestAddress:
+    def test_prefilled_address_is_shown_after_new_merge(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, macOS rc3: after New merge, step 4's address field was
+        filled with the account once the sign-in check answered, but "Will
+        send" still said "(enter test address above)"."""
+        page = wizard
+        page.evaluate("newMerge()")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        page.fill("#subject-input", "Hello {{name}}")
+        page.fill("#body-input", "Hi {{name}}")
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
+        expect(page.locator("#test-email-input")).to_have_value("me@example.com")
+        expect(page.locator("#test-preview-info")).to_contain_text("To: me@example.com")
+
+
 class TestRestoreAfterRestart:
     def test_saved_columns_are_chosen_after_upload(self, wizard: Page, workflow_xlsx: Path):
         """Phase H, Windows: after quitting and reopening the desktop app,

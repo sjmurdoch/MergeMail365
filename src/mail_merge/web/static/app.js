@@ -554,6 +554,8 @@ function showAuth(status) {
         setHtml(el, html`<span class="dot green"></span> Signed in as <span class="email">${status.email}</span>`);
         if ($("test-email-input") && !$("test-email-input").value) {
             $("test-email-input").value = status.email;
+            // Step 4 shows its "Will send" line before this answer arrives.
+            updateTestPreview();
         }
         _auth.tokenExpiresAt = status.token_expires_at ? new Date(status.token_expires_at) : null;
     } else {
