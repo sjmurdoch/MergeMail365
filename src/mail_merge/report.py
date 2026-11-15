@@ -46,9 +46,14 @@ def summarize(results: list[SendResult]) -> dict[str, object]:
     }
 
 
-def print_summary(results: list[SendResult]) -> None:
+def print_summary(results: list[SendResult], *, dry_run: bool = False) -> None:
     summary = summarize(results)
-    if summary["unknown"]:
+    if dry_run:
+        logger.info(
+            "Dry run summary (nothing sent): Total: %d, Would send: %d, Failed: %d",
+            summary["total"], summary["sent"], summary["failed"],
+        )
+    elif summary["unknown"]:
         logger.info(
             "Summary: Total: %d, Sent: %d, Failed: %d, Unknown: %d",
             summary["total"], summary["sent"], summary["failed"], summary["unknown"],

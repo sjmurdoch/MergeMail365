@@ -15,6 +15,13 @@ class TestPrintSummary:
         assert "Total: 2, Sent: 2, Failed: 0" in caplog.text
         assert "Failed:" not in caplog.text.replace("Failed: 0", "")
 
+    def test_dry_run_says_nothing_was_sent(self, caplog):
+        """A dry run's emails were only composed (phase H, macOS)."""
+        results = [SendResult(email="a@x.com", success=True), SendResult(email="b@x.com", success=True)]
+        with caplog.at_level(logging.INFO, logger="mail_merge.report"):
+            print_summary(results, dry_run=True)
+        assert caplog.messages == ["Dry run summary (nothing sent): Total: 2, Would send: 2, Failed: 0"]
+
     def test_with_failures_logs_each_failed_recipient(self, caplog):
         results = [
             SendResult(email="a@x.com", success=True, status_code=202),

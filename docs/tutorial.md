@@ -161,12 +161,10 @@ export MERGEMAIL365_TENANT_ID=YOUR_TENANT_ID
 After all emails are sent, you'll see a console summary:
 
 ```
-========================================
-Total:  2
-Sent:   2
-Failed: 0
-========================================
+Summary: Total: 2, Sent: 2, Failed: 0
 ```
+
+A dry run (without `--send`) ends with `Dry run summary (nothing sent): Total: 2, Would send: 2, Failed: 0`.
 
 The exit code is 0 if all emails succeeded, or 1 if any failed.
 
