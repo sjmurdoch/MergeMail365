@@ -90,8 +90,10 @@ class TestDesktopMode:
     """
 
     @pytest.fixture
-    def fake_webview(self, monkeypatch):
+    def fake_webview(self, monkeypatch, tmp_path):
         webview = pytest.importorskip("webview")
+        # main() creates the web view's storage directory under state_dir().
+        monkeypatch.setattr("mail_merge._paths.state_dir", lambda: tmp_path / "state")
         # Autospec only the functions we call: autospeccing the whole module
         # touches webview.screens, a lazy proxy that initialises the GUI
         # backend and fails on Linux runners without GTK/Qt.
@@ -130,7 +132,7 @@ class TestDesktopMode:
         assert len(token) >= 32
         assert args[1] == f"http://localhost:5057/?token={token}"
         assert kwargs == {"width": 1100, "height": 800}
-        fake_webview.start.assert_called_once_with()
+        fake_webview.start.assert_called_once()
         timer.assert_not_called()  # no system browser launch in desktop mode
 
     def test_desktop_app_enforces_token_and_csrf(self, fake_webview, fake_server):
@@ -168,12 +170,29 @@ class TestDesktopMode:
         save the file.
         """
         assert fake_webview.settings["ALLOW_DOWNLOADS"] is False
-        fake_webview.start.side_effect = lambda: started.append(
+        fake_webview.start.side_effect = lambda **kw: started.append(
             fake_webview.settings["ALLOW_DOWNLOADS"])
         started: list[bool] = []
         with patch("threading.Timer"):
             main(["--desktop"])
         assert started == [True]
+
+    def test_desktop_keeps_web_storage_between_runs(self, fake_webview, fake_server):
+        """The page saves the subject and body in localStorage so that they
+        survive a restart; pywebview's default private mode discarded it
+        when the app quit (phase H, macOS)."""
+        from mail_merge import _paths
+
+        with patch("threading.Timer"):
+            main(["--desktop"])
+        kwargs = fake_webview.start.call_args.kwargs
+        assert kwargs["private_mode"] is False
+        # Windows (WebView2) keeps it here; WKWebView uses its own store.
+        storage = _paths.state_dir() / "webview"
+        assert kwargs["storage_path"] == str(storage)
+        assert storage.is_dir()
+        if sys.platform != "win32":
+            assert storage.stat().st_mode & 0o777 == 0o700
 
     def test_pywebview_has_allow_downloads_setting(self):
         webview = pytest.importorskip("webview")

@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
                 logger.error("pywebview is required for --desktop mode. Install with: uv pip install 'mergemail365[desktop]'")
                 sys.exit(1)
 
-    from mail_merge._paths import state_dir
+    from mail_merge._paths import private_dir, state_dir
     from mail_merge.web.app import create_app
 
     # Both modes serve the app on a localhost port and open it at the same
@@ -132,7 +132,15 @@ def main(argv: list[str] | None = None) -> None:
         # nothing. Allowed, both ask where to save the file.
         webview.settings["ALLOW_DOWNLOADS"] = True
         webview.create_window("MergeMail365", url, width=1100, height=800)
-        webview.start()
+        # Not private mode: the page keeps the subject and body in
+        # localStorage so that they survive quitting the app (the origin,
+        # localhost:5050, is the same each run). WebView2 keeps its data in
+        # storage_path; WKWebView ignores it and uses the app's default
+        # store under ~/Library/WebKit.
+        webview.start(
+            private_mode=False,
+            storage_path=str(private_dir(state_dir() / "webview")),
+        )
     else:
         logger.info("Access URL: %s", url)
 
