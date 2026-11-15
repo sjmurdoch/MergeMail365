@@ -22,6 +22,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Fixed
 
+- Web UI: the advice shown for a failed test email is chosen from Microsoft's status code. It used to be chosen by searching the error text for numbers, so an address or request ID containing, say, `403` or `500` could produce the wrong advice. A network failure now says "Could not reach Microsoft".
 - `--log-level` with a misspelt level (`--log-level DEGUB`) is refused; it used to be quietly treated as `INFO`. At `DEBUG`, an unexpected error on the command line is now followed by its traceback.
 - Web UI: a spreadsheet whose name ends in upper-case `.XLSX` was refused as "Only .xlsx files are supported".
 - **A network timeout could send an email twice.** When Microsoft received a request but no answer came back in time (a read timeout), the email was sent again, up to `--max-retries` times, although the first attempt may well have been delivered. It is now not retried, and is reported as "outcome unknown: may have been delivered" rather than as failed: in the summary, in a new `unknown` column of the `--output` report, and in the web UI's results. Resuming from the report doesn't send it again, and says so; delete its line from the report to send it anyway. Connection errors, where nothing reached Microsoft, are still retried.

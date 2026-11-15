@@ -512,3 +512,37 @@ test("a rejected test email leaves step 4 failed, with Next disabled and Retry s
     assert.equal(C.retryVisible(s), true);
     assert.equal(s.testResult.success, false);
 });
+
+// What step 4 says about a failed test email (docs/review-fixes-plan.md, E3):
+// chosen from the failed result's status code, never by searching the text
+// for digits, which an address or a request ID can contain.
+test("testEmailFailure advises from the status code", () => {
+    const failed = (code, error = "", extra = {}) =>
+        ({ ok: false, error: `Test email to x was not sent (HTTP ${code})`, results: [{ success: false, status_code: code, error, ...extra }] });
+    assert.match(C.testEmailFailure(failed(403, "ErrorAccessDenied")), /^Permission denied\./);
+    assert.match(C.testEmailFailure(failed(401)), /^Permission denied\./);
+    assert.match(C.testEmailFailure(failed(400, "Invalid recipient 500@example.com")), /^Email rejected by Microsoft\./);
+    assert.match(C.testEmailFailure(failed(429)), /^Rate limited by Microsoft\./);
+    assert.match(C.testEmailFailure(failed(503)), /^Microsoft server error\./);
+    assert.match(C.testEmailFailure(failed(403)), /\(HTTP 403\)$/);
+    // Digits in the text don't decide: a 413 naming request 400-401.
+    const big = C.testEmailFailure(failed(413, "request id 400-401-500"));
+    assert.doesNotMatch(big, /Permission|rejected|Rate limited|server error/);
+    assert.match(big, /413/);
+});
+
+test("testEmailFailure without a status code", () => {
+    // A network failure: nothing came back from Microsoft.
+    const network = { ok: false, results: [{ success: false, status_code: null, error: "connection refused" }] };
+    assert.equal(C.testEmailFailure(network), "Could not reach Microsoft: connection refused");
+    // No answer after sending: may have gone, so the job's own words.
+    const unknown = { ok: false, error: "No answer from Microsoft for the test email to x: it may have been delivered.",
+        results: [{ success: false, status_code: null, unknown: true, error: "No answer" }] };
+    assert.equal(C.testEmailFailure(unknown), unknown.error);
+    // No result at all: the error as it is, digits and all.
+    for (const error of ["Not signed in. Sign in with Microsoft, then try again.", "Row 403: bad address"]) {
+        assert.equal(C.testEmailFailure({ ok: false, error, results: [] }), error);
+        assert.equal(C.testEmailFailure({ ok: false, error }), error);
+    }
+    assert.equal(C.testEmailFailure({ ok: false }), "Test email failed");
+});

@@ -681,6 +681,7 @@ class TestRejectedTestEmail:
         _to_step4(page, workflow_xlsx)
         page.click("#btn-send-test")
         expect(page.locator("#test-result")).to_contain_text("Permission denied", timeout=10000)
+        expect(page.locator("#test-result")).to_contain_text("(HTTP 403)")  # WizardCore.testEmailFailure
         expect(page.locator("#test-result")).not_to_contain_text("successfully")
         expect(page.locator("#btn-next-4")).to_be_disabled()
         expect(page.locator("#btn-retry-test")).to_be_visible()

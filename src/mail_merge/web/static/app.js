@@ -1358,7 +1358,7 @@ async function runJob(mode, id) {
             // still runs to the end (spec/wizard.qnt, testPassHonest).
             const ok = WizardCore.jobSucceeded(result);
             if (mode === "test_email") {
-                completed(ok, ok ? "Test email sent successfully!" : categoriseError(jobFailureText(result, "Test email failed")));
+                completed(ok, ok ? "Test email sent successfully!" : WizardCore.testEmailFailure(result));
             } else {
                 completed(ok, ok ? dryRunSummary() : jobFailureText(result, "Verification failed"));
             }
@@ -1806,25 +1806,6 @@ function updateSessionTimer() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Categorised error messages for test email
-// ---------------------------------------------------------------------------
-function categoriseError(msg) {
-    if (!msg) return msg;
-    if (/401|403|Forbidden|Unauthorized/i.test(msg)) {
-        return "Permission denied. Check that your Azure AD app has Mail.Send permission and admin consent has been granted.";
-    }
-    if (/400|Bad Request/i.test(msg)) {
-        return "Email rejected by Microsoft. Check that all addresses, attachments, and fields are valid.";
-    }
-    if (/429|Too Many Requests|throttl/i.test(msg)) {
-        return "Rate limited by Microsoft. Wait a moment and retry.";
-    }
-    if (/5\d\d|Server Error|Internal/i.test(msg)) {
-        return "Microsoft server error. This is usually temporary. Try again in a few moments.";
-    }
-    return msg;
-}
 
 // ---------------------------------------------------------------------------
 // Buttons. The template names what each does in a data-action attribute,
