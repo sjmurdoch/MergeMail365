@@ -336,7 +336,14 @@ def test_find_open_port_reuses_a_port_left_by_a_closed_server():
     client.recv(1)
     client.close()
     server.close()
-    assert _find_open_port(port, port + 20, host="localhost") == port
+    # The server's end reaches TIME_WAIT once the client's FIN arrives; until
+    # then (FIN_WAIT_2) the port is busy for Werkzeug too, so allow a moment.
+    import time
+
+    deadline = time.monotonic() + 5
+    while (found := _find_open_port(port, port + 20, host="localhost")) != port:
+        assert time.monotonic() < deadline, f"port {port} still busy; probe chose {found}"
+        time.sleep(0.05)
 
 
 def test_find_open_port_reports_an_unusable_host():
