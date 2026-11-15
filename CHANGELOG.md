@@ -23,6 +23,11 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Fixed
 
+- A display name in curly quotes is accepted in CC, BCC, Reply-To and the other address fields: `“Murdoch, Steven” <steven@example.com>`. macOS replaces straight quotes with curly ones as you type, so in the desktop app a name containing a comma could not be typed; it was refused with "An email address must have an @-sign".
+- Desktop app: the subject and body you were writing are restored when you open the app again, as they are in a browser. The desktop window used to forget them when it closed.
+- Web UI: the log of a test email or send names the account it is sent from ("Sending as …"), as the command line does.
+- A dry run's summary says "Would send", not "Sent", and that nothing was sent.
+- Web UI: an attachment smaller than 1 KB is shown with its size in bytes on the Send step, not as "0 KB". The sign-in diagnostics no longer run past the edge of the window.
 - Web UI: the advice shown for a failed test email is chosen from Microsoft's status code. It used to be chosen by searching the error text for numbers, so an address or request ID containing, say, `403` or `500` could produce the wrong advice. A network failure now says "Could not reach Microsoft".
 - `--log-level` with a misspelt level (`--log-level DEGUB`) is refused; it used to be quietly treated as `INFO`. At `DEBUG`, an unexpected error on the command line is now followed by its traceback.
 - Web UI: a spreadsheet whose name ends in upper-case `.XLSX` was refused as "Only .xlsx files are supported".
