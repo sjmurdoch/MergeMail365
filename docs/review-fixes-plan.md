@@ -232,11 +232,11 @@ Written 2026-11-15, at the end of phase C, for an agent (or person) with no memo
 
 ### Where things are
 
-- **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`; 15 commits, the last being this handover. Nothing is pushed. The working tree is clean. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers.
-- **Done:** phases A to G (findings F1–F16; guards G1–G9; requirement R19; documents; dependency updates).
-- **Remaining:** phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
-- **Version and release:** the version is still 0.6.0 and nothing is tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. Bumping the version and releasing are the user's call; ask, don't do it.
-- **Last verified state** (commit `83cce54`): 1163 tests pass and 14 are skipped (Windows-only tests, on macOS); `mypy`, `ruff check .` and `biome lint` are clean; the Quint scenarios pass for `buggy`, `partial`, `round2` and `fixed`; Apalache reports `allInvariants` holds for `fixed` at 16 steps.
+- **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`, pushed as pull request #4. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers. This section was written at the end of phase C and its instructions for D to H are kept as the record of what was asked; [Status](#status) says what was done.
+- **Done:** phases A to G and H1 to H4 (findings F1–F16; guards G1–G9; requirement R19; documents; dependency updates; the release candidates tested on macOS and Windows).
+- **Remaining:** H5, the real release, which is the user's, and the open items in `TODO.md`.
+- **Version and release:** the version in `pyproject.toml` is still 0.6.0; pre-releases `v0.7.0rc1` to `rc5` are tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. The next release is 0.7.0, with everything on this branch (decided 2026-11-15). Bumping the version and releasing are the user's call; ask, don't do it.
+- **Last verified state:** see "Checks at the last commit" in [Status](#status).
 
 ### How the user wants this run
 
@@ -430,7 +430,7 @@ The command-line tool is not part of what the release workflow builds. If the us
 ### Loose ends and things not verified
 
 - **Not run on Windows or Linux.** CI has not run on this branch. The permission tests are skipped on Windows; `os.fchmod` and the `chmod` calls are guarded by platform checks, but that is untested there.
-- **Guards checked against their bug:** `tests/test_outcomes.py` (fails without the `api.py` change), `tests/test_fs_footprint.py` (fails with the old `_save_cache`), the cookie guard and `tests/test_web_sessions.py` (fail with Flask's cookie session), the injection walk (its second test breaks the escaping), and the conformance mutants. **Not checked that way:** `test_running_send_lookup_survives_jobs_being_created_meanwhile` (may pass without the lock; the race is rare), `TestRouteTable` against a deliberately unprotected route, and `tests/test_log_secrets.py` against the original `sender.py` (the leak was confirmed by hand during the review; the test file did fail on the two leaks it found while being written).
+- **Guards checked against their bug:** `tests/test_outcomes.py` (fails without the `api.py` change), `tests/test_fs_footprint.py` (fails with the old `_save_cache`), the cookie guard and `tests/test_web_sessions.py` (fail with Flask's cookie session), the injection walk (its second test breaks the escaping), and the conformance mutants. Checked on 2026-11-15, after phase H: `TestRouteTable` (fails with `auth_login` exempt from the session check, with a session route marked `@public`, and with one POST route exempt from the CSRF check; `TestRouteAccess` fails for the second too) and `tests/test_log_secrets.py` (three tests fail with the header and payload line back in `sender.py`). The third, `test_running_send_lookup_survives_jobs_being_created_meanwhile`, passed five times out of five without the lock, so it was replaced by `test_running_send_holds_the_lock_while_it_reads_the_job_table`, which makes another thread create a job half-way through the iteration and fails every time without the lock.
 - **Apalache** was run as `--all fixed` (one result for all invariants), not invariant by invariant, and for `round2` only at 12 steps for three invariants.
 - **Browser conformance has no mutant for `jobSucceeded`.** The client and server tiers have one each; the page is covered by `TestRejectedTestEmail` instead, because the few random browser traces would not reliably include a rejected test email.
 - **The 4 MB figure.** `_check_message_size()` and the older per-attachment check assume Microsoft Graph accepts about 4 MB per `sendMail` request. That is not stated in the copies of the documentation in `docs/`; verify it against Microsoft's documentation before relying on the exact limit.
@@ -438,9 +438,9 @@ The command-line tool is not part of what the release workflow builds. If the us
 
 ### Questions waiting for the user
 
-1. **`batch_size=0`.** It used to mean "send nothing this time" and an existing test said so; it is now an error, as the accepted plan specified (`batch_size >= 1`). The user was told and has not yet answered whether 0 should stay a no-op.
+1. ~~`batch_size=0`~~: answered 2026-11-15, it stays an error (`batch_size >= 1`), as the changelog says.
 2. ~~Resume and "outcome unknown"~~: answered 2026-11-15, skip with a warning (done in D2).
-3. **Releasing.** Whether phase A should go out on its own as 0.6.1 (it would have to be cherry-picked, since later commits change behaviour) or everything together as 0.7.0.
+3. ~~Releasing~~: answered 2026-11-15, the next release is 0.7.0 with everything on this branch; no separate 0.6.1.
 4. ~~Phase G~~: answered 2026-11-15 (groups 1–5 and Biome updated; Python stays 3.14).
 5. ~~Phase H~~: answered 2026-11-15 (push, pull request and pre-release approved; the user named the account and recipients; the user runs the desktop-app agent on macOS, then Windows).
 
