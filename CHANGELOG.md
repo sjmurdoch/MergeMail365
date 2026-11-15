@@ -22,6 +22,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Fixed
 
+- **Resuming a send skipped rows that share an address.** If the spreadsheet had several rows for one address (one person, several personalised emails) and a run stopped after the first of them, re-running with `--output` never sent the others, because any recorded success for the address skipped every row with it. Rows are now counted: each recorded success skips one row. The report also keeps one line per row instead of one per address.
+- Resuming a send re-sent to an address starting with `+`, `-`, `=` or `@` (such as `+tag@example.com`) every time, because the character that the report adds to stop spreadsheets reading such a value as a formula was not taken off again when the report was read back.
 - CC, BCC and reply-to addresses are checked before anything is sent, like the recipients' addresses. A mistyped address used to be discovered only when Microsoft rejected the email, once for every recipient. The web UI reports it when you leave the Compose step. The test address and BCC mode's To address are checked too.
 - A display name containing a comma now works when quoted: `"Doe, Jane" <jane@example.com>` used to be split into the "addresses" `Doe` and `Jane`. Addresses may also be separated by semicolons, as in Outlook.
 - `--batch-size`, `--delay` and `--max-retries` refuse values that make no sense. `--batch-size -1` used to send to everyone except the last recipient. `--batch-size 0`, which did nothing, is now an error too.

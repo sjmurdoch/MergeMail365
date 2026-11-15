@@ -17,6 +17,15 @@ def _sanitize_csv(value: str) -> str:
     return value
 
 
+def _unsanitize_csv(value: str) -> str:
+    """Undo :func:`_sanitize_csv`: the tab it adds is always followed by one
+    of the guarded characters, so one leading tab followed by one of them
+    was added by it."""
+    if value.startswith("\t") and value[1:].startswith(_CSV_FORMULA_PREFIXES):
+        return value[1:]
+    return value
+
+
 def summarize(results: list[SendResult]) -> dict[str, object]:
     """Return structured summary: total, sent, failed counts + failed details."""
     total = len(results)
@@ -84,9 +93,9 @@ def read_csv(path: str | Path) -> list[SendResult]:
         for row in reader:
             status_raw = row.get("status_code", "")
             results.append(SendResult(
-                email=row["email"],
+                email=_unsanitize_csv(row["email"]),
                 success=row["success"] == "True",
                 status_code=int(status_raw) if status_raw else None,
-                error=row.get("error", ""),
+                error=_unsanitize_csv(row.get("error") or ""),
             ))
     return results

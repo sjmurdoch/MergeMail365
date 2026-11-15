@@ -1474,6 +1474,119 @@ class TestInterruptedSend:
             self._send(sample_xlsx, body_template_file, output)
         assert [(r.email, r.success) for r in read_csv(output)] == [("alice@example.com", True)]
 
+    @pytest.fixture
+    def shared_xlsx(self, tmp_path):
+        """Three rows for one person (three different emails to them), then Bob."""
+        path = tmp_path / "shared.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "email", "company"])
+        ws.append(["Alice", "alice@example.com", "Acme"])
+        ws.append(["Alice", "Alice@Example.com", "Widgets"])
+        ws.append(["Alice", "alice@example.com", "Gadgets"])
+        ws.append(["Bob", "bob@example.com", "Acme"])
+        wb.save(path)
+        return path
+
+    def test_resume_sends_the_rest_of_the_rows_that_share_an_address(
+        self, shared_xlsx, body_template_file, tmp_path, auth, sent,
+    ):
+        from mail_merge.report import read_csv
+        from mail_merge.sender import SendAborted
+
+        output = tmp_path / "report.csv"
+        sent.fail_on = "Alice@Example.com"  # the second row
+        with pytest.raises(SendAborted):
+            self._send(shared_xlsx, body_template_file, output)
+        assert sent == ["alice@example.com"]
+
+        sent.fail_on = None
+        self._send(shared_xlsx, body_template_file, output)
+        assert sent == [
+            "alice@example.com", "Alice@Example.com", "alice@example.com", "bob@example.com",
+        ]
+        rows = [(r.email.lower(), r.success) for r in read_csv(output)]
+        assert sorted(rows) == [("alice@example.com", True)] * 3 + [("bob@example.com", True)]
+
+    def test_resume_with_batch_size_keeps_one_line_per_row(
+        self, shared_xlsx, body_template_file, tmp_path, auth, sent,
+    ):
+        from mail_merge.report import read_csv
+
+        output = tmp_path / "report.csv"
+        # Run 1 sent the first row and failed the second; the third and Bob
+        # were left for later.
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="Alice@Example.com", success=False, status_code=500, error="x"),
+        ], output)
+
+        def run():
+            return send_merge(
+                spreadsheet=shared_xlsx, body=body_template_file, subject="Hello {{name}}",
+                email_column="email", client_id="fake-client-id", send=True, confirm=False,
+                output=output, delay=0, batch_size=1,
+            )
+
+        run()  # retries the second row only
+        assert sent == ["Alice@Example.com"]
+        assert sorted((r.email.lower(), r.success) for r in read_csv(output)) == [
+            ("alice@example.com", True), ("alice@example.com", True),
+        ]
+        run()
+        run()
+        assert sent == ["Alice@Example.com", "alice@example.com", "bob@example.com"]
+        assert sorted((r.email.lower(), r.success) for r in read_csv(output)) == [
+            ("alice@example.com", True), ("alice@example.com", True),
+            ("alice@example.com", True), ("bob@example.com", True),
+        ]
+
+    def test_previous_failure_not_retried_this_run_stays_in_the_report(
+        self, shared_xlsx, body_template_file, tmp_path, auth, sent,
+    ):
+        from mail_merge.report import read_csv
+
+        output = tmp_path / "report.csv"
+        write_csv([
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="alice@example.com", success=True, status_code=202),
+            SendResult(email="bob@example.com", success=False, status_code=500, error="x"),
+            SendResult(email="carol@example.com", success=False, status_code=400, error="y"),
+        ], output)
+        results = self._send(shared_xlsx, body_template_file, output)
+        assert sent == ["bob@example.com"]
+        assert sorted((r.email, r.success) for r in results) == sorted((r.email, r.success) for r in read_csv(output))
+        assert sorted((r.email, r.success) for r in read_csv(output)) == [
+            ("alice@example.com", True), ("alice@example.com", True), ("alice@example.com", True),
+            ("bob@example.com", True), ("carol@example.com", False),
+        ]
+
+    def test_bcc_mode_resume_counts_rows_that_share_an_address(
+        self, shared_xlsx, tmp_path, monkeypatch,
+    ):
+        body = tmp_path / "static.txt"
+        body.write_text("Hello all", encoding="utf-8")
+        blasted: list[list[str]] = []
+
+        def fake_blast(*, emails, on_result=None, **kwargs):
+            blasted.append(list(emails))
+            results = [SendResult(email=e, success=True, status_code=202) for e in emails]
+            for r in results:
+                if on_result is not None:
+                    on_result(r)
+            return results
+
+        monkeypatch.setattr("mail_merge.api.send_bcc_blast", fake_blast)
+        output = tmp_path / "report.csv"
+        write_csv([SendResult(email="alice@example.com", success=True, status_code=202)], output)
+        send_merge(
+            spreadsheet=shared_xlsx, body=body, subject="Hello",
+            email_column="email", bcc_blast=True, bcc_blast_to="me@example.com",
+            output=output, confirm=False,
+        )
+        assert blasted == [["Alice@Example.com", "alice@example.com", "bob@example.com"]]
+
     def test_completed_send_output_has_one_row_per_recipient(
         self, sample_xlsx, body_template_file, tmp_path, auth, sent,
     ):

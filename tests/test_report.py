@@ -78,6 +78,17 @@ class TestReadCsvRoundTrip:
         assert loaded[1].status_code == 403
         assert loaded[1].error == "Forbidden"
 
+    def test_round_trip_of_guarded_values(self, tmp_path):
+        """The tab written before a value that a spreadsheet would treat as
+        a formula is taken off again, so resume matches +tag@ addresses."""
+        results = [
+            SendResult(email=f"{c}tag@example.com", success=False, status_code=400, error=f"{c}err")
+            for c in ("=", "+", "-", "@", "\t", "\r")
+        ] + [SendResult(email="\tx@example.com", success=True, status_code=202, error="\tplain")]
+        path = tmp_path / "report.csv"
+        write_csv(results, path)
+        assert read_csv(path) == results
+
     def test_none_status_code(self, tmp_path):
         results = [
             SendResult(email="c@x.com", success=True, status_code=None, error=""),

@@ -5,6 +5,7 @@ import logging
 import mimetypes
 import os
 import re
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -302,6 +303,44 @@ def apply_filters(
     return result
 
 
+def _skip_previously_sent(
+    recipients: list[dict[str, str]],
+    email_column: str,
+    previous: list[SendResult],
+) -> list[dict[str, str]]:
+    """Drop the rows a previous run sent. Rows are matched by address and
+    counted, not looked up: two recorded successes for an address skip the
+    first two rows with it, so a person with several rows (several emails)
+    still gets the ones not yet sent."""
+    sent = Counter(r.email.lower() for r in previous if r.success)
+    remaining = []
+    for row in recipients:
+        address = row[email_column].lower()
+        if sent[address] > 0:
+            sent[address] -= 1
+        else:
+            remaining.append(row)
+    return remaining
+
+
+def _previous_results_to_keep(
+    previous: list[SendResult], to_send: list[str],
+) -> list[SendResult]:
+    """The previous results that stay in the report: every success, and the
+    failures whose rows this run will not try again (rows held back by
+    ``batch_size``). Like :func:`_skip_previously_sent`, failures are
+    matched to rows by counting, earliest first."""
+    retrying = Counter(address.lower() for address in to_send)
+    kept = []
+    for r in previous:
+        address = r.email.lower()
+        if not r.success and retrying[address] > 0:
+            retrying[address] -= 1
+            continue
+        kept.append(r)
+    return kept
+
+
 def send_merge(
     spreadsheet: str | Path,
     body: str | Path | None = None,
@@ -486,17 +525,13 @@ def send_merge(
             output_path = Path(output)
             if output_path.exists():
                 previous_results = read_csv(output_path)
-                successful_emails = {
-                    r.email.lower() for r in previous_results if r.success
-                }
                 total_before = len(recipients)
-                recipients = [
-                    r for r in recipients
-                    if r[email_column].lower() not in successful_emails
-                ]
+                recipients = _skip_previously_sent(
+                    recipients, email_column, previous_results,
+                )
                 logger.info(
                     "📋 %d previously sent, %d remaining of %d total",
-                    len(successful_emails),
+                    total_before - len(recipients),
                     len(recipients),
                     total_before,
                 )
@@ -506,6 +541,12 @@ def send_merge(
 
         if batch_size is not None:
             recipients = recipients[:batch_size]  # at least 1: _check_options()
+
+        # The report keeps one line per row: a previous failure is replaced
+        # by this run's result when its row is tried again.
+        previous_results = _previous_results_to_keep(
+            previous_results, [r[email_column] for r in recipients],
+        )
 
     # --- Read body template ---
     if body_text is not None:
@@ -765,13 +806,7 @@ def send_merge(
         )
 
     # --- Merge with previous results when resuming ---
-    if previous_results:
-        merged: dict[str, SendResult] = {}
-        for r in previous_results:
-            merged[r.email.lower()] = r
-        for r in results:
-            merged[r.email.lower()] = r
-        results = list(merged.values())
+    results = previous_results + results
 
     # --- Report ---
     print_summary(results)

@@ -317,6 +317,8 @@ uv run mergemail365 \
 
 When all recipients have succeeded, the tool logs "All emails already sent" and exits 0. Use `--no-resume` to disable automatic resume and send to all recipients fresh.
 
+Resume counts rows, not addresses. If the spreadsheet has several rows for the same address (one person getting several different emails) and the CSV records one success for it, only the first of those rows is skipped; the rest are still sent. The rows are matched in spreadsheet order, so don't reorder or delete rows between runs. The CSV keeps one line per row sent, plus earlier failures that haven't been retried yet.
+
 ### BCC blast
 
 When every recipient should receive the same email and must not be able to see other recipients' addresses, use BCC blast mode. Instead of sending one email per row, MergeMail365 groups all recipients into BCC batches (up to 499 addresses per email, respecting the Microsoft Graph API limit of 500 total recipients per message) and sends a small number of emails in total.
