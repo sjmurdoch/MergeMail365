@@ -329,7 +329,10 @@ table caption {
 .auth-diagnostics-content {
     font-size: 0.8rem;
     max-height: 200px;
+    max-width: 100%;
     overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .auth-diagnostics-content pre {

@@ -1412,7 +1412,7 @@ function prepareSend() {
     if ($("bcc-input").value) details.push(html`<strong>BCC:</strong> ${$("bcc-input").value}<br>`);
     const attInput = $("attachment-input");
     if (attInput.files.length > 0) {
-        const attList = Array.from(attInput.files).map(f => `${f.name} (${(f.size / 1024).toFixed(0)} KB)`);
+        const attList = Array.from(attInput.files).map(f => `${f.name} (${WizardCore.formatSize(f.size)})`);
         details.push(html`<strong>Attachments:</strong> ${attList.join(", ")}<br>`);
     }
     setHtml($("send-confirm-details"), details);

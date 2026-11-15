@@ -546,3 +546,13 @@ test("testEmailFailure without a status code", () => {
     }
     assert.equal(C.testEmailFailure({ ok: false }), "Test email failed");
 });
+
+test("formatSize never shows a small file as 0 KB", () => {
+    assert.equal(C.formatSize(0), "0 bytes");
+    assert.equal(C.formatSize(1), "1 byte");
+    assert.equal(C.formatSize(14), "14 bytes");
+    assert.equal(C.formatSize(1023), "1023 bytes");
+    assert.equal(C.formatSize(1024), "1 KB");
+    assert.equal(C.formatSize(150 * 1024), "150 KB");
+    assert.equal(C.formatSize(3.5 * 1024 * 1024), "3.5 MB");
+});

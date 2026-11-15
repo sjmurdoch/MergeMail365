@@ -571,9 +571,18 @@
         return `${advice} (HTTP ${code})`;
     }
 
+    /** An attachment's size for step 6: bytes under 1 KB (a 14-byte file
+     *  used to show as "0 KB"), then KB, then MB with one decimal. */
+    function formatSize(bytes) {
+        if (bytes < 1024) return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+        if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
     const WizardCore = {
         jobSucceeded,
         testEmailFailure,
+        formatSize,
         initialState,
         resetTestAndVerify,
         newMergeState,
