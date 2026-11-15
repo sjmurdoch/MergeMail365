@@ -480,6 +480,8 @@ The packaged app requires no Python installation, no CLI usage — user just dou
 
 ## Security Assessment
 
+Revised 2026-11-15 for the fixes in `docs/review-fixes-plan.md` (phases A to C): route protection by default, server-side sessions, the Content Security Policy, `--allow-remote`, private files and what the log file holds. Where this section and `CLAUDE.md` disagree, `CLAUDE.md` describes the code.
+
 ### Threat Model
 
 The web app runs on localhost on potentially shared machines, handling PII (recipient email addresses, names) and holding delegated Microsoft Graph API credentials (Mail.Send scope). Threats to consider:
@@ -487,8 +489,9 @@ The web app runs on localhost on potentially shared machines, handling PII (reci
 1. **Other local users accessing the server** — Any user on the machine can connect to `http://localhost:5050`.
 2. **PII exposure** — Spreadsheet data in temp files, in-memory state, logs, and SSE streams.
 3. **Credential theft** — MSAL token cache and Flask session cookies.
-4. **Cross-site attacks** — CSRF and XSS via malicious spreadsheet content.
+4. **Cross-site attacks** — CSRF, DNS rebinding, other web pages open in the same browser navigating to the app's routes, and XSS via malicious spreadsheet content (cells, column headers, the file name) or pasted HTML.
 5. **Accidental mass emailing** — Sending to wrong recipients or too many.
+6. **Secrets in support material** — the log file is what users send when asking for help.
 
 ### Mitigations
 
@@ -502,11 +505,13 @@ On startup, generate a cryptographically random token and include it in the auto
 
 This prevents other local users from accessing the server — they don't know the token. This is the same approach used by Jupyter Notebook.
 
+**Every route needs the session unless its view is marked `@public`**: only the OAuth redirect (`/auth/callback`) and static files are. `/auth/login` needs it too, because any web page could otherwise navigate the browser there and start a sign-in for an app registration of its choosing; a `--client-id` or `--tenant-id` given on the command line can't be overridden by a request. `TestRouteTable` in `tests/test_web.py` walks the URL map and requires a 403 without the session (and, for non-GET routes, without the CSRF token).
+
 #### Flask session security
 
-- **Secret key**: Generated via `secrets.token_hex(32)` on each startup. Not persisted. Sessions are invalidated on restart.
+- **Server-side sessions** (`web/sessions.py`): the cookie holds only a random session ID; the data stays in the server process. Flask's default cookie session silently lost everything once the data passed the browser's 4 KB cookie limit (a wide spreadsheet). Sessions are lost on restart.
 - **Cookie flags**: `Secure=False` (localhost doesn't use HTTPS), `HttpOnly=True`, `SameSite=Lax`.
-- **Session lifetime**: 1 hour. User must re-authenticate after that.
+- **Session lifetime**: 24 hours, sliding.
 
 #### CSRF protection
 
@@ -519,28 +524,35 @@ This prevents other local users from accessing the server — they don't know th
 
 A web page on an attacker's domain can re-resolve that domain to `127.0.0.1` and then talk to the server as same-origin, which gets past CSRF protection and lets it read responses. Every request (including static files) is rejected with 403 unless the `Host` header names `localhost`, `127.0.0.1`, `::1` or the `--host` value. When bound to a wildcard address (`0.0.0.0`, `::`), the check is skipped because the machine can be reached under any of its names; the startup token is then the only guard.
 
+#### Binding beyond this computer
+
+`--host` with anything but a loopback address is refused unless `--allow-remote` is also given, and then the server starts with a warning: the connection is plain HTTP, and anyone who learns the access URL can send email as the signed-in account.
+
 #### Desktop mode
 
 Desktop mode applies all of the above unchanged. The pywebview window is just another client of the localhost server, opened at the token URL.
 
 #### PII handling
 
-- **Temp files**: Created with `tempfile.mkdtemp()` with `0o700` permissions (owner-only). Cleaned up immediately after job completion. `atexit` handler catches server shutdown.
-- **In-memory data**: Job results and uploaded spreadsheet data held in Python dicts. Cleared when the user starts a new session or after 1 hour.
+- **Temp files**: Created with `tempfile.mkdtemp()` with `0o700` permissions (owner-only). The uploaded spreadsheet is deleted on re-upload, New merge or exit (`atexit`); each job's attachments are deleted when the job ends.
+- **In-memory data**: Job results and session data held in the server process, lost on restart.
+- **Send log** (`web/sendlog.py`): a running send's results are written to a file (0600, in a 0700 directory) so that a crash can be reported on the next start; it is deleted when the send ends.
 - **Log stream**: SSE events contain email addresses (necessary for showing progress). The SSE endpoint requires session authentication (see above).
-- **No disk logging**: The web server does not write log files. Log output goes to stderr only (the terminal where the server was started).
+- **Log file**: written when `--log-file` is given, and always by the macOS and Windows apps. It holds recipient addresses, so it is created 0600 in a 0700 directory (`_paths.open_private_append()`, `private_dir()`). It never holds credentials or message content: no request headers or payloads, msal's DEBUG records are dropped (they include the authorisation code and PKCE verifier), and a redacting formatter removes bearer tokens, JWTs and `token=`/`code=`/`state=` query values (werkzeug's access log would otherwise record the startup token). `tests/test_log_secrets.py` runs the flows with canary secrets and searches every log for them. Version 0.6.0 and earlier logged each `sendMail` request in full, including the access token.
 
 #### Credential protection
 
-- **MSAL token cache**: Already protected with `0o600` permissions (existing code in `auth.py`).
-- **Flask session**: Contains only the session ID and CSRF token, not the access token. Access tokens are held in the MSAL cache, not in the Flask session.
+- **MSAL token cache**: Written with `_paths.write_private()`: created 0600 (never readable by others, even briefly) in a temporary file and renamed, so a crash can't truncate it. The home directory it sits in is never chmod'ed. A damaged cache is ignored with a warning.
+- **Flask session**: The cookie holds only the session ID; the server-side session holds the CSRF token and wizard state, never the access token. Access tokens are held in the MSAL cache.
 - **Auth code flow**: Uses PKCE (Proof Key for Code Exchange), preventing authorization code interception.
 
 #### XSS prevention
 
-- **Spreadsheet data**: All data from the spreadsheet is rendered via Jinja2's auto-escaping (enabled by default in Flask). The preview panel, results table, and column names are all escaped.
-- **Template preview**: When rendering the user's email template with `template.render()`, the output is displayed in a `<pre>` or text-content element, not injected as raw HTML — even in HTML mode, a sandboxed `<iframe srcdoc>` with `sandbox=""` (no scripts) is used for the preview.
-- **SSE events**: Log messages in SSE are JSON-encoded and inserted into the DOM via `textContent`, not `innerHTML`.
+- **One way to build markup**: the page is built in JavaScript, so Jinja2's auto-escaping covers only the initial template. In `app.js`, markup is built only with the `` html`...` `` tag from `static/safe-html.js`, which escapes every interpolated value (quotes included, so values are safe in attributes), and reaches the page only through `setHtml()`, or text goes in with `textContent`. `TestHtmlSinks` fails on any other `innerHTML` assignment; `tests/test_web_e2e_injection.py` walks the whole wizard with an injection payload in every string the page receives. Found while doing this: the old `escapeHtml()` did not escape quotes, and the "Test connection" panel showed diagnostics unescaped.
+- **Content Security Policy** on every response: script only from the app's own files (`script-src 'self'`), so no inline `<script>` or `on...=` attributes (buttons name their action in `data-action`, run through one delegated listener), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`; plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. This is a second line of defence: injected markup can't run script even if escaping fails.
+- **Template preview**: HTML-mode previews use a sandboxed `<iframe srcdoc>` with `sandbox=""` (no scripts).
+- **Pasted HTML** is parsed in an inert document before Trix sanitises it, so images in it don't load and their `onerror` handlers don't fire.
+- **Cell values in HTML emails** are escaped by both renderers (`template.py`, `static/template-core.js`), so a spreadsheet filled in by others can't put markup into the email.
 
 #### Protection against accidental mass emailing
 
@@ -549,14 +561,16 @@ Desktop mode applies all of the above unchanged. The pywebview window is just an
 - **Mandatory test email**: Must send and verify a test email before proceeding.
 - **Mandatory dry run**: Must complete a dry run before the Send step.
 - Both are enforced in the browser only, by design: they guard against mistakes in the wizard, not against a client that bypasses it, which would already hold the startup and CSRF tokens. `/api/start-job` does not check them.
-- **Confirmation dialog**: Step 5 requires explicit confirmation with recipient count.
+- **Confirmation**: Step 6 requires typing `SEND`.
 - **No auto-send**: The wizard requires deliberate progression through all steps.
 
 ### Residual risks (accepted)
 
 - **localhost HTTP (not HTTPS)**: Traffic is not encrypted. On a shared machine, another user could theoretically sniff localhost traffic. Mitigated by: (a) the startup token prevents unauthorized access, (b) TLS on localhost requires self-signed certs which cause browser warnings and UX friction, (c) the MSAL token cache is the higher-value target and it's already on disk with file permissions.
 - **Terminal access**: The user who started the server can see the startup token in their terminal. On a shared machine with shared terminal access, this is inherent. Users should not leave the terminal unattended.
-- **Flask dev server**: Not a production WSGI server. Acceptable for a local single-user tool. Not exposed to the network (bound to `127.0.0.1`).
+- **Flask dev server**: Not a production WSGI server. Acceptable for a local single-user tool. Not exposed to the network (bound to `localhost`; anything else needs `--allow-remote`).
+- **Token cache in a file**, not the system keychain; protected by file permissions only.
+- **Two `mergemail365-web` processes** each treat the other's running send log as an interrupted send.
 
 ## Implementation Sequence
 
