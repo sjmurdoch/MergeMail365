@@ -9,7 +9,8 @@ per recipient (docs/review-fixes-plan.md, F7, G5).
 Accepted: ``alice@example.com`` or ``Alice Example <alice@example.com>``,
 several separated by commas or semicolons (what Outlook's address line
 uses). A display name containing a comma must be quoted, as in
-``"Example, Alice" <alice@example.com>``.
+``"Example, Alice" <alice@example.com>``. Curly quotes (“Example, Alice”)
+quote a name too: macOS substitutes them for straight quotes as you type.
 """
 
 import re
@@ -18,22 +19,28 @@ from mail_merge.sender import EmailAddress
 
 _NAME_AND_ADDRESS_RE = re.compile(r"^(.*)<([^<>]*)>$", re.DOTALL)
 
+# Opening quote -> its closing quote.
+_QUOTES = {'"': '"', "“": "”"}
+
 
 def split_addresses(text: str) -> list[str]:
     """Split on commas and semicolons that are not inside a quoted display
     name or an <address>. Empty entries (a trailing comma) are dropped."""
     parts: list[str] = []
     current: list[str] = []
-    in_quotes = False
+    closing = ""  # the quote that ends the quoted text we are in, if any
     in_angle = False
     escaped = False
     for ch in text:
+        in_quotes = bool(closing)
         if escaped:
             escaped = False
-        elif ch == "\\" and in_quotes:
+        elif ch == "\\" and closing == '"':
             escaped = True
-        elif ch == '"':
-            in_quotes = not in_quotes
+        elif in_quotes and ch == closing:
+            closing = ""
+        elif not in_quotes and not in_angle and ch in _QUOTES:
+            closing = _QUOTES[ch]
         elif ch == "<" and not in_quotes:
             in_angle = True
         elif ch == ">" and not in_quotes:
@@ -58,6 +65,8 @@ def _parse_one(entry: str, label: str) -> EmailAddress:
     name, address = (match[1].strip(), match[2].strip()) if match else ("", entry)
     if len(name) >= 2 and name[0] == name[-1] == '"':
         name = name[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    elif len(name) >= 2 and name[0] == "“" and name[-1] == "”":
+        name = name[1:-1]
     try:
         # The same check as the recipients' column (api.validate_emails).
         validate_email(address, check_deliverability=False, allow_smtputf8=False)

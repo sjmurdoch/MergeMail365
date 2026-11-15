@@ -17,6 +17,12 @@ from mail_merge.sender import EmailAddress as A
     ('"Doe, Jane" <jane@example.com>, bob@example.com', [A("jane@example.com", "Doe, Jane"), A("bob@example.com")]),
     ('"Doe; Jane" <jane@example.com>', [A("jane@example.com", "Doe; Jane")]),
     ('"The \\"Boss\\"" <boss@example.com>', [A("boss@example.com", 'The "Boss"')]),
+    # macOS replaces straight quotes with curly ones as they are typed
+    # (phase H, macOS failure 1), so those quote a name too.
+    ("“Doe, Jane” <jane@example.com>, bob@example.com", [A("jane@example.com", "Doe, Jane"), A("bob@example.com")]),
+    ("“Doe; Jane” <jane@example.com>", [A("jane@example.com", "Doe; Jane")]),
+    # Curly quotes inside a name are kept as they are.
+    ("Jane “JJ” Doe <jane@example.com>", [A("jane@example.com", "Jane “JJ” Doe")]),
     # Names people write unquoted, which a strict RFC parser refuses.
     ("[Team] Lead <lead@example.com>", [A("lead@example.com", "[Team] Lead")]),
     ("Dr. A. Jones (Maths) <aj@example.com>", [A("aj@example.com", "Dr. A. Jones (Maths)")]),
