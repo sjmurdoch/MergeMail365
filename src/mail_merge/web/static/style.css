@@ -338,6 +338,14 @@ table caption {
 .auth-diagnostics-content pre {
     font-size: 0.8rem;
     margin-top: 0.5rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* A fieldset is as wide as its widest unbreakable content by default
+   (min-inline-size: min-content), so a long line in it widened the page. */
+fieldset {
+    min-width: 0;
 }
 
 /* Stop send button */
