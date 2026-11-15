@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
 	"files": {
 		"includes": ["src/mail_merge/web/static/app.js", "src/mail_merge/web/static/wizard-core.js", "src/mail_merge/web/static/safe-html.js", "src/mail_merge/web/static/template-core.js", "src/mail_merge/web/static/trix-config.js"]
 	},
