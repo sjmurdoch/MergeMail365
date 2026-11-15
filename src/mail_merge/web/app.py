@@ -182,9 +182,10 @@ def _validate_html_body(body: str) -> list[str]:
 def _attachment_basename(filename: str) -> str | None:
     """Return the final path component of an uploaded attachment's filename.
 
-    The multipart filename is client-controlled and Werkzeug passes it
-    through unchanged, so it may contain ``../``, an absolute path, or
-    Windows separators.  Strip everything up to the last ``/`` or ``\\``,
+    The multipart filename is client-controlled. Werkzeug only undoes the
+    header's quoting (since 3.1.9, a backslash escapes the next character,
+    so a client must send ``\\`` for a literal backslash), so it may contain
+    ``../``, an absolute path, or Windows separators.  Strip everything up to the last ``/`` or ``\\``,
     which keeps the name as the user sees it (spaces, punctuation,
     non-ASCII) unlike ``secure_filename``.  Returns ``None`` when nothing
     usable is left.

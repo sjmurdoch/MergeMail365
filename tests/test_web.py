@@ -1529,8 +1529,11 @@ class TestAttachmentSaving:
         "../escaped.txt",
         "../../escaped.txt",
         "sub/../../escaped.txt",
-        "..\\escaped.txt",
-        "C:\\Users\\victim\\escaped.txt",
+        # Backslashes doubled: in a quoted multipart filename a backslash
+        # escapes the next character (Werkzeug 3.1.9 and later), so these
+        # reach the server as ..\escaped.txt and C:\Users\victim\...
+        "..\\\\escaped.txt",
+        "C:\\\\Users\\\\victim\\\\escaped.txt",
         "{abs}",
     ])
     def test_traversal_filename_stays_in_temp_dir(
@@ -1551,6 +1554,21 @@ class TestAttachmentSaving:
         assert not (root.parent / "escaped.txt").exists()
         assert not (root.parent.parent / "escaped.txt").exists()
         assert not abs_target.exists()
+
+    @pytest.mark.parametrize(("name", "expected"), [
+        ("report.pdf", "report.pdf"),
+        ("../escaped.txt", "escaped.txt"),
+        ("..\\escaped.txt", "escaped.txt"),
+        ("C:\\Users\\victim\\escaped.txt", "escaped.txt"),
+        ("/etc/passwd", "passwd"),
+        ("Q3 report (final) é.pdf", "Q3 report (final) é.pdf"),
+        ("..", None), (".", None), ("", None), ("dir/", None), ("a\x00b", None),
+    ])
+    def test_attachment_basename(self, name, expected):
+        """The rule itself, apart from how the HTTP layer delivers the name."""
+        from mail_merge.web.app import _attachment_basename
+
+        assert _attachment_basename(name) == expected
 
     def test_drive_relative_filename_stays_in_temp_dir(
         self, web_client, sample_xlsx_web, monkeypatch
