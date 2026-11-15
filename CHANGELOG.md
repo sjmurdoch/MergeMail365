@@ -24,7 +24,9 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 ### Fixed
 
 - A display name in curly quotes is accepted in CC, BCC, Reply-To and the other address fields: `“Murdoch, Steven” <steven@example.com>`. macOS replaces straight quotes with curly ones as you type, so in the desktop app a name containing a comma could not be typed; it was refused with "An email address must have an @-sign".
-- Desktop app: the subject and body you were writing are restored when you open the app again, as they are in a browser. The desktop window used to forget them when it closed.
+- Desktop app: the subject, body and chosen columns are restored when you open the app again, as they are in a browser. The desktop window used to forget them when it closed. (In a browser too, the name column wasn't restored once the spreadsheet was uploaded again.)
+- Opening the app a second time while it is running no longer makes the two share one port on Windows, where the second window then talked to the first copy's server. On macOS and Linux the second copy failed to start; now it uses the next free port, as intended.
+- Web UI: after New merge, the Verify step shows the dry run's log again; it showed only the summary line.
 - Web UI: the log of a test email or send names the account it is sent from ("Sending as …"), as the command line does.
 - A dry run's summary says "Would send", not "Sent", and that nothing was sent.
 - Web UI: an attachment smaller than 1 KB is shown with its size in bytes on the Send step, not as "0 KB". The sign-in diagnostics no longer run past the edge of the window.
