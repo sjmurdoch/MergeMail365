@@ -233,8 +233,8 @@ Written 2026-11-15, at the end of phase C, for an agent (or person) with no memo
 ### Where things are
 
 - **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`; 15 commits, the last being this handover. Nothing is pushed. The working tree is clean. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers.
-- **Done:** phases A to F (findings F1–F16; guards G1–G9; requirement R19; documents).
-- **Remaining:** phase G (whether the dependencies and vendored code can safely be updated), phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
+- **Done:** phases A to G (findings F1–F16; guards G1–G9; requirement R19; documents; dependency updates).
+- **Remaining:** phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
 - **Version and release:** the version is still 0.6.0 and nothing is tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. Bumping the version and releasing are the user's call; ask, don't do it.
 - **Last verified state** (commit `83cce54`): 1163 tests pass and 14 are skipped (Windows-only tests, on macOS); `mypy`, `ruff check .` and `biome lint` are clean; the Quint scenarios pass for `buggy`, `partial`, `round2` and `fixed`; Apalache reports `allInvariants` holds for `fixed` at 16 steps.
 
@@ -441,14 +441,14 @@ The command-line tool is not part of what the release workflow builds. If the us
 1. **`batch_size=0`.** It used to mean "send nothing this time" and an existing test said so; it is now an error, as the accepted plan specified (`batch_size >= 1`). The user was told and has not yet answered whether 0 should stay a no-op.
 2. ~~Resume and "outcome unknown"~~: answered 2026-11-15, skip with a warning (done in D2).
 3. **Releasing.** Whether phase A should go out on its own as 0.6.1 (it would have to be cherry-picked, since later commits change behaviour) or everything together as 0.7.0.
-4. **Phase G:** which updates to make, once the verdicts are in; and whether to raise the minimum Python version if a newer stable release exists.
+4. ~~Phase G~~: answered 2026-11-15 (groups 1–5 and Biome updated; Python stays 3.14).
 5. **Phase H:** approval to push the branch, open a pull request and publish a pre-release; the candidate's version number; which Microsoft 365 account and which recipient mailboxes to use; who operates the Windows machine.
 
 ## Status
 
-Updated 2026-11-15 (end of phase F; last commit `734da86`). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
+Updated 2026-11-15 (end of phase G). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A to F are complete. Phase G has its inventory and verdicts (G1, G2) and waits for the user's decision (G3); phase H has not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A to G are complete. Phase H has not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
 **Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
 
@@ -513,7 +513,11 @@ Checks at `feebd91` (E3, the last code change): 1237 passed, 14 skipped; mypy, R
 | `spec/*`, `docs/quint-model.md` | No change needed | The model did not change after A1, which updated them. |
 | Move this plan to `archive/` | Not yet | After G and H. |
 
-### Phase G: dependencies — G1 and G2 done, waiting for the user (G3)
+### Phase G: dependencies — complete
+
+**G3, the user's decision (2026-11-15):** update groups 1 to 5; trial-run Biome 2.6.6 and update it if clean; keep Python 3.14 only in CI. **G4:** done, one commit per group (`d4a5f14`, `032d009`, `0117a54`, `db9b279`, `78da186`, `326d541`), recorded in `docs/upgrade-plan.md` (round 2). What came up: Werkzeug 3.1.9 unescapes backslashes in multipart filenames (safe; test adjusted, `_attachment_basename()` unit-tested); Chromium 156 reports parse-time CSP violations for the inert paste document (nothing runs; the test now checks image fetches, and fails with the paste parsed into the live document); Quint 0.33 lists the `Test` constructor as an ignored test. **Phase H must check:** pyobjc 13 and pythonnet 3.2 (the window, items 1, 2, 7, 12, 17), and the CI pins (H1). Checks at `326d541`: 1249 passed, 14 skipped; mypy, Ruff clean; Biome 2.6.6 clean; Quint scenarios 27/27 in all four variants and the simulation clean.
+
+The inventory as checked:
 
 Checked 2026-11-15. "Allowed" is the newest version public for at least 7 days (released on or before 2026-11-08): for Python packages, what `uv lock --upgrade` chose in a scratch copy of the project, with `exclude-newer` applied; for the rest, release dates read from npm and GitHub. Advisories are from osv.dev for every locked package at its current version, and `npm audit` for Quint.
 

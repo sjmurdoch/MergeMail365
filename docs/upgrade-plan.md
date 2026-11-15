@@ -1,4 +1,23 @@
-# Dependency upgrade plan (2026-09-30)
+# Dependency upgrade plan
+
+## Round 2 (2026-11-15)
+
+Part of `docs/review-fixes-plan.md`, phase G, where the inventory, the advisories and the verdict for each group are recorded. One commit per group, the full suite and mypy before each:
+
+1. ✅ Runtime, with two security fixes: certifi 2026.10.23 (GHSA-6q48-6c7w-9gw2, a compromised CA in the bundle `requests` uses) and werkzeug 3.1.9 (GHSA-g6x2-hccm-hh4m, Windows device names through `safe_join`); pyjwt 2.15.1, dnspython 2.9.2, cryptography 50.0.2 and patch releases. Werkzeug 3.1.9 treats a backslash in a quoted multipart filename as an escape character; the attachment traversal test was adjusted and `_attachment_basename()` gained unit tests.
+2. ✅ Desktop backends: pyobjc 13.0 (macOS), pythonnet 3.2.1 (Windows). Not covered by automated tests; phase H of the review-fixes plan checks the window on both systems.
+3. ✅ Tooling: mypy 2.4.1, pytest 9.2.0, playwright 1.64.1 (Chromium 156), pytest-playwright 0.10.0 and the rest of the lock. Chromium 156 reports a CSP violation when an inline handler attribute is parsed into the inert paste document, though nothing runs; the paste test now checks that the images aren't fetched.
+4. ✅ Quint 0.33.1 (fixes the `adm-zip` audit finding). Its `quint test` lists the `Test` constructor as "1 ignored".
+5. ✅ CI: setup-python v7.1.0, setup-uv v10.3.3, uv 0.13.6 (setup-uv's embedded checksums end there). Checked only by the first CI run.
+6. ✅ Biome 2.6.6: a trial run found nothing; schema and CI pin updated.
+
+Held: Python stays at 3.14 (3.15 is out; not added to CI, by the user's choice). Unchanged because already current: msal, requests, openpyxl, email-validator, rich, flask, pywebview, pyinstaller, Trix, Pico CSS, `actions/checkout`, `setup-biome`.
+
+Still open from round 1: the PyInstaller smoke test (step 8 below). Phase H of the review-fixes plan, a checklist run against the released bundles on a real Mac and Windows PC, stands in for it this time.
+
+New warning, not ours: pytest 9.2 deprecates pytest-playwright 0.10's session-scoped `base_url` fixture defined as an instance method.
+
+## Round 1 (2026-09-30)
 
 Goal: before bumping any vendored code or pins, make sure the test suite would catch regressions each upgrade could plausibly introduce.
 
