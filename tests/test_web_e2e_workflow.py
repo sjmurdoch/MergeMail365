@@ -415,6 +415,24 @@ class TestRestoreAfterRestart:
         assert page.input_value("#email-column") == "email"
         assert page.input_value("#name-column") == "name"
 
+    def test_autosave_before_upload_keeps_saved_columns(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, Windows rc4: the name column still came back as "none",
+        because an auto-save after the reload (restoring an HTML body fires
+        an edit) wrote the still-empty dropdowns over the saved columns."""
+        page = wizard
+        page.evaluate("localStorage.setItem('mm_email_col', 'email'); localStorage.setItem('mm_name_col', 'name')")
+        page.reload()
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        page.evaluate("document.getElementById('subject-input').dispatchEvent(new Event('input'))")
+        page.wait_for_timeout(5500)  # the auto-save runs every 5 s
+        assert page.evaluate("localStorage.getItem('mm_name_col')") == "name"
+        page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        assert page.input_value("#email-column") == "email"
+        assert page.input_value("#name-column") == "name"
+
 
 class TestReload:
     def test_reload_during_test_email_stays_off_send_step(

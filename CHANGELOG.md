@@ -24,7 +24,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 ### Fixed
 
 - A display name in curly quotes is accepted in CC, BCC, Reply-To and the other address fields: `“Murdoch, Steven” <steven@example.com>`. macOS replaces straight quotes with curly ones as you type, so in the desktop app a name containing a comma could not be typed; it was refused with "An email address must have an @-sign".
-- Desktop app: the subject, body and chosen columns are restored when you open the app again, as they are in a browser. The desktop window used to forget them when it closed. (In a browser too, the name column wasn't restored once the spreadsheet was uploaded again.)
+- Desktop app: the subject, body and chosen columns are restored when you open the app again, as they are in a browser. The desktop window used to forget them when it closed. (In a browser too, the chosen columns weren't restored once the spreadsheet was uploaded again, and editing the message before uploading it forgot them.)
 - Opening the app a second time while it is running no longer makes the two share one port on Windows, where the second window then talked to the first copy's server. On macOS and Linux the second copy failed to start; now it uses the next free port, as intended.
 - Web UI: on the Test step after New merge, the summary under the address said "(enter test address above)" although the field held your address.
 - Web UI: after New merge, the Verify step shows the dry run's log again; it showed only the summary line.

@@ -1893,8 +1893,13 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             localStorage.setItem("mm_subject", $("subject-input").value);
             localStorage.setItem("mm_body", $("body-input").value);
-            localStorage.setItem("mm_email_col", $("email-column").value);
-            localStorage.setItem("mm_name_col", $("name-column").value);
+            // Only once the dropdowns list a spreadsheet's columns: before
+            // an upload they are empty, and saving them would wipe the
+            // columns chosen before the app was last closed.
+            if ($("email-column").options.length > 1) {
+                localStorage.setItem("mm_email_col", $("email-column").value);
+                localStorage.setItem("mm_name_col", $("name-column").value);
+            }
             localStorage.setItem("mm_html", $("html-toggle").checked ? "1" : "");
         } catch (_e) { /* ignore */ }
     }, 5000);
