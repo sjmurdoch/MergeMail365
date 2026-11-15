@@ -65,7 +65,11 @@ Example `recipients.xlsx`:
 
 ## 5. Write your email template
 
-Create a plain-text file for the email body. Use `{{column_name}}` to insert per-recipient values. Placeholder names are case-insensitive (`{{Name}}` and `{{name}}` both work).
+Create a plain-text file for the email body. Use `{{column_name}}` to insert per-recipient values. The subject can use placeholders too.
+
+- Any column name works, including ones with spaces or punctuation: `{{First Name}}`, `{{E-mail}}`, `{{Price <GBP>}}`. The only exception is a column whose name contains `{` or `}`.
+- Spaces inside the braces don't matter, and neither does case or a run of spaces in the name: `{{ first   name }}` is the column `First Name`.
+- A placeholder that names no column stops the send before anything goes out, with a message listing it and the columns there are. A `{{` or `}}` that isn't part of a placeholder (such as `{{name}`) gives a warning, since it is probably a typo; it is sent as written.
 
 Example `body.txt`:
 
@@ -77,6 +81,8 @@ I wanted to reach out from {{company}} about our upcoming event.
 Best regards,
 Your Name
 ```
+
+**How cell values are written.** Text is used as it is. A date is written `2026-12-01`, with the time added only when there is one (`2026-12-01 14:30`). A cell formatted as a percentage is written `25%`. Numbers are written plainly, never as `3.0` or `1.23e+19`. Other Excel number formats, such as currency symbols, thousands separators and a fixed number of decimals, are **not** applied: `£1,250.50` is sent as `1250.5`. The command line warns when the message uses such a column, and the web UI lists them when you upload the spreadsheet. To control exactly what is sent, format the column as Text in Excel, or type the value as you want it to appear.
 
 ## 6. Dry run (the default)
 
@@ -92,7 +98,7 @@ uv run mergemail365 \
 
 If a placeholder in your subject or body doesn't match any spreadsheet column, the tool will abort with an error listing the unresolvable placeholders and the available columns.
 
-Use `--log-level DEBUG` to see the fully rendered body for each recipient.
+Use `--log-level DEBUG` (or `-v`) to see the fully rendered body for each recipient. The bodies are shown in the terminal only; they are never written to the log file.
 
 ## 7. Send a test email
 
@@ -216,13 +222,16 @@ When omitted, no importance field is sent and the email defaults to normal impor
 
 ### CC and BCC
 
-Add CC and/or BCC recipients to every email in the merge. Provide comma-separated addresses. Both plain addresses and `"Display Name <email>"` format are supported:
+Add CC and/or BCC recipients to every email in the merge. Separate addresses with commas or semicolons (as Outlook does). Each can be a plain address or `Display Name <email>`; a display name containing a comma or semicolon must be in double quotes:
 
 ```bash
 --cc "manager@example.com,team@example.com"
---cc "Manager <manager@example.com>, Team Inbox <team@example.com>"
+--cc "Manager <manager@example.com>; Team Inbox <team@example.com>"
+--cc '"Doe, Jane" <jane@example.com>'
 --bcc "Archive <archive@example.com>"
 ```
+
+Every address you type (CC, BCC, reply-to, `--test-email` and `--bcc-blast-to`) is checked before anything is sent, the same way as the spreadsheet's addresses, and a mistyped one stops the run with a message naming it.
 
 These addresses are static (not templated per recipient).
 
@@ -236,6 +245,8 @@ By default, the body is sent as plain text. To send HTML content instead:
 
 Your body template file should contain valid HTML when using this flag.
 
+In an HTML body, values from the spreadsheet are inserted as text, not as HTML: a cell containing `R&D <team>` appears to the recipient exactly like that, and a line break within a cell becomes a line break in the email. So a spreadsheet filled in by other people (from a form, say) can't add links, images or formatting to your email. Put any markup you want in the body file itself. The subject is always plain text.
+
 ### Attachments
 
 Attach files to every email in the merge. Specify `--attachment` once per file:
@@ -244,11 +255,11 @@ Attach files to every email in the merge. Specify `--attachment` once per file:
 --attachment report.pdf --attachment logo.png
 ```
 
-Files are base64-encoded inline. The Graph API limits inline attachments to ~3 MB per file.
+Files are base64-encoded inline. A message sent this way can carry about 3 MB of attachments in total (Microsoft Graph accepts about 4 MB per request, and base64 encoding adds a third), so a file over that, or several that together exceed it, are refused before anything is sent.
 
 ### Reply-To
 
-Set custom reply-to addresses (comma-separated) so replies go somewhere other than the sender. Plain addresses and `"Display Name <email>"` format are both accepted:
+Set custom reply-to addresses (separated by commas or semicolons, as for CC) so replies go somewhere other than the sender. Plain addresses and `"Display Name <email>"` format are both accepted:
 
 ```bash
 --reply-to "support@example.com,team@example.com"
@@ -507,6 +518,16 @@ If your workbook has multiple sheets, select one by name:
 
 By default, the first sheet is used.
 
+### Web interface from another computer
+
+`mergemail365-web` listens on `localhost`, so only this computer can reach it. To reach it from another, both `--host` with a reachable address and `--allow-remote` are needed:
+
+```bash
+uv run mergemail365-web --host 0.0.0.0 --allow-remote
+```
+
+The connection is plain HTTP, not encrypted, and anyone who learns the access URL it prints can send email as the signed-in account. Only do this on a network you control. Signing in returns to `localhost` on whichever computer the browser runs on, so sign in from the computer running the app.
+
 ## Recommended workflow
 
 ### Standard (personalised) send
@@ -592,6 +613,8 @@ The web UI exposes `GET /api/log-path` which returns the log file path and wheth
 ```
 
 ### What gets logged
+
+The log file is what you send when asking for help, so it never contains your access token, the sign-in codes, the web UI's access URL token, or the content of your emails: each send is logged with the recipient, the lengths of the subject and body, the number of attachments, and the result. It does contain recipients' addresses, so on macOS and Linux it is readable by you only, as is the folder it is in. Version 0.6.0 and earlier logged each request in full, including the access token and the message; if you used file logging with one of them, delete the old log files.
 
 When the web UI encounters an error (e.g. a corrupt spreadsheet, invalid column name, or send failure), the error message is shown in the browser. The full Python stack trace is logged at DEBUG level in the log file for troubleshooting. This applies to all API error paths: spreadsheet upload, recipient validation, job startup, and background send failures.
 
