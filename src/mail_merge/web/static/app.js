@@ -335,6 +335,12 @@ function clearTestAndVerifyLogs() {
 // ---------------------------------------------------------------------------
 // Step 2: Compose — initialisation and validation
 // ---------------------------------------------------------------------------
+// A value the page saved in localStorage, or "" if there is none or
+// storage is unavailable.
+function savedSetting(key) {
+    try { return localStorage.getItem(key) || ""; } catch (_e) { return ""; }
+}
+
 function initComposeStep() {
     if (!state.spreadsheetData) return;
     const sd = state.spreadsheetData;
@@ -346,9 +352,11 @@ function initComposeStep() {
     buildComposePreviewTable(sd.columns, sd.rows, sd.total_rows);
 
     // Populate column dropdowns — preserve previous selections if they're
-    // still valid (user went back and came forward without changing data)
-    const prevEmail = $("email-column").value;
-    const prevName = $("name-column").value;
+    // still valid (user went back and came forward without changing data),
+    // or the ones saved before the app was last closed: on a fresh start
+    // the dropdowns are empty until a spreadsheet is uploaded.
+    const prevEmail = $("email-column").value || savedSetting("mm_email_col");
+    const prevName = $("name-column").value || savedSetting("mm_name_col");
     populateColumnDropdowns(sd.columns);
     if (prevEmail && sd.columns.includes(prevEmail)) {
         $("email-column").value = prevEmail;
@@ -1331,9 +1339,9 @@ function sendTestEmail() {
 async function runJob(mode, id) {
     const isCurrent = () => requestIsCurrent(id);
     const logPanel = mode === "test_email" ? "test-log" : "verify-log";
-    if (mode === "test_email") {
-        show("test-log");
-    } else {
+    // New merge hides both panels.
+    show(logPanel);
+    if (mode !== "test_email") {
         const recipients = getRecipients();
         $("verify-count").textContent = recipients ? recipients.length : "?";
     }

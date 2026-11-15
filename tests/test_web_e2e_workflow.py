@@ -323,6 +323,43 @@ class TestButtonState:
         expect(page.locator("#btn-back-6")).to_be_enabled()
 
 
+    def test_new_merge_shows_the_dry_run_log(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
+    ):
+        """Phase H, macOS and Windows: after New merge, Verify showed only
+        the summary line, because New merge hid the log panel and nothing
+        showed it again."""
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        expect(page.locator("#verify-log")).to_be_visible()
+        _send_all(page)
+        page.click("#btn-new-merge")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        expect(page.locator("#verify-log")).to_be_visible()
+
+
+class TestRestoreAfterRestart:
+    def test_saved_columns_are_chosen_after_upload(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, Windows: after quitting and reopening the desktop app,
+        the subject and body came back but the name column did not, because
+        the dropdowns are empty until a spreadsheet is uploaded."""
+        page = wizard
+        page.evaluate("localStorage.setItem('mm_email_col', 'email'); localStorage.setItem('mm_name_col', 'name')")
+        page.reload()
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        assert page.input_value("#email-column") == "email"
+        assert page.input_value("#name-column") == "name"
+
+
 class TestReload:
     def test_reload_during_test_email_stays_off_send_step(
         self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
@@ -686,3 +723,20 @@ class TestRejectedTestEmail:
         expect(page.locator("#btn-next-4")).to_be_disabled()
         expect(page.locator("#btn-retry-test")).to_be_visible()
         assert page.evaluate("state.testPassed") is False
+
+
+class TestLayout:
+    def test_diagnostics_stay_inside_the_column(self, wizard: Page):
+        """Phase H, macOS and Windows: a long line in the Test connection
+        diagnostics (home_account_id) ran past the page column, because a
+        fieldset grows to fit unbreakable content."""
+        page = wizard
+        widths = page.evaluate("""() => {
+            show("auth-diagnostics");
+            const data = {home_account_id: "x".repeat(80) + "." + "y".repeat(80)};
+            setHtml($("auth-diag-content"), html`<p>Success</p><pre>${JSON.stringify(data, null, 2)}</pre>`);
+            const right = (el) => el.getBoundingClientRect().right;
+            return {box: right($("auth-diag-content")),
+                    column: right(document.querySelector("main"))};
+        }""")
+        assert widths["box"] <= widths["column"], widths
