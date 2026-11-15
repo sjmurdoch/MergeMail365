@@ -3,6 +3,6 @@
   "private": true,
   "description": "Quint, pinned for spec/wizard.qnt and tests/test_conformance.py. Lockfile resolved with npm --before 7 days ago (supply-chain policy in CLAUDE.md).",
   "dependencies": {
-    "@informalsystems/quint": "0.32.0"
+    "@informalsystems/quint": "0.33.1"
   }
 }
