@@ -327,6 +327,9 @@ def test_find_open_port_reuses_a_port_left_by_a_closed_server():
     from mail_merge.web import _find_open_port
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # As Werkzeug's server does. On Linux a closing connection lets the port
+    # be reused only if the socket it came from set this too.
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", 0))
     server.listen(1)
     port = server.getsockname()[1]
