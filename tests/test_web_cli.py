@@ -298,6 +298,24 @@ def test_find_open_port_skips_a_port_taken_on_that_host():
         assert port < found <= port + 20
 
 
+def test_find_open_port_checks_the_address_the_server_binds():
+    """Phase H, Windows: a second copy of the app shared the first one's
+    port. For "localhost" the probe tried ::1 (getaddrinfo's first answer)
+    while Werkzeug listens on 127.0.0.1, and Werkzeug sets SO_REUSEADDR,
+    which on Windows lets a second socket bind a port already listening."""
+    import socket
+
+    from mail_merge.web import _find_open_port
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as taken:
+        taken.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # as Werkzeug does
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        port = taken.getsockname()[1]
+        found = _find_open_port(port, port + 20, host="localhost")
+        assert port < found <= port + 20
+
+
 def test_find_open_port_reports_an_unusable_host():
     from mail_merge.web import _find_open_port
 

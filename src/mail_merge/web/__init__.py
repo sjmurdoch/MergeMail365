@@ -15,18 +15,27 @@ from mail_merge.console import add_log_level_arguments, configure_console_loggin
 def _find_open_port(start: int = 5050, end: int = 5099, host: str = "127.0.0.1") -> int:
     """Find a port in the range that is free on `host`, the address the
     server will listen on (a port free on 127.0.0.1 may be taken on another
-    interface, and the reverse)."""
+    interface, and the reverse).
+
+    The probe binds the address Werkzeug will bind (for "localhost" that is
+    127.0.0.1, not getaddrinfo's first answer, which may be ::1). On Windows
+    it binds exclusively: Werkzeug sets SO_REUSEADDR, with which Windows lets
+    a second socket bind a port that is already listening, so a plain probe
+    would succeed there and two copies of the app would share one port.
+    """
+    from werkzeug.serving import get_sockaddr, select_address_family
+
     for port in range(start, end + 1):
-        try:
-            family, kind, proto, _name, address = socket.getaddrinfo(
-                host or None, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE,
-            )[0]
-        except socket.gaierror as exc:
-            raise RuntimeError(f"Cannot listen on host {host!r}: {exc}") from exc
-        with socket.socket(family, kind, proto) as s:
+        family = select_address_family(host, port)
+        address = get_sockaddr(host, port, family)
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            if sys.platform == "win32":
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             try:
                 s.bind(address)
                 return port
+            except socket.gaierror as exc:
+                raise RuntimeError(f"Cannot listen on host {host!r}: {exc}") from exc
             except OSError:
                 continue
     raise RuntimeError(f"No available port in range {start}-{end}")
