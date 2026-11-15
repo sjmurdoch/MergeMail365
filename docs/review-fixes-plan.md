@@ -233,8 +233,8 @@ Written 2026-11-15, at the end of phase C, for an agent (or person) with no memo
 ### Where things are
 
 - **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`; 15 commits, the last being this handover. Nothing is pushed. The working tree is clean. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers.
-- **Done:** phases A, B and C (findings F1–F4, F6–F8, F10–F14, part of F9; guards G1–G9; requirement R19).
-- **Remaining:** phase D (F5, the rest of F9), phase E (F15, F16), phase F (documents), phase G (whether the dependencies and vendored code can safely be updated), phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
+- **Done:** phases A, B, C and D (findings F1–F14; guards G1–G9; requirement R19).
+- **Remaining:** phase E (F15, F16), phase F (documents), phase G (whether the dependencies and vendored code can safely be updated), phase H (an end-to-end test of the bundle the GitHub release process builds, on real systems), and the loose ends listed below. G and H were added by the user after phase C.
 - **Version and release:** the version is still 0.6.0 and nothing is tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. Bumping the version and releasing are the user's call; ask, don't do it.
 - **Last verified state** (commit `83cce54`): 1163 tests pass and 14 are skipped (Windows-only tests, on macOS); `mypy`, `ruff check .` and `biome lint` are clean; the Quint scenarios pass for `buggy`, `partial`, `round2` and `fixed`; Apalache reports `allInvariants` holds for `fixed` at 16 steps.
 
@@ -439,16 +439,16 @@ The command-line tool is not part of what the release workflow builds. If the us
 ### Questions waiting for the user
 
 1. **`batch_size=0`.** It used to mean "send nothing this time" and an existing test said so; it is now an error, as the accepted plan specified (`batch_size >= 1`). The user was told and has not yet answered whether 0 should stay a no-op.
-2. **Resume and "outcome unknown"** (before starting D2): skip such rows with a warning, or re-send them? See D2.
+2. ~~Resume and "outcome unknown"~~: answered 2026-11-15, skip with a warning (done in D2).
 3. **Releasing.** Whether phase A should go out on its own as 0.6.1 (it would have to be cherry-picked, since later commits change behaviour) or everything together as 0.7.0.
 4. **Phase G:** which updates to make, once the verdicts are in; and whether to raise the minimum Python version if a newer stable release exists.
 5. **Phase H:** approval to push the branch, open a pull request and publish a pre-release; the candidate's version number; which Microsoft 365 account and which recipient mailboxes to use; who operates the Windows machine.
 
 ## Status
 
-Updated 2026-11-15 (end of phase C; last commit `83cce54` plus the handover notes). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
+Updated 2026-11-15 (end of phase D; last commit `a92d399`). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A, B and C are complete. Phases D, E, F, G and H have not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A, B, C and D are complete. Phases E, F, G and H have not been started (G and H were added to the plan on 2026-11-15, after phase C). Nothing has been pushed and the version has not been bumped; changelog entries are under "Unreleased".
 
 **Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
 
@@ -480,6 +480,15 @@ Updated 2026-11-15 (end of phase C; last commit `83cce54` plus the handover note
 | C4 (F7) | Done | `addresses.py`, `tests/test_addresses.py`. Not an RFC 5322 parser, on purpose: a strict one refuses names people write unquoted, such as `[Team] Lead <x@y>`, which an existing test covers. Semicolons and newlines separate addresses as well as commas. `/api/get-recipients` checks the Compose step's addresses. |
 | C5 (F9 part, G5) | Done | `_check_options()`, `_check_message_size()`, argparse types, `tests/test_input_validation.py` (34 rows). The table found one more: an unknown `--sheet` raised `KeyError`, reported as "Unexpected error". The total-size limit reuses the per-attachment limit's existing assumption (about 4 MB per request to Graph, 3 MB of files once base64-encoded); that figure was already in the code and is not stated in the copies of Microsoft's documentation kept in `docs/`. |
 
-### Phases D, E, F, G, H — not started
+### Phase D: the send engine — complete
+
+| Step | State | Notes |
+|---|---|---|
+| D1 (F5) | Done | `_skip_previously_sent()` and `_previous_results_to_keep()` in `api.py`; `report._unsanitize_csv()`. The rule for the report: the CSV written before the first email already leaves out the previous failures that this run will retry, so an interrupted run's file needs no further merging (the plan had left this open). Matching failures to rows is by count, earliest first, as for successes. |
+| D2 (F9 rest) | Done | `SendResult.unknown`, `sender.NO_ANSWER`. The user chose: resume skips an unknown row, with a warning naming it and saying to delete its line from the report to send it anyway. `summarize()` counts unknown apart from failed (`failed` is now only emails known not to have gone) and adds `unknown_details`. The browser's CSV gained an `unknown` column, so `test_download_mail_merge_report`'s expected text changed. |
+
+Checks at `a92d399`: 1206 passed, 14 skipped; mypy, Ruff and Biome clean. The model was not changed (as the plan expected), so Quint and Apalache were not rerun.
+
+### Phases E, F, G, H — not started
 
 What each step involves, file by file, is under [Remaining work, in detail](#remaining-work-in-detail) in the Handover section. Add a table here for each phase as it is done, in the style of the ones above.
