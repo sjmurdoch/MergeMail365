@@ -307,37 +307,35 @@ class TestAttachmentCleanup:
         assert _job_store.running_send() is None
 
 
-def test_running_send_lookup_survives_jobs_being_created_meanwhile():
-    """running_send() iterates the job table while other requests add and
-    evict jobs; without the lock that is "dictionary changed size during
-    iteration" now and then."""
+def test_running_send_holds_the_lock_while_it_reads_the_job_table():
+    """running_send() iterates the job table while other requests' threads
+    add and evict jobs; without the lock that is "dictionary changed size
+    during iteration". The table here lets another thread create a job
+    half-way through the iteration, so the race happens every time rather
+    than now and then."""
     import threading
 
-    from mail_merge.web.jobs import JobStatus, JobStore
+    from mail_merge.web.jobs import JobStore
 
     store = JobStore()
-    errors: list[BaseException] = []
-    stop = threading.Event()
+    assert store.create("dry_run") is not None
+    assert store.create("dry_run") is not None
+    created = threading.Event()
 
-    def churn() -> None:
-        while not stop.is_set():
-            job = store.create("dry_run")
-            assert job is not None
-            job.status = JobStatus.COMPLETED
+    def create_another() -> None:
+        store.create("dry_run")
+        created.set()
 
-    def look() -> None:
-        try:
-            for _ in range(20000):
-                store.running_send()
-        except BaseException as exc:  # noqa: BLE001
-            errors.append(exc)
+    class PausesHalfWay(dict):  # type: ignore[type-arg]
+        def values(self):  # type: ignore[no-untyped-def, override]
+            jobs = iter(super().values())
+            yield next(jobs)
+            threading.Thread(target=create_another).start()
+            # With the lock held, create() waits and this times out.
+            created.wait(0.2)
+            yield from jobs
 
-    threads = [threading.Thread(target=churn) for _ in range(2)] + [threading.Thread(target=look) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads[2:]:
-        t.join(30)
-    stop.set()
-    for t in threads[:2]:
-        t.join(5)
-    assert not errors, errors
+    store.jobs = PausesHalfWay(store.jobs)
+    assert store.running_send() is None
+    assert created.wait(5), "the job was never created once the lock was free"
+    assert len(store.jobs) == 3
