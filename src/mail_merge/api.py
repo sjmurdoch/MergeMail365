@@ -28,6 +28,7 @@ from mail_merge.sender import (
     MessageOptions,
     SendAborted,
     SendResult,
+    count,
     send_all,
     send_bcc_blast,
     send_one,
@@ -556,9 +557,9 @@ def send_merge(
             raise ValueError(
                 f"No recipients match the filter(s): {', '.join(filters)}"
             )
-        logger.info("📋 Loaded %d recipients (filtered from %d)", len(recipients), total)
+        logger.info("📋 Loaded %s (filtered from %d)", count(len(recipients), "recipient"), total)
     else:
-        logger.info("📋 Loaded %d recipients", len(recipients))
+        logger.info("📋 Loaded %s", count(len(recipients), "recipient"))
 
     # --- Resume and batch size (skip for test emails) ---
     previous_results: list[SendResult] = []
@@ -699,11 +700,11 @@ def send_merge(
             blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
             console.print(f"[bold]Subject:[/bold]  {escape(subject)}")
             console.print(f"[bold]To:[/bold]       {escape(blast_to.address)}")
-            console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
+            console.print(f"[bold]BCC:[/bold]      {count(len(recipients), 'recipient')} in {count(blast_batch_count, 'batch', 'batches')}")
         else:
             sample = recipients[0]
             console.print(f"[bold]Subject:[/bold]  {escape(render(subject, sample))}")
-            console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
+            console.print(f"[bold]To:[/bold]       {count(len(recipients), 'recipient')}")
         if msg_opts.cc:
             console.print(f"[bold]CC:[/bold]       {escape(_format_addrs(msg_opts.cc))}")
         if not bcc_blast and msg_opts.bcc:

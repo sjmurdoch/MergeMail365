@@ -48,6 +48,11 @@ class MessageOptions:
     reply_to: list[EmailAddress] | None = None
 
 
+def count(n: int, noun: str, plural: str | None = None) -> str:
+    """``n`` of something, in words: "1 recipient", "2 recipients"."""
+    return f"{n} {noun}" if n == 1 else f"{n} {plural or noun + 's'}"
+
+
 @dataclass
 class SendResult:
     email: str
@@ -228,7 +233,7 @@ def send_bcc_blast(
         if should_stop is not None and should_stop():
             logger.warning("⏹️ Stopped after %d of %d batches", i, total)
             break
-        label = f"batch {i + 1}/{total} ({len(batch)} recipients)"
+        label = f"batch {i + 1}/{total} ({count(len(batch), 'recipient')})"
         if dry_run:
             logger.info("🔄 DRY RUN %s | Subject: %s", label, subject)
             batch_results = [
