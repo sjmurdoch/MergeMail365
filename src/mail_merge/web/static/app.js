@@ -582,6 +582,12 @@ function hideAuthMessage() {
     el.classList.add("hidden");
 }
 
+// The Test connection result describes the account that was signed in.
+function hideAuthDiagnostics() {
+    hide("auth-diagnostics");
+    clear("auth-diag-content");
+}
+
 // Sign-in button state management
 
 function updateSignInButton() {
@@ -629,6 +635,7 @@ async function doSignOut() {
     btn.setAttribute("aria-busy", "true");
     try {
         await apiFetch("/auth/logout", { method: "POST" });
+        hideAuthDiagnostics();
         showAuthMessage("Signed out successfully.", "info");
     } catch (e) {
         showAuthMessage(`Sign-out failed: ${e.message}`, "error");
@@ -1611,9 +1618,18 @@ function newMerge() {
     return dispatch({ type: "newMerge" });
 }
 
+// Which collapsible panels are open when the page loads.
+const DETAILS_AT_LOAD = [...document.querySelectorAll("details")].map((el) => [el, el.open]);
+
 // The "clearForm" effect of New merge: empty every field the previous merge
-// filled in.
+// filled in, so that the page shows what a newly loaded one does
+// (TestSecondPass in tests/test_web_e2e_workflow.py compares the two).
 function clearForm() {
+    // Panels the user opened, and the Test connection result
+    for (const [el, open] of DETAILS_AT_LOAD) el.open = open;
+    hideAuthDiagnostics();
+    hideAuthMessage();
+
     // Clear Step 1 — spreadsheet
     $("spreadsheet-file").value = "";
     hide("spreadsheet-info");

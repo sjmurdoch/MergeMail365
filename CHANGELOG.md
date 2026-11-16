@@ -4,6 +4,11 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ## [Unreleased]
 
+### Fixed
+
+- Web UI: New merge closes the panels you had opened (Additional options, All recipients, Preview data) and removes Test connection's result, so the page is as it is when first opened.
+- Web UI: Test connection's result, which describes the account that was signed in, is removed when you sign out.
+
 ## [0.7.0] — 2026-11-16
 
 ### Security

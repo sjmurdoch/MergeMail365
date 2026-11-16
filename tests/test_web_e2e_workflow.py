@@ -814,3 +814,207 @@ class TestLayout:
                     column: right(document.querySelector("main"))};
         }""")
         assert widths["box"] <= widths["column"], widths
+
+
+# ---------------------------------------------------------------------------
+# The second time through (docs/phase-h-guards-plan.md, class A)
+# ---------------------------------------------------------------------------
+
+# What every element with an id shows: whether it is visible, its text or
+# value, and whether it is disabled, checked or open. Elements with no id
+# that hold state (<details>, the step indicator, frames) are numbered.
+SNAPSHOT_JS = """() => {
+    const out = {};
+    const counts = {};
+    const shown = (el) => el.getClientRects().length > 0;
+    const sel = "[id], details, [data-step], iframe";
+    for (const el of document.body.querySelectorAll(sel)) {
+        const tag = el.tagName.toLowerCase();
+        if (tag === "script") continue;
+        let key = el.id ? "#" + el.id : null;
+        if (!key) {
+            counts[tag] = (counts[tag] || 0) + 1;
+            key = tag + ":" + counts[tag];
+        }
+        const s = {shown: shown(el), cls: [...el.classList].sort().join(" ")};
+        if ("disabled" in el) s.disabled = el.disabled;
+        if (tag === "input" && el.type === "file") s.files = el.files.length;
+        else if (tag === "input" && (el.type === "checkbox" || el.type === "radio")) s.checked = el.checked;
+        else if (tag === "input" || tag === "textarea" || tag === "select") s.value = el.value;
+        if (tag === "select") s.options = [...el.options].map((o) => o.value).join("|");
+        if (tag === "details" || tag === "dialog") s.open = el.open;
+        if (tag === "iframe") s.srcdoc = el.getAttribute("srcdoc");
+        if (tag === "progress") s.progress = el.getAttribute("value");
+        if (!el.querySelector(sel) && !("value" in el && tag !== "button" && tag !== "li")) {
+            s.text = el.textContent.replace(/\\s+/g, " ").trim();
+        }
+        out[key] = s;
+    }
+    return out;
+}"""
+
+# What Test connection is told.
+DIAGNOSTICS = {
+    "cache_path": "~/.mergemail365-token-cache.json", "token_valid": True, "authority_reachable": True,
+    "accounts": [{"username": "me@example.com", "home_account_id": "abc.def"}],
+}
+
+HTML_BODY = "<div>Hi <strong>{{name}}</strong>, see you soon.</div>"
+
+# Differences between the first pass and the second that are intended:
+# (snapshot, element, field) -> why. An entry that no longer differs fails
+# the test too, so the table can't go stale.
+SECOND_PASS_DIFFERENCES: dict[tuple[str, str, str], str] = {}
+
+
+SIGN_OUT_DIFFERENCES: dict[tuple[str, str, str], str] = {
+    ("signed out", "#auth-message", f): "the page confirms the sign-out" for f in ("cls", "shown", "text")
+}
+
+
+def _diff(first: dict[str, Any], second: dict[str, Any], label: str) -> list[tuple[str, str, str, Any, Any]]:
+    found = []
+    for key in sorted(set(first) | set(second)):
+        a, b = first.get(key, {}), second.get(key, {})
+        if not a.get("shown") and not b.get("shown"):
+            # Not on screen either time. What a hidden element holds is
+            # compared when it is next shown.
+            continue
+        for field in sorted(set(a) | set(b)):
+            if a.get(field) != b.get(field):
+                found.append((label, key, field, a.get(field), b.get(field)))
+    return found
+
+
+def _report(found: list[tuple[str, str, str, Any, Any]]) -> str:
+    return "\n".join(
+        f"  {label}: {key} {field}: first {a!r}, then {b!r}" for label, key, field, a, b in found
+    )
+
+
+class TestSecondPass:
+    """Phase H found five places where the page after New merge differed
+    from a new page (no dry-run log, an empty HTML preview, a stale summary
+    on the Test step, panels left open). Each was a field missing from a
+    hand-written reset. This compares everything the page shows instead."""
+
+    @pytest.fixture
+    def attachment(self, tmp_path: Path) -> Path:
+        path = tmp_path / "notes.txt"
+        path.write_text("attachment ok")
+        return path
+
+    @staticmethod
+    def _open(page: Page, details: str) -> None:
+        """Open a collapsible panel, whether or not it was left open (the
+        recordings on either side say which)."""
+        page.eval_on_selector(details, "el => { if (!el.open) el.querySelector('summary').click(); }")
+
+    def _walk(self, page: Page, xlsx: Path, attachment: Path) -> dict[str, dict[str, Any]]:
+        """One merge from step 1 to the results, using every kind of field;
+        returns what the page showed at each point."""
+        seen: dict[str, dict[str, Any]] = {}
+
+        def record(label: str) -> None:
+            page.wait_for_timeout(150)  # let effects of the last action land
+            seen[label] = page.evaluate(SNAPSHOT_JS)
+
+        record("1 before upload")
+        page.click("#btn-test-connection")
+        expect(page.locator("#auth-diagnostics")).to_be_visible()
+        record("1 after Test connection")
+        page.set_input_files("#spreadsheet-file", str(xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        record("1 uploaded")
+
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        record("2 entered")
+        page.select_option("#name-column", "name")
+        page.fill("#subject-input", "Hello {{name}}")
+        page.check("#html-toggle")
+        page.check("#source-toggle")
+        page.fill("#html-source", HTML_BODY)
+        self._open(page, "#step-2 details:has(#cc-input)")
+        page.fill("#cc-input", "Copy <copy@example.com>")
+        page.fill("#bcc-input", "hidden@example.com")
+        page.fill("#reply-to-input", "replies@example.com")
+        page.select_option("#importance-select", "high")
+        page.fill("#filter-input", "name!=Zed")
+        page.set_input_files("#attachment-input", str(attachment))
+        record("2 filled in")
+
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        expect(page.locator("#preview-body-html")).to_be_visible()
+        record("3 entered")
+        page.click("#step-3 .preview-nav button:has-text('Next')")
+        self._open(page, "#step-3 details:has(#recipients-table)")
+        record("3 second recipient")
+
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
+        record("4 entered")
+        _pass_test(page)
+        record("4 test sent")
+
+        _pass_verify(page)
+        record("5 dry run done")
+
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        record("6 entered")
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=10000)
+        record("6 sent")
+        return seen
+
+    def test_second_merge_shows_what_the_first_did(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path, attachment: Path,
+    ):
+        page = wizard
+        page.route("**/auth/debug", lambda route: route.fulfill(json=DIAGNOSTICS))
+        first = self._walk(page, workflow_xlsx, attachment)
+        page.click("#btn-new-merge")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        second = self._walk(page, workflow_xlsx, attachment)
+
+        found = []
+        for label in first:
+            found += _diff(first[label], second[label], label)
+        unexpected = [d for d in found if d[:3] not in SECOND_PASS_DIFFERENCES]
+        assert not unexpected, (
+            "after New merge the page differs from the first time through:\n" + _report(unexpected)
+        )
+        stale = set(SECOND_PASS_DIFFERENCES) - {d[:3] for d in found}
+        assert not stale, f"listed as intended differences, but no longer differ: {sorted(stale)}"
+
+    def test_signing_out_shows_what_a_signed_out_page_does(self, wizard: Page, auth: AuthStub):
+        """Phase H, Windows rc4: Test connection's "token is valid" stayed on
+        screen after Sign out."""
+        page = wizard
+        page.route("**/auth/debug", lambda route: route.fulfill(json=DIAGNOSTICS))
+
+        def signed_out(route: Any) -> None:
+            auth.signed_in = False
+            route.fulfill(json={"success": True})
+
+        page.route("**/auth/logout", signed_out)
+        expect(page.locator("#btn-sign-in")).to_have_text("Sign out")
+        page.click("#btn-test-connection")
+        expect(page.locator("#auth-diag-content")).to_contain_text("token is valid")
+        page.click("#btn-sign-in")
+        expect(page.locator("#btn-sign-in")).to_have_text("Sign in with Microsoft")
+        after = page.evaluate(SNAPSHOT_JS)
+
+        page.reload()
+        expect(page.locator("#btn-sign-in")).to_have_text("Sign in with Microsoft")
+        page.wait_for_timeout(300)
+        fresh = page.evaluate(SNAPSHOT_JS)
+
+        found = _diff(fresh, after, "signed out")
+        unexpected = [d for d in found if d[:3] not in SIGN_OUT_DIFFERENCES]
+        assert not unexpected, "after Sign out the page differs from a signed-out page:\n" + _report(unexpected)
+        stale = set(SIGN_OUT_DIFFERENCES) - {d[:3] for d in found}
+        assert not stale, f"listed as intended differences, but no longer differ: {sorted(stale)}"
