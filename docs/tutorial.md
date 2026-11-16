@@ -27,12 +27,12 @@ uv run mergemail365 --help
 1. Go to the [Azure portal](https://portal.azure.com/) > **App registrations** > **New registration**.
 2. Set **Name** to something like `mergemail365`.
 3. Under **Supported account types**, choose the option that matches your organisation (typically "Accounts in this organizational directory only").
-4. Under **Redirect URI**, select **Public client/native (mobile & desktop)** and set the URI to `https://login.microsoftonline.com/common/oauth2/nativeclient`.
+4. Under **Redirect URI**, select **Public client/native (mobile & desktop)** and set the URI to `http://localhost`, which the browser sign-in from the command line and the desktop app returns to. After registering, add `http://localhost:5050/auth/callback` under **Authentication** as a second redirect URI of the same platform if you will use the web interface in a browser.
 5. Click **Register**.
 6. Copy the **Application (client) ID** — you'll need this as `--client-id`.
 7. Go to **API permissions** > **Add a permission** > **Microsoft Graph** > **Delegated permissions** > search for `Mail.Send` > **Add**.
 8. If your tenant requires it, click **Grant admin consent**.
-9. Go to **Authentication** > **Advanced settings** > set **Allow public client flows** to **Yes** > **Save**. (Required for the device code flow used by this tool.)
+9. Go to **Authentication** > **Advanced settings** > set **Allow public client flows** to **Yes** > **Save**. (Required for `--device-code`, the sign-in for machines without a browser.)
 
 ## 3. Save your credentials (optional)
 
