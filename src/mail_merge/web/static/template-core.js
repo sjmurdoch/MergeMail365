@@ -19,9 +19,19 @@
 
     function placeholderRe() { return new RegExp(PLACEHOLDER_SRC, "g"); }
 
+    /** Characters a system substitutes while the user types or pastes, as
+     *  the plain ones: typed_text.plain() in Python. */
+    const INVISIBLE_RE = /[\u200b\u2060\ufeff\u00ad\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+    function plain(text) {
+        return text.replace(INVISIBLE_RE, "")
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/[\u201c\u201d]/g, '"')
+            .replace(/[\u00a0\u202f\u2007]/g, " ");
+    }
+
     /** A column or placeholder name as compared. */
     function normalizeName(name) {
-        return name.replace(SPACES_RE, " ").trim().toLowerCase();
+        return plain(name).replace(SPACES_RE, " ").trim().toLowerCase();
     }
 
     /** A placeholder's text as shown in messages. */
