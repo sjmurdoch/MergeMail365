@@ -4,6 +4,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-11-16
+
 ### Fixed
 
 - **A filter typed with a curly apostrophe or a no-break space matched nothing.** macOS turns a typed `'` into `’`, in the desktop app too, so `Company!=O'Neil` was compared as `O’Neil`, matched no row, and excluded nobody: the people you meant to leave out would have been sent the email. Filter values and column names are now compared with curly quotes as straight ones, no-break spaces as spaces, and invisible characters (pasted from a web page or Outlook) ignored.
@@ -170,7 +172,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Tests now fail if they make a real network request, check calls against the real `msal` and `pywebview` APIs, and include contract tests that run real `msal` against mocked Microsoft Entra endpoints.
 - Added browser tests for pasting into the editor, toolbar formatting and links, plus checks for invalid HTML in the web UI.
 
-[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/sjmurdoch/MergeMail365/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.1...v0.5.0
