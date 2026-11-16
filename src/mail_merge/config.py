@@ -16,7 +16,7 @@ else:
 
 
 def load_config(path: Path | None = None) -> dict[str, str]:
-    """Read TOML config and return {"client_id": ..., "tenant_id": ...}.
+    """Read TOML config and return {"client_id", "tenant_id", "log_level"}.
 
     Keys that are absent in the file are omitted from the result.
     Returns an empty dict if the file does not exist or is malformed.
@@ -39,4 +39,6 @@ def load_config(path: Path | None = None) -> dict[str, str]:
         result["client_id"] = str(raw["client-id"])
     if "tenant-id" in raw:
         result["tenant_id"] = str(raw["tenant-id"])
+    if "log-level" in raw:
+        result["log_level"] = str(raw["log-level"])
     return result

@@ -1,0 +1,768 @@
+{
+  "comment": "Shared by tests/test_template.py and tests/js/template.test.js: the Python renderer (what is sent) and the JavaScript one (what the preview shows) must agree on every case. `row` maps column names to cell values.",
+  "vectors": [
+    {
+      "name": "simple",
+      "template": "Hi {{name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Hi Alice",
+      "stray": false
+    },
+    {
+      "name": "case-insensitive",
+      "template": "Hi {{NAME}} {{Name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Hi Alice Alice",
+      "stray": false
+    },
+    {
+      "name": "spaces inside the braces",
+      "template": "Hi {{ name }} {{  First   Name  }}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Hi Alice Alice",
+      "stray": false
+    },
+    {
+      "name": "non-breaking space inside the braces",
+      "template": "Hi {{First Name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Hi Alice",
+      "stray": false
+    },
+    {
+      "name": "hyphen in the column name",
+      "template": "{{First-Name}} <{{E-mail}}>",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Al <alice@example.com>",
+      "stray": false
+    },
+    {
+      "name": "angle brackets in the column name",
+      "template": "Costs {{Price <GBP>}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Costs 12 < 20",
+      "stray": false
+    },
+    {
+      "name": "ampersand and quotes in the value",
+      "template": "{{R&D budget}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "AT&T \"quoted\" it's",
+      "stray": false
+    },
+    {
+      "name": "non-ASCII column name",
+      "template": "{{Größe}} {{größe}} {{GRÖSSE}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [
+        "GRÖSSE"
+      ],
+      "rendered": "groß groß {{GRÖSSE}}",
+      "stray": false
+    },
+    {
+      "name": "dotted capital I",
+      "template": "{{İstanbul}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "city",
+      "stray": false
+    },
+    {
+      "name": "unknown column",
+      "template": "Hi {{nope}} and {{ also nope }}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [
+        "also nope",
+        "nope"
+      ],
+      "rendered": "Hi {{nope}} and {{ also nope }}",
+      "stray": false
+    },
+    {
+      "name": "empty placeholder",
+      "template": "Hi {{}} {{   }}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [
+        ""
+      ],
+      "rendered": "Hi {{}} {{   }}",
+      "stray": false
+    },
+    {
+      "name": "unfinished placeholder",
+      "template": "Hi {{name}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Hi {{name}",
+      "stray": true
+    },
+    {
+      "name": "unopened placeholder",
+      "template": "Hi {name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Hi {name}}",
+      "stray": true
+    },
+    {
+      "name": "single braces are just text",
+      "template": "Set {a} = {b}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Set {a} = {b}",
+      "stray": false
+    },
+    {
+      "name": "triple braces",
+      "template": "{{{name}}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "{Alice}",
+      "stray": false
+    },
+    {
+      "name": "nested open",
+      "template": "{{a{{name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "{{aAlice",
+      "stray": true
+    },
+    {
+      "name": "a value that looks like a placeholder is not expanded again",
+      "template": "{{other}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "{{name}}",
+      "stray": false
+    },
+    {
+      "name": "a value with markup, plain text",
+      "template": "{{tag}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<b>bold</b>",
+      "stray": false
+    },
+    {
+      "name": "multi-line value, plain text",
+      "template": "{{address}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "1 High St\nOxford",
+      "stray": false
+    },
+    {
+      "name": "adjacent placeholders",
+      "template": "{{name}}{{name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "AliceAlice",
+      "stray": false
+    },
+    {
+      "name": "placeholder across lines is still one",
+      "template": "{{First\nName}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Alice",
+      "stray": false
+    },
+    {
+      "name": "no placeholders",
+      "template": "Nothing to see",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Nothing to see",
+      "stray": false
+    },
+    {
+      "name": "CSS in an HTML body is left alone",
+      "template": "<style>p { margin: 0 } @media print { p { color: red } }</style>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<style>p { margin: 0 } @media print { p { color: red } }</style>",
+      "stray": false
+    },
+    {
+      "name": "minified CSS has stray braces",
+      "template": "<style>@media print{p{color:red}}</style>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<style>@media print{p{color:red}}</style>",
+      "stray": true
+    },
+    {
+      "name": "html: value is escaped",
+      "template": "<p>{{tag}} {{Price <GBP>}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<p>&lt;b&gt;bold&lt;/b&gt; 12 &lt; 20</p>",
+      "stray": false
+    },
+    {
+      "name": "html: quotes and ampersands escaped",
+      "template": "<a title=\"{{R&D budget}}\">x</a>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<a title=\"AT&amp;T &quot;quoted&quot; it&#39;s\">x</a>",
+      "stray": false
+    },
+    {
+      "name": "html: name written as HTML, as the editor does",
+      "template": "<p>{{R&amp;D budget}} {{Price &lt;GBP&gt;}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<p>AT&amp;T &quot;quoted&quot; it&#39;s 12 &lt; 20</p>",
+      "stray": false
+    },
+    {
+      "name": "html: &nbsp; inside the braces",
+      "template": "<p>{{First&nbsp;Name}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<p>Alice</p>",
+      "stray": false
+    },
+    {
+      "name": "html: formatting applied to part of a placeholder",
+      "template": "<p>{{<strong>First</strong> Name}} {{na<em>me</em>}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<p>Alice Alice</p>",
+      "stray": false
+    },
+    {
+      "name": "html: line breaks in a value become <br>",
+      "template": "<p>{{address}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<p>1 High St<br>Oxford</p>",
+      "stray": false
+    },
+    {
+      "name": "html: a value that looks like a placeholder",
+      "template": "<p>{{other}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "<p>{{name}}</p>",
+      "stray": false
+    },
+    {
+      "name": "html: unknown column, shown unescaped in the message",
+      "template": "<p>{{no &amp; such}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [
+        "no &amp; such"
+      ],
+      "rendered": "<p>{{no &amp; such}}</p>",
+      "stray": false
+    },
+    {
+      "name": "html: same template, plain mode: the HTML name is not a column",
+      "template": "{{R&amp;D budget}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [
+        "R&amp;D budget"
+      ],
+      "rendered": "{{R&amp;D budget}}",
+      "stray": false
+    },
+    {
+      "name": "windows line endings in a value",
+      "template": "<p>{{a}}</p>",
+      "html": true,
+      "row": {
+        "a": "x\r\ny\rz"
+      },
+      "unresolved": [],
+      "rendered": "<p>x<br>y<br>z</p>",
+      "stray": false
+    },
+    {
+      "name": "numbers and empty cells",
+      "template": "[{{n}}][{{empty}}]",
+      "html": false,
+      "row": {
+        "n": "42",
+        "empty": ""
+      },
+      "unresolved": [],
+      "rendered": "[42][]",
+      "stray": false
+    },
+    {
+      "name": "column name with surrounding or repeated spaces",
+      "template": "{{first name}}",
+      "html": false,
+      "row": {
+        "First  Name": "A"
+      },
+      "unresolved": [],
+      "rendered": "A",
+      "stray": false
+    }
+  ],
+  "chip_columns": [
+    "email",
+    "First Name",
+    "R&D budget",
+    "O'Brien \"Q\"",
+    "Größe",
+    "Price <GBP>",
+    "E-mail",
+    "First-Name",
+    "Amount (£)",
+    "50% off?",
+    "a.b/c\\d",
+    "tab\there",
+    "#1 choice!",
+    "naïve café",
+    "x = y",
+    "<b>bold</b>",
+    "semi;colon:and,comma",
+    "日本語"
+  ],
+  "unusable_columns": [
+    "a{b",
+    "c}d",
+    "{{e}}"
+  ]
+}

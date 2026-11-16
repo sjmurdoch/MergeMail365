@@ -28,9 +28,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.12.18"
+          version: "0.13.6"
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
@@ -46,6 +46,9 @@ jobs:
       - name: Type check
         run: uv run mypy
 
+      - name: Lint with Ruff (logging and security rules)
+        run: uv run ruff check .
+
   lint-js:
     runs-on: ubuntu-latest
     steps:
@@ -53,10 +56,10 @@ jobs:
 
       - uses: biomejs/setup-biome@4c91541eaada48f67d7dbd7833600ce162b68f51 # v2.7.1
         with:
-          version: 2.5.14
+          version: 2.6.6
 
       - name: Lint app.js
-        run: biome lint src/mail_merge/web/static/app.js src/mail_merge/web/static/wizard-core.js
+        run: biome lint
 
   spec:
     # The Quint model of the web UI (spec/wizard.qnt): scenario tests, a
@@ -69,9 +72,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.12.18"
+          version: "0.13.6"
           python-version: "3.14"
           enable-cache: true
 
@@ -85,7 +88,7 @@ jobs:
       - name: Typecheck and scenario tests
         run: |
           spec/node_modules/.bin/quint typecheck spec/wizard.qnt
-          for variant in buggy partial fixed; do
+          for variant in buggy partial round2 fixed; do
             spec/node_modules/.bin/quint test --main=$variant --max-samples=1 --backend=typescript spec/wizard.qnt
           done
 

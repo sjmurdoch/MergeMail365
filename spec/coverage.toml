@@ -1,7 +1,7 @@
 # Coverage inventory for spec/wizard.qnt.
 #
-# Every entry point in the web UI and server is listed here: each inline
-# handler in templates/index.html, each listener, EventSource callback and
+# Every entry point in the web UI and server is listed here: each button's
+# data-action in templates/index.html, each listener, EventSource callback and
 # timer in static/app.js, and each Flask route in web/app.py. Each maps to the
 # model actions that describe it, or is excluded with a reason.
 #
@@ -11,7 +11,7 @@
 # until someone decides how it is modelled.
 #
 # Keys:
-#   html:<handler>            onclick/onchange/oninput attribute text
+#   html:<handler>            a button's data-action attribute, e.g. goToStep(2)
 #   js:#<id>:<event>          $("id").addEventListener(event)
 #   js:document:<event>       document.addEventListener(event)
 #   js:window:<event>         window.addEventListener(event)
@@ -20,10 +20,29 @@
 #   js:<timer>@<context>      setInterval/setTimeout, keyed by the enclosing
 #                             top-level function or listener
 #   route:<METHOD> <path>     Flask route
+#
+# Each route also states its `access`: "session" (needs the startup-token
+# session, the default for every route) or "public" (marked @public in
+# web/app.py). tests/test_spec_coverage.py compares this with the code, so
+# making a route public is a visible change here.
 
 [environment]
 # Actions that no user entry point triggers: the server finishing work.
 actions = ["completeJob", "completeOrphan", "sendNext", "finishSend", "sendWithoutToken", "tokenExpires", "previewResponse", "startSendResponse", "serverRestart"]
+
+[assumptions]
+# What each choice the environment makes stands for in the code, and the test
+# that pins it. The model lets the environment pick these values freely, so
+# an invariant is only as true as the reading of each one: `completeJob(ok)`
+# was once read as "the test email was sent" while the code computed it from
+# "the job ran to the end", and every invariant about tested content held in
+# the model and was false in the app (docs/review-fixes-plan.md, G9).
+# tests/test_spec_coverage.py fails if a parameter of an [environment] action
+# has no entry here, or if a pinning test no longer exists.
+"previewResponse.ok" = { fact = "POST /api/get-recipients answered 200 with a non-empty recipient list; anything else (an error, no recipients, over the cap) is not ok.", pinned_by = ["tests/test_web.py::test_get_recipients_filtering", "tests/test_web.py::test_get_recipients_limit_enforced"] }
+"completeJob.ok" = { fact = "The job ran to the end: send_merge() returned instead of raising, so the job's status is \"completed\". It says nothing about whether an email was accepted.", pinned_by = ["tests/test_web_jobs.py::test_failed_send_keeps_the_results_so_far", "tests/test_conformance.py::test_server_conformance"] }
+"completeJob.accepted" = { fact = "Graph answered the test email's sendMail request with 202. The page's verdict is /api/job/<id>/status `ok` (Job.ok: completed and every result a success), never the status alone. A dry run makes no request, so this does not apply to it.", pinned_by = ["tests/test_outcomes.py::test_reported_outcome_matches_graph", "tests/test_outcomes.py::test_dry_run_makes_no_request_and_succeeds"] }
+"finishSend.failed" = { fact = "send_merge() raised part-way through the send (the job's status is \"failed\"); emails already recorded stay in the job's results.", pinned_by = ["tests/test_web_jobs.py::test_failed_send_keeps_the_results_so_far"] }
 
 [implementation]
 # How each action in `step` is carried out in the code. Page actions are
@@ -44,7 +63,7 @@ environment = ["tokenExpires"]
 not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists the current requests.", verifyGen = "Replaced by request ids: abstractPage's pending lists the current requests.", previewGen = "Replaced by request ids: abstractPage's previewReq.", progressJob = "DOM text (#send-progress-text) the reducer does not hold.", bccToMerge = "DOM field (#bcc-blast-to) the reducer does not hold.", signedIn = "The MSAL token cache; conformance drives a fake cache.", btnNext2 = "DOM: loadPreview() disables #btn-next-2 until its response arrives, stale or not, while the reducer forgets stale requests." }
 
 [entries]
-# --- templates/index.html inline handlers ---
+# --- templates/index.html buttons (data-action) ---
 "html:goToStep(2)" = { actions = ["next1"] }
 "html:setSendMode('individual')" = { actions = ["edit"] }
 "html:setSendMode('bcc')" = { actions = ["edit"] }
@@ -65,9 +84,10 @@ not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists 
 "html:newMerge()" = { actions = ["newMerge"] }
 "html:dismissInterrupted()" = { actions = ["dismissInterrupted"] }
 "html:downloadInterruptedCsv()" = { out_of_scope = "Builds a CSV of the interrupted sends already shown; no state change." }
-"html:window.location.reload()" = { actions = ["reload"] }
+"html:reloadPage()" = { actions = ["reload"] }
 
 # --- static/app.js listeners ---
+"js:document:click" = { out_of_scope = "Runs the data-action of the button clicked (runDataAction); each button is listed above as html:<its data-action>." }
 "js:window:beforeunload" = { out_of_scope = "Browser leave-page warning while sending; the page itself is unchanged." }
 "js:#btn-sign-in:click" = { actions = ["signIn", "signOut"] }
 "js:#btn-sign-in-4:click" = { actions = ["signIn"] }
@@ -105,24 +125,24 @@ not_mapped = { testGen = "Replaced by request ids: abstractPage's pending lists 
 "js:setInterval@document:DOMContentLoaded" = { out_of_scope = "Session expiry display and localStorage auto-save; what auto-save keeps is covered by reload." }
 
 # --- web/app.py routes ---
-"route:GET /" = { actions = ["reload"] }
-"route:GET /auth/login" = { actions = ["signIn"] }
-"route:GET /auth/callback" = { actions = ["signIn"] }
+"route:GET /" = { access = "session", actions = ["reload"] }
+"route:GET /auth/login" = { access = "session", actions = ["signIn"] }
+"route:GET /auth/callback" = { access = "public", actions = ["signIn"] }
 # checkAuthStatus(): on load, entering steps 4 and 6, after a failed test, and while polling a desktop sign-in.
-"route:GET /auth/status" = { actions = ["reload", "next3", "next5", "completeJob", "signIn", "signOut"] }
-"route:POST /auth/logout" = { actions = ["signOut"] }
-"route:GET /auth/debug" = { out_of_scope = "Diagnostics; no state change." }
-"route:POST /auth/interactive" = { actions = ["signIn"] }
-"route:GET /api/config" = { actions = ["reload"] }
-"route:POST /api/state" = { out_of_scope = "Stores the step and flags for display; on reload the page returns to step 1 and resets the flags whatever was stored." }
-"route:POST /api/reset" = { actions = ["newMerge"] }
-"route:POST /api/interrupted/dismiss" = { actions = ["dismissInterrupted"] }
-"route:POST /api/upload-spreadsheet" = { actions = ["upload"] }
-"route:POST /api/change-sheet" = { actions = ["upload"] }
-"route:POST /api/get-recipients" = { actions = ["next2", "previewResponse"] }
-"route:POST /api/preview-template" = { out_of_scope = "Not called by the page; server-side placeholder validation for API clients." }
-"route:POST /api/start-job" = { actions = ["sendTestEmail", "next4", "startSend", "startSendResponse"] }
-"route:GET /api/job/<job_id>/events" = { actions = ["completeJob", "finishSend", "reload"] }
-"route:GET /api/job/<job_id>/status" = { actions = ["completeJob", "finishSend"] }
-"route:POST /api/job/<job_id>/stop" = { actions = ["stopSend"] }
-"route:GET /api/log-path" = { out_of_scope = "Troubleshooting information; no state change." }
+"route:GET /auth/status" = { access = "session", actions = ["reload", "next3", "next5", "completeJob", "signIn", "signOut"] }
+"route:POST /auth/logout" = { access = "session", actions = ["signOut"] }
+"route:GET /auth/debug" = { access = "session", out_of_scope = "Diagnostics; no state change." }
+"route:POST /auth/interactive" = { access = "session", actions = ["signIn"] }
+"route:GET /api/config" = { access = "session", actions = ["reload"] }
+"route:POST /api/state" = { access = "session", out_of_scope = "Stores the step and flags for display; on reload the page returns to step 1 and resets the flags whatever was stored." }
+"route:POST /api/reset" = { access = "session", actions = ["newMerge"] }
+"route:POST /api/interrupted/dismiss" = { access = "session", actions = ["dismissInterrupted"] }
+"route:POST /api/upload-spreadsheet" = { access = "session", actions = ["upload"] }
+"route:POST /api/change-sheet" = { access = "session", actions = ["upload"] }
+"route:POST /api/get-recipients" = { access = "session", actions = ["next2", "previewResponse"] }
+"route:POST /api/preview-template" = { access = "session", out_of_scope = "Not called by the page; server-side placeholder validation for API clients." }
+"route:POST /api/start-job" = { access = "session", actions = ["sendTestEmail", "next4", "startSend", "startSendResponse"] }
+"route:GET /api/job/<job_id>/events" = { access = "session", actions = ["completeJob", "finishSend", "reload"] }
+"route:GET /api/job/<job_id>/status" = { access = "session", actions = ["completeJob", "finishSend"] }
+"route:POST /api/job/<job_id>/stop" = { access = "session", actions = ["stopSend"] }
+"route:GET /api/log-path" = { access = "session", out_of_scope = "Troubleshooting information; no state change." }

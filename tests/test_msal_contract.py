@@ -219,6 +219,22 @@ class TestCachedToken:
         assert info["token_valid"] is True
         assert info["token_expires_at"] is not None
 
+    def test_cached_account_names_need_no_network(self, entra):
+        """The confirmation prompt names the account before signing in, and
+        building an msal app would fetch the authority's metadata."""
+        _sign_in_via_auth_code(entra)
+        with responses.RequestsMock():  # no routes: any request fails
+            assert auth_module.cached_account_names() == [USERNAME]
+        assert auth_module.cached_account_names() == [
+            a["username"] for a in diagnose_auth(CLIENT_ID, TENANT_ID)["accounts"]
+        ]
+
+    def test_account_name_falls_back_to_the_cache(self, entra):
+        """Graph access tokens for personal accounts are not JWTs."""
+        _sign_in_via_auth_code(entra)
+        assert auth_module.account_name("opaque-token") == USERNAME
+        assert auth_module.account_name(_jwt({"upn": "bob@contoso.com"})) == "bob@contoso.com"
+
     def test_sign_out_removes_account(self, entra):
         _sign_in_via_auth_code(entra)
 

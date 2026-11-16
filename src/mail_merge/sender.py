@@ -1,4 +1,3 @@
-import json
 import logging
 import time
 from collections.abc import Callable
@@ -8,6 +7,11 @@ from importlib.metadata import version
 import requests
 
 logger = logging.getLogger(__name__)
+
+# Passed as `extra` on log records that hold message content. The file
+# handler drops them (console.setup_file_logging), so what users write to
+# their recipients is never in the log file they send when asking for help.
+CONSOLE_ONLY = "console_only"
 
 GRAPH_SEND_URL = "https://graph.microsoft.com/v1.0/me/sendMail"
 MAX_RECIPIENTS_PER_MESSAGE = 500
@@ -51,6 +55,15 @@ class SendResult:
     status_code: int | None = None
     error: str = ""
     throttled: bool = False
+    # No answer from Graph after the request was sent (a read timeout): the
+    # email may or may not have been delivered. ``success`` is False.
+    unknown: bool = False
+
+
+NO_ANSWER = (
+    "No answer from Microsoft: the email may or may not have been delivered. "
+    "Check Sent Items before sending it again."
+)
 
 
 def send_one(
@@ -103,11 +116,20 @@ def send_one(
     was_throttled = False
     while True:
         try:
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("POST to %s with headers %s and payload: %s",
-                             GRAPH_SEND_URL,
-                             json.dumps(headers, indent=2), json.dumps(payload, indent=2))
+            # Never the headers or the payload: they hold the access token,
+            # the message and the attachments, and the log file is what
+            # users send when asking for help (tests/test_log_secrets.py).
+            logger.debug(
+                "POST sendMail for %s: subject %d chars, body %d chars, %d attachment(s)",
+                to.address, len(subject), len(body), len(opts.attachments or []),
+            )
             resp = requests.post(GRAPH_SEND_URL, json=payload, headers=headers, timeout=30)
+        except requests.ReadTimeout as exc:
+            # The request reached Graph, which may have accepted it; sendMail
+            # has no idempotency key, so a retry could deliver it twice.
+            # (A ConnectTimeout is retried below: nothing was sent.)
+            logger.debug("Read timeout sending to %s: %s", to.address, exc)
+            return SendResult(email=to.address, success=False, error=NO_ANSWER, unknown=True)
         except requests.RequestException as exc:
             retries += 1
             if retries > opts.max_retries:
@@ -235,6 +257,7 @@ def send_bcc_blast(
                 status_code=result.status_code,
                 error=result.error,
                 throttled=result.throttled,
+                unknown=result.unknown,
             )
             for addr in batch
         ]
@@ -281,14 +304,17 @@ def send_all(
         to_name = recipient.get(name_column, "").strip() or None if name_column else None
         to = EmailAddress(address=recipient[email_column], name=to_name)
         rendered_subject = render(subject_template, recipient)
-        rendered_body = render(body_template, recipient)
+        # In an HTML body, cell values are escaped (template.py).
+        rendered_body = render(body_template, recipient, html=opts.html)
 
         if dry_run:
             logger.info(
                 "🔄 DRY RUN [%d/%d] To: %s | Subject: %s",
                 i + 1, len(recipients), to.address, rendered_subject,
             )
-            logger.debug("Body:\n%s", rendered_body)
+            # The rendered message is for the terminal (a DEBUG dry run is
+            # how CLI users read what would be sent), never the log file.
+            logger.debug("Body:\n%s", rendered_body, extra={CONSOLE_ONLY: True})
             results.append(SendResult(email=to.address, success=True, status_code=None))
             if on_result is not None:
                 on_result(results[-1])
@@ -305,7 +331,9 @@ def send_all(
             results.append(result)
             if on_result is not None:
                 on_result(result)
-            if not result.success:
+            if result.unknown:
+                logger.error("❓ No answer for %s: the email may have been delivered", to.address)
+            elif not result.success:
                 logger.error("❌ Failed to send to %s: %s", to.address, result.error)
 
             # Adaptive delay: back off on throttling, recover when clear

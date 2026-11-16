@@ -389,6 +389,54 @@ class TestNetworkErrors:
         assert call_count == 2
 
 
+    @responses.activate
+    def test_read_timeout_is_not_retried_and_the_outcome_is_unknown(self):
+        """The request reached Graph, which may have accepted it, and sendMail
+        has no idempotency key: a retry could deliver the email twice
+        (docs/review-fixes-plan.md, D5)."""
+        import requests as req_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, body=req_module.ReadTimeout("read timed out"))
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        with patch("mail_merge.sender.time.sleep"):
+            result = send_one(
+                lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body",
+                opts=MessageOptions(max_retries=3),
+            )
+        assert len(responses.calls) == 1
+        assert not result.success
+        assert result.unknown
+        assert "may or may not have been delivered" in result.error
+
+    @responses.activate
+    def test_connect_timeout_is_retried(self):
+        """Nothing reached Graph, so retrying can't send twice."""
+        import requests as req_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, body=req_module.ConnectTimeout("connect timed out"))
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        with patch("mail_merge.sender.time.sleep"):
+            result = send_one(
+                lambda: "fake-token", EmailAddress(address="test@example.com"), "Subject", "Body",
+                opts=MessageOptions(max_retries=3),
+            )
+        assert len(responses.calls) == 2
+        assert result.success and not result.unknown
+
+    @responses.activate
+    def test_bcc_blast_copies_an_unknown_outcome_to_each_recipient(self):
+        import requests as req_module
+
+        responses.add(responses.POST, GRAPH_SEND_URL, body=req_module.ReadTimeout("read timed out"))
+        results = send_bcc_blast(
+            lambda: "fake-token", ["a@example.com", "b@example.com"],
+            EmailAddress(address="list@example.com"), "Subject", "Body",
+        )
+        assert [(r.email, r.success, r.unknown) for r in results] == [
+            ("a@example.com", False, True), ("b@example.com", False, True),
+        ]
+
+
 class TestRateLimitEdgeCases:
     @responses.activate
     def test_rate_limit_unparseable_retry_after_defaults_to_10(self):

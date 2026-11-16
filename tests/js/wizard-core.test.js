@@ -490,3 +490,69 @@ test("a config without interrupted sends shows none", () => {
     assert.equal(C.interruptedShown(r.state), false);
     assert.deepEqual(r.effects, []);
 });
+
+test("a job succeeded only if /status says ok, whatever its status (model: testPassHonest)", () => {
+    // Graph rejected the test email: the job still ran to the end.
+    assert.equal(C.jobSucceeded({ status: "completed", ok: false, results: [{ success: false, status_code: 403 }] }), false);
+    assert.equal(C.jobSucceeded({ status: "completed", ok: true }), true);
+    assert.equal(C.jobSucceeded({ status: "failed", ok: false, error: "x" }), false);
+    // The answer made up when the connection is lost has no `ok`.
+    assert.equal(C.jobSucceeded({ status: "failed", error: "Connection lost" }), false);
+    assert.equal(C.jobSucceeded({ status: "completed" }), false);
+});
+
+test("a rejected test email leaves step 4 failed, with Next disabled and Retry shown", () => {
+    let s = Object.assign(C.initialState(), { currentStep: 4, signedIn: true });
+    s = C.reduce(s, { type: "sendTestEmail", addressOk: true }).state;
+    const id = C.pendingRequest(s, "test");
+    const result = { status: "completed", ok: false, results: [{ success: false, status_code: 403 }] };
+    s = C.reduce(s, { type: "jobCompleted", id, ok: C.jobSucceeded(result), message: "rejected" }).state;
+    assert.equal(s.testPassed, false);
+    assert.equal(C.nextEnabled(s, 4), false);
+    assert.equal(C.retryVisible(s), true);
+    assert.equal(s.testResult.success, false);
+});
+
+// What step 4 says about a failed test email (docs/review-fixes-plan.md, E3):
+// chosen from the failed result's status code, never by searching the text
+// for digits, which an address or a request ID can contain.
+test("testEmailFailure advises from the status code", () => {
+    const failed = (code, error = "", extra = {}) =>
+        ({ ok: false, error: `Test email to x was not sent (HTTP ${code})`, results: [{ success: false, status_code: code, error, ...extra }] });
+    assert.match(C.testEmailFailure(failed(403, "ErrorAccessDenied")), /^Permission denied\./);
+    assert.match(C.testEmailFailure(failed(401)), /^Permission denied\./);
+    assert.match(C.testEmailFailure(failed(400, "Invalid recipient 500@example.com")), /^Email rejected by Microsoft\./);
+    assert.match(C.testEmailFailure(failed(429)), /^Rate limited by Microsoft\./);
+    assert.match(C.testEmailFailure(failed(503)), /^Microsoft server error\./);
+    assert.match(C.testEmailFailure(failed(403)), /\(HTTP 403\)$/);
+    // Digits in the text don't decide: a 413 naming request 400-401.
+    const big = C.testEmailFailure(failed(413, "request id 400-401-500"));
+    assert.doesNotMatch(big, /Permission|rejected|Rate limited|server error/);
+    assert.match(big, /413/);
+});
+
+test("testEmailFailure without a status code", () => {
+    // A network failure: nothing came back from Microsoft.
+    const network = { ok: false, results: [{ success: false, status_code: null, error: "connection refused" }] };
+    assert.equal(C.testEmailFailure(network), "Could not reach Microsoft: connection refused");
+    // No answer after sending: may have gone, so the job's own words.
+    const unknown = { ok: false, error: "No answer from Microsoft for the test email to x: it may have been delivered.",
+        results: [{ success: false, status_code: null, unknown: true, error: "No answer" }] };
+    assert.equal(C.testEmailFailure(unknown), unknown.error);
+    // No result at all: the error as it is, digits and all.
+    for (const error of ["Not signed in. Sign in with Microsoft, then try again.", "Row 403: bad address"]) {
+        assert.equal(C.testEmailFailure({ ok: false, error, results: [] }), error);
+        assert.equal(C.testEmailFailure({ ok: false, error }), error);
+    }
+    assert.equal(C.testEmailFailure({ ok: false }), "Test email failed");
+});
+
+test("formatSize never shows a small file as 0 KB", () => {
+    assert.equal(C.formatSize(0), "0 bytes");
+    assert.equal(C.formatSize(1), "1 byte");
+    assert.equal(C.formatSize(14), "14 bytes");
+    assert.equal(C.formatSize(1023), "1023 bytes");
+    assert.equal(C.formatSize(1024), "1 KB");
+    assert.equal(C.formatSize(150 * 1024), "150 KB");
+    assert.equal(C.formatSize(3.5 * 1024 * 1024), "3.5 MB");
+});

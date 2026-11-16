@@ -12,9 +12,11 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlsplit
+from typing import Any, TypeVar
+from urllib.parse import quote, urlencode, urlsplit
 
 import werkzeug
 werkzeug.serving._log_add_style = False
@@ -33,11 +35,15 @@ from mail_merge.config import load_config
 from mail_merge.sender import SendResult
 from mail_merge.web.jobs import FINISHED_STATUSES, JobStore
 from mail_merge.web.sendlog import SendLog
+from mail_merge.web.sessions import ServerSession, ServerSideSessions
 
 logger = logging.getLogger(__name__)
 
 MAX_WEB_RECIPIENTS = 99
 WEB_SEND_DELAY = 2.0
+# The largest request accepted: a spreadsheet (50 MB limit in excel.py), or
+# a job's body and attachments (Graph takes about 4 MB a message).
+MAX_REQUEST_BYTES = 64 * 1024 * 1024
 
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z][^>]*>")
 _BLOCK_OR_BR_RE = re.compile(
@@ -80,10 +86,7 @@ def _cleanup_temp_dirs() -> None:
     """Clean up all temp directories on shutdown."""
     with _temp_dirs_lock:
         for d in _temp_dirs:
-            try:
-                shutil.rmtree(d, ignore_errors=True)
-            except Exception:
-                pass
+            shutil.rmtree(d, ignore_errors=True)
         _temp_dirs.clear()
 
 
@@ -179,9 +182,10 @@ def _validate_html_body(body: str) -> list[str]:
 def _attachment_basename(filename: str) -> str | None:
     """Return the final path component of an uploaded attachment's filename.
 
-    The multipart filename is client-controlled and Werkzeug passes it
-    through unchanged, so it may contain ``../``, an absolute path, or
-    Windows separators.  Strip everything up to the last ``/`` or ``\\``,
+    The multipart filename is client-controlled. Werkzeug only undoes the
+    header's quoting (since 3.1.9, a backslash escapes the next character,
+    so a client must send ``\\`` for a literal backslash), so it may contain
+    ``../``, an absolute path, or Windows separators.  Strip everything up to the last ``/`` or ``\\``,
     which keeps the name as the user sees it (spaces, punctuation,
     non-ASCII) unlike ``secure_filename``.  Returns ``None`` when nothing
     usable is left.
@@ -234,7 +238,7 @@ def _validated_recipient_count(
 # ---------------------------------------------------------------------------
 
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
-_WILDCARD_HOSTS = frozenset({"", "0.0.0.0", "::"})
+_WILDCARD_HOSTS = frozenset({"", "0.0.0.0", "::"})  # noqa: S104 - names to compare with, not a bind
 
 
 def _allowed_hostnames(bind_host: str) -> frozenset[str] | None:
@@ -254,6 +258,45 @@ def _request_hostname() -> str:
     return (urlsplit("//" + request.host).hostname or "").lower()
 
 
+_View = TypeVar("_View", bound=Callable[..., Any])
+
+
+def public(view: _View) -> _View:
+    """Mark a route as reachable without the startup-token session.
+
+    Every route needs the session unless it carries this mark, so a new
+    route is protected without anyone remembering to protect it
+    (tests/test_web.py TestRouteTable checks the whole route table, and
+    spec/coverage.toml records each route's `access`).
+    """
+    view._public = True  # type: ignore[attr-defined]
+    return view
+
+
+# The page's Content Security Policy: the second defence against injected
+# markup, behind the escaping in static/safe-html.js. Script only from this
+# server's own files: no inline <script>, no on...= handlers, no eval. So
+# markup that did reach the page unescaped still could not run script, which
+# here could send email as the signed-in user.
+# - style-src allows inline styles: the Trix editor and the email preview's
+#   wrapper (a srcdoc iframe inherits this policy) use them.
+# - img-src allows https images, so an HTML email's pictures show in the
+#   preview.
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+# How long a sign-in started on 127.0.0.1 has to arrive on localhost.
+_HANDOFF_LIFETIME = 60.0
+
+
 
 def create_app(
     startup_token: str = "",
@@ -269,9 +312,12 @@ def create_app(
         template_folder=os.path.join(os.path.dirname(__file__), "templates"),
         static_folder=os.path.join(os.path.dirname(__file__), "static"),
     )
-    # Use a stable secret key based on the startup token so that restarting
-    # the server doesn't invalidate the user's session.
+    # Session data stays in this process; the cookie is only an id
+    # (web/sessions.py). Flask still wants a secret key for anything that
+    # signs with it.
     app.secret_key = hashlib.sha256(startup_token.encode()).hexdigest()
+    sessions = ServerSideSessions()
+    app.session_interface = sessions
 
     # Keep running sends' results on disk, and report the sends an earlier
     # process didn't finish (spec/requirements.md, R15). Only the
@@ -282,6 +328,7 @@ def create_app(
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
+    app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     app.config["STARTUP_TOKEN"] = startup_token
     app.config["PORT"] = port
     app.config["FIXED_CLIENT_ID"] = client_id
@@ -305,12 +352,33 @@ def create_app(
             content_type="text/plain; charset=utf-8",
         )
 
+    def _is_public() -> bool:
+        if request.endpoint == "static":
+            return True
+        view = app.view_functions.get(request.endpoint or "")
+        return bool(getattr(view, "_public", False))
+
+    # One-time passes for a sign-in that started on 127.0.0.1 and continues
+    # on localhost, where the redirect URI lives: nonce -> (expiry time,
+    # session id). The localhost cookie is given the same session, so the
+    # uploaded spreadsheet comes along.
+    handoffs: dict[str, tuple[float, str]] = {}
+
+    def _redeem_handoff() -> bool:
+        nonce = request.args.get("handoff", "")
+        entry = handoffs.pop(nonce, None) if nonce else None
+        if entry is None or entry[0] < time.monotonic():
+            return False
+        assert isinstance(session._get_current_object(), ServerSession)  # type: ignore[attr-defined]
+        return sessions.adopt(session._get_current_object(), entry[1])  # type: ignore[attr-defined]
+
     @app.before_request
     def _check_auth() -> Any:
-        # Allow static files and auth routes without session auth
-        if request.endpoint == "static":
+        if _is_public():
             return None
-        if request.endpoint in ("auth_callback", "auth_login"):
+
+        # A sign-in handed over from 127.0.0.1 (see auth_login).
+        if request.endpoint == "auth_login" and _redeem_handoff():
             return None
 
         # Check for startup token in query string
@@ -334,18 +402,41 @@ def create_app(
         session.permanent = True
         return None
 
+    @app.after_request
+    def _security_headers(response: Response) -> Response:
+        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # The page and the API answers hold addresses and tokens; static
+        # files may be cached.
+        if request.endpoint != "static":
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
+
+    @app.errorhandler(413)
+    def _too_large(_exc: Exception) -> Any:
+        # JSON, like every other answer the page's fetch() calls expect.
+        limit_mb = MAX_REQUEST_BYTES // (1024 * 1024)
+        return jsonify({"error": f"Upload too large (the limit is {limit_mb} MB)"}), 413
+
+    def _json_object() -> dict[str, Any] | None:
+        """The request's JSON body if it is an object, else None (never an
+        exception: a malformed body is the caller's mistake, a 400)."""
+        data = request.get_json(silent=True)
+        return data if isinstance(data, dict) else None
+
     # ----- CSRF protection -----
 
     @app.before_request
     def _ensure_csrf_token() -> None:
-        if "csrf_token" not in session:
+        # Only for a session that got in with the startup token, so that a
+        # request without one (a static file, say) leaves nothing behind.
+        if session.get("authenticated") and "csrf_token" not in session:
             session["csrf_token"] = secrets.token_hex(32)
 
     @app.before_request
     def _check_csrf() -> Response | None:
         if request.method in ("GET", "HEAD", "OPTIONS"):
-            return None
-        if request.endpoint in ("auth_login", "auth_callback"):
             return None
         csrf_token = request.headers.get("X-CSRF-Token") or ""
         if not csrf_token or csrf_token != session.get("csrf_token"):
@@ -364,21 +455,33 @@ def create_app(
 
     @app.route("/auth/login")
     def auth_login() -> Any:
-        # If the user is on 127.0.0.1, redirect them to localhost so the
-        # session cookie is set on the domain that matches the redirect_uri.
-        if request.host.startswith("127.0.0.1"):
-            new_url = request.url.replace("127.0.0.1", "localhost", 1)
-            return redirect(new_url)
+        # Microsoft redirects back to localhost (the registered redirect
+        # URI), and cookies set on 127.0.0.1 are not sent there. So a
+        # sign-in started on 127.0.0.1 moves to localhost first, with a
+        # one-time pass that lets this (already authenticated) user in.
+        if _request_hostname() == "127.0.0.1":
+            now = time.monotonic()
+            for stale in [n for n, (expiry, _sid) in handoffs.items() if expiry < now]:
+                del handoffs[stale]
+            nonce = secrets.token_urlsafe(32)
+            sid = session._get_current_object().sid  # type: ignore[attr-defined]
+            handoffs[nonce] = (now + _HANDOFF_LIFETIME, sid)
+            params = {k: v for k, v in request.args.items() if k != "handoff"}
+            params["handoff"] = nonce
+            return redirect(f"http://localhost:{app.config['PORT']}/auth/login?{urlencode(params)}")
 
-        # Read client_id/tenant_id from query params (sent by JS), falling
-        # back to session/config.  Store in session for later use.
+        # client_id/tenant_id come from the page's fields (sent by JS),
+        # falling back to session/config, unless they were fixed on the
+        # command line.  Stored in the session for later use.
         client_id = (
-            request.args.get("client_id")
+            app.config["FIXED_CLIENT_ID"]
+            or request.args.get("client_id")
             or session.get("client_id")
             or _get_config_value("client_id")
         )
         tenant_id = (
-            request.args.get("tenant_id")
+            app.config["FIXED_TENANT_ID"]
+            or request.args.get("tenant_id")
             or session.get("tenant_id")
             or _get_config_value("tenant_id")
             or "common"
@@ -389,13 +492,22 @@ def create_app(
         from mail_merge.auth import initiate_auth_code_flow
 
         redirect_uri = f"http://localhost:{app.config['PORT']}/auth/callback"
-        flow = initiate_auth_code_flow(client_id, tenant_id, redirect_uri)
+        try:
+            flow = initiate_auth_code_flow(client_id, tenant_id, redirect_uri)
+        except Exception as exc:
+            # Offline, a mistyped tenant, an unknown client ID: back to the
+            # page with the reason, not a bare 500.
+            logger.debug("auth_login: could not start the sign-in", exc_info=True)
+            return redirect(url_for("index") + "#auth-error=" + quote(str(exc), safe=""))
         session["auth_flow"] = flow
         session["client_id"] = client_id
         session["tenant_id"] = tenant_id
         return redirect(flow["auth_uri"])
 
+    # Public: Microsoft's redirect arrives here, and without the session
+    # that started the sign-in (its `auth_flow`) the route does nothing.
     @app.route("/auth/callback")
+    @public
     def auth_callback() -> Any:
         flow = session.get("auth_flow")
         if not flow:
@@ -403,7 +515,7 @@ def create_app(
 
         if "error" in request.args:
             error = request.args.get("error_description", request.args.get("error", "Unknown error"))
-            return redirect(url_for("index") + f"#auth-error={error}")
+            return redirect(url_for("index") + "#auth-error=" + quote(error, safe=""))
 
         client_id = session.get("client_id", "")
         tenant_id = session.get("tenant_id", "common")
@@ -418,7 +530,7 @@ def create_app(
                 auth_response=dict(request.args),
             )
         except RuntimeError as exc:
-            return redirect(url_for("index") + f"#auth-error={exc}")
+            return redirect(url_for("index") + "#auth-error=" + quote(str(exc), safe=""))
 
         session["ms_authenticated"] = True
         session.pop("auth_flow", None)
@@ -445,7 +557,7 @@ def create_app(
                         "token_expires_at": expires.isoformat() if expires else None,
                     })
         except Exception:
-            pass
+            logger.debug("auth status: could not read the token cache", exc_info=True)
         return jsonify({"authenticated": False, "email": None})
 
     @app.route("/auth/logout", methods=["POST"])
@@ -471,10 +583,10 @@ def create_app(
         if not app.config["DESKTOP_MODE"]:
             return jsonify({"error": "Interactive auth is only available in desktop mode"}), 400  # type: ignore[return-value]
 
-        data = request.get_json() or {}
+        data = _json_object() or {}
         fallback_cid, fallback_tid = _get_client_tenant()
-        cid = data.get("client_id") or fallback_cid
-        tid = data.get("tenant_id") or fallback_tid
+        cid = app.config["FIXED_CLIENT_ID"] or data.get("client_id") or fallback_cid
+        tid = app.config["FIXED_TENANT_ID"] or data.get("tenant_id") or fallback_tid
 
         if not cid:
             return jsonify({"error": "client_id is required"}), 400  # type: ignore[return-value]
@@ -521,7 +633,7 @@ def create_app(
                     )
                     spreadsheet_info = {**spreadsheet_info, "rows": rows}
                 except Exception:
-                    pass
+                    logger.debug("config: could not re-read the uploaded spreadsheet", exc_info=True)
 
         from mail_merge.api import _EMAIL_HTML_HEAD, _EMAIL_HTML_TAIL
 
@@ -554,7 +666,9 @@ def create_app(
 
     @app.route("/api/state", methods=["POST"])
     def api_save_state() -> Response:
-        data = request.get_json()
+        data = _json_object()
+        if data is None:
+            return jsonify({"error": "Expected a JSON object"}), 400  # type: ignore[return-value]
         if "current_step" in data:
             session["current_step"] = data["current_step"]
         if "test_passed" in data:
@@ -593,7 +707,7 @@ def create_app(
         if not file or not file.filename:
             return jsonify({"error": "No file uploaded"}), 400  # type: ignore[return-value]
 
-        if not file.filename.endswith(".xlsx"):
+        if not file.filename.lower().endswith(".xlsx"):
             return jsonify({"error": "Only .xlsx files are supported"}), 400  # type: ignore[return-value]
 
         # Clean up previous upload if re-uploading
@@ -606,10 +720,11 @@ def create_app(
         filepath = os.path.join(tmp_dir, "upload.xlsx")
         file.save(filepath)
 
-        from mail_merge.excel import read_preview
+        from mail_merge.excel import number_format_columns, read_preview
 
         try:
             columns, rows, sheets, total_rows, active_sheet = read_preview(filepath)
+            unformatted = number_format_columns(filepath, active_sheet)
         except Exception as exc:
             logger.debug("upload-spreadsheet: read_preview failed", exc_info=True)
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -618,15 +733,17 @@ def create_app(
 
         session["spreadsheet_path"] = filepath
         session["spreadsheet_tmp_dir"] = tmp_dir
-        # Store only lightweight metadata in the session cookie — preview
-        # rows can be large and would blow the 4 KB cookie size limit,
-        # causing the session to be silently dropped by the browser.
+        # Metadata only: the rows are re-read from the saved file when
+        # needed (the session lives in server memory, web/sessions.py).
         session["spreadsheet_info"] = {
             "columns": columns,
             "sheets": sheets,
             "total_rows": total_rows,
             "file_name": file.filename,
             "active_sheet": active_sheet,
+            # Columns of numbers sent without their Excel formatting, each
+            # with an example, for a note on the page (excel.cell_text).
+            "unformatted_numbers": unformatted,
         }
 
         return jsonify({**session["spreadsheet_info"], "rows": rows})
@@ -637,15 +754,20 @@ def create_app(
         if not filepath or not os.path.exists(filepath):
             return jsonify({"error": "No spreadsheet uploaded"}), 400  # type: ignore[return-value]
 
-        data = request.get_json()
-        sheet_name = data.get("sheet") if data else None
+        data = _json_object()
+        if data is None:
+            return jsonify({"error": "Expected a JSON object"}), 400  # type: ignore[return-value]
+        sheet_name = data.get("sheet")
+        if sheet_name is not None and not isinstance(sheet_name, str):
+            return jsonify({"error": "sheet must be a string"}), 400  # type: ignore[return-value]
 
-        from mail_merge.excel import read_preview
+        from mail_merge.excel import number_format_columns, read_preview
 
         try:
             columns, rows, sheets, total_rows, active_sheet = read_preview(
                 filepath, sheet_name=sheet_name,
             )
+            unformatted = number_format_columns(filepath, active_sheet)
         except Exception as exc:
             logger.debug("change-sheet: read_preview failed", exc_info=True)
             return jsonify({"error": str(exc)}), 400  # type: ignore[return-value]
@@ -658,6 +780,7 @@ def create_app(
             "total_rows": total_rows,
             "file_name": info.get("file_name", "upload.xlsx"),
             "active_sheet": active_sheet,
+            "unformatted_numbers": unformatted,
         }
 
         return jsonify({**session["spreadsheet_info"], "rows": rows})
@@ -674,10 +797,18 @@ def create_app(
 
         filters = [f.strip() for f in filters_raw.split("\n") if f.strip()]
 
+        from mail_merge.addresses import parse_address, parse_addresses
         from mail_merge.api import apply_filters
         from mail_merge.excel import read_recipients
 
         try:
+            # The addresses typed on the Compose step, so a mistake is
+            # reported here and not by the test email two steps later.
+            parse_addresses(request.form.get("cc"), "CC")
+            parse_addresses(request.form.get("bcc"), "BCC")
+            parse_addresses(request.form.get("reply_to"), "reply-to")
+            if request.form.get("bcc_blast") == "true":
+                parse_address(request.form.get("bcc_blast_to", ""), "BCC-mode To")
             recipients = read_recipients(filepath, email_column, sheet_name=sheet)
             total_before = len(recipients)
             valid, invalid = _partition_emails(recipients, email_column)
@@ -710,7 +841,7 @@ def create_app(
 
     @app.route("/api/preview-template", methods=["POST"])
     def api_preview_template() -> Response:
-        data = request.get_json()
+        data = _json_object()
         if not data:
             return jsonify({"error": "No data provided"}), 400  # type: ignore[return-value]
 
@@ -719,14 +850,15 @@ def create_app(
         sample_data = data.get("sample_data", {})
         columns = data.get("columns", [])
 
-        from mail_merge.template import render, validate_template
+        from mail_merge.template import has_stray_braces, render, validate_template
 
+        is_html = bool(data.get("html"))
         bad_subject = validate_template(subject, columns)
-        bad_body = validate_template(body_text, columns)
+        bad_body = validate_template(body_text, columns, html=is_html)
         bad = sorted(set(bad_subject + bad_body))
 
         rendered_subject = render(subject, sample_data)
-        rendered_body = render(body_text, sample_data)
+        rendered_body = render(body_text, sample_data, html=is_html)
 
         html_warnings: list[str] = []
         if data.get("html"):
@@ -738,6 +870,7 @@ def create_app(
             "subject": rendered_subject,
             "body": rendered_body,
             "unresolved_placeholders": bad,
+            "stray_braces": has_stray_braces(subject) or has_stray_braces(body_text),
             "html_warnings": html_warnings,
         })
 
@@ -823,7 +956,14 @@ def create_app(
             kwargs["bcc_blast"] = True
             kwargs["bcc_blast_to"] = data.get("bcc_blast_to", "")
 
-        # Handle attachments
+        # Handle attachments. Each job gets its own copies (the page sends
+        # them again with every job), deleted when the job ends.
+        att_dirs: list[str] = []
+
+        def _remove_attachments() -> None:
+            for d in att_dirs:
+                shutil.rmtree(d, ignore_errors=True)
+
         attachments = [a for a in request.files.getlist("attachments") if a.filename]
         att_names: list[str] = []
         for att in attachments:
@@ -844,10 +984,12 @@ def create_app(
             att_paths: list[str] = []
             for att, name in zip(attachments, att_names):
                 att_dir = tempfile.mkdtemp(dir=tmp_dir)
+                att_dirs.append(att_dir)
                 att_path = os.path.join(att_dir, name)
                 # On Windows a drive-relative name ("C:x.txt") makes join
                 # discard att_dir, so check where the path actually lands.
                 if os.path.dirname(os.path.abspath(att_path)) != os.path.abspath(att_dir):
+                    _remove_attachments()
                     return jsonify({"error": f"Invalid attachment filename: {att.filename!r}"}), 400  # type: ignore[return-value]
                 att.save(att_path)
                 att_paths.append(att_path)
@@ -865,6 +1007,7 @@ def create_app(
         # Token provider for authenticated modes
         if mode in ("test_email", "send"):
             if not client_id:
+                _remove_attachments()
                 return jsonify({"error": "client_id is required for sending"}), 400  # type: ignore[return-value]
 
             # Silent only: a job has nobody to answer a sign-in prompt, so
@@ -881,10 +1024,11 @@ def create_app(
         # Checked again here: two requests can pass the early check.
         job = _job_store.create(mode)
         if job is None:
+            _remove_attachments()
             return jsonify({"error": "A send is already in progress"}), 409  # type: ignore[return-value]
         # The job's runner adds should_stop (checked before each email,
         # stopHonoured) and on_result (counts emails sent).
-        _job_store.start(job, kwargs)
+        _job_store.start(job, kwargs, on_finish=_remove_attachments)
 
         session["job_id"] = job.id
         return jsonify({"job_id": job.id})
@@ -929,6 +1073,9 @@ def create_app(
 
         result: dict[str, Any] = {
             "status": job.status.value,
+            # Whether the job did what was asked; "completed" only says the
+            # job ran to the end (a rejected email is still "completed").
+            "ok": job.ok,
             "error": job.error,
         }
         if job.results is not None:
@@ -940,6 +1087,7 @@ def create_app(
                     "success": r.success,
                     "status_code": r.status_code,
                     "error": r.error,
+                    "unknown": r.unknown,
                 }
                 for r in job.results
             ]
@@ -977,8 +1125,14 @@ def create_app(
         return os.environ.get(f"MERGEMAIL365_{key.upper()}") or _cached_config.get(key)
 
     def _get_client_tenant() -> tuple[str | None, str]:
-        client_id = session.get("client_id") or _get_config_value("client_id")
-        tenant_id = session.get("tenant_id") or _get_config_value("tenant_id") or "common"
+        # Values fixed on the command line win over anything a request set.
+        client_id = (
+            app.config["FIXED_CLIENT_ID"] or session.get("client_id") or _get_config_value("client_id")
+        )
+        tenant_id = (
+            app.config["FIXED_TENANT_ID"] or session.get("tenant_id")
+            or _get_config_value("tenant_id") or "common"
+        )
         return client_id, tenant_id
 
     return app

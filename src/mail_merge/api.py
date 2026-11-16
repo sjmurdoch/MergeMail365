@@ -5,19 +5,28 @@ import logging
 import mimetypes
 import os
 import re
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
-from email.utils import parseaddr
 from pathlib import Path
 
 from mail_merge import config as _config
+from mail_merge.addresses import parse_address, parse_addresses
 from mail_merge.config import load_config
-from mail_merge.excel import read_recipients
-from mail_merge.template import extract_placeholders, render, validate_template
+from mail_merge.excel import number_format_columns, read_recipients
+from mail_merge.template import (
+    extract_placeholders,
+    has_stray_braces,
+    render,
+    unusable_columns,
+    used_columns,
+    validate_template,
+)
 from mail_merge.sender import (
     EmailAddress,
     MAX_RECIPIENTS_PER_MESSAGE,
     MessageOptions,
+    SendAborted,
     SendResult,
     send_all,
     send_bcc_blast,
@@ -33,26 +42,20 @@ def _format_addrs(entries: list[EmailAddress]) -> str:
     return ", ".join(str(e) for e in entries)
 
 
-def _parse_one_addr(raw: str) -> EmailAddress:
-    """Parse 'Display Name <email>' or plain email into an EmailAddress."""
-    name, addr = parseaddr(raw.strip())
-    return EmailAddress(address=addr or raw.strip(), name=name or None)
+def _parse_one_addr(raw: str, label: str = "email") -> EmailAddress:
+    """Parse and validate one 'Display Name <email>' or plain address."""
+    return parse_address(raw, label)
 
 
 def _parse_address_entries(
-    value: str | list[str] | None,
+    value: str | list[str] | None, label: str = "email",
 ) -> list[EmailAddress] | None:
-    """Parse addresses (supporting 'Display Name <email>' format) into EmailAddress objects.
+    """Parse and validate addresses (see mail_merge.addresses).
 
-    Accepts a comma-separated string or list. Returns ``None`` when empty.
+    Returns ``None`` when there are none; raises ``ValueError`` for an entry
+    that isn't a valid address.
     """
-    if value is None:
-        return None
-    parts = value.split(",") if isinstance(value, str) else value
-    items = [s for a in parts if (s := a.strip())]
-    if not items:
-        return None
-    return [_parse_one_addr(raw) for raw in items]
+    return parse_addresses(value, label) or None
 
 
 def _normalize_column(
@@ -98,6 +101,45 @@ def _process_attachments(
             "contentBytes": base64.b64encode(content_bytes).decode("ascii"),
         })
     return attachment_list
+
+
+# The whole request, as sent: the same ~4 MB that the per-attachment limit
+# above assumes (3 MB of file is 4 MB once base64-encoded).
+_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+
+
+def _check_message_size(attachments: list[dict[str, str]] | None, body: str) -> None:
+    """Refuse attachments that fit one by one but not together.
+
+    Each is checked alone in _process_attachments(); several can still add
+    up to more than one message may carry, which Graph would then reject
+    for every recipient in turn.
+    """
+    if not attachments:
+        return
+    encoded = sum(len(a["contentBytes"]) for a in attachments)
+    total = encoded + len(body.encode("utf-8"))
+    if total > _MAX_MESSAGE_BYTES:
+        raise ValueError(
+            f"Attachments too large together: {len(attachments)} files come to "
+            f"{encoded * 3 / 4 / (1024 * 1024):.1f} MB; the limit for all attachments "
+            f"in one message is about 3 MB"
+        )
+
+
+def _check_options(batch_size: int | None, delay: float, max_retries: int, importance: str | None) -> None:
+    """Options with a fixed range, checked before anything is read or sent."""
+    if batch_size is not None and batch_size < 1:
+        # A negative slice would silently drop recipients from the end.
+        raise ValueError(f"batch_size must be at least 1, not {batch_size}")
+    if delay < 0:
+        raise ValueError(f"delay must not be negative, not {delay}")
+    if max_retries < 0:
+        raise ValueError(f"max_retries must not be negative, not {max_retries}")
+    if importance is not None and importance not in ("low", "normal", "high"):
+        raise ValueError(
+            f"Invalid importance {importance!r}; expected 'low', 'normal', or 'high'"
+        )
 
 
 _FULL_HTML_DOC_RE = re.compile(r"<!DOCTYPE|<html\b", re.IGNORECASE)
@@ -166,6 +208,29 @@ def _wrap_html_for_email(body: str) -> str:
     if _FULL_HTML_DOC_RE.search(body):
         return body
     return _EMAIL_HTML_HEAD + body + _EMAIL_HTML_TAIL
+
+
+def _require_test_sent(test_email: str, results: list[SendResult]) -> None:
+    """Raise if the test email was not accepted.
+
+    A test email exists to answer "can I send this?", so a rejected one is
+    a failure of the call, not a result to inspect: every caller (CLI, API,
+    web job) then reports it the same way.
+    """
+    failed = next((r for r in results if not r.success), None)
+    if failed is None:
+        return
+    if failed.unknown:
+        raise SendAborted(
+            f"No answer from Microsoft for the test email to {test_email}: it may have "
+            "been delivered. Check your inbox and Sent Items before trying again.",
+            results,
+        )
+    status = f"HTTP {failed.status_code}" if failed.status_code else "no response"
+    detail = f": {failed.error}" if failed.error else ""
+    raise SendAborted(
+        f"Test email to {test_email} was not sent ({status}){detail}", results,
+    )
 
 
 def _parse_filter(expr: str) -> tuple[str, str, str]:
@@ -244,6 +309,90 @@ def apply_filters(
     return result
 
 
+def resolve_ids(client_id: str | None, tenant_id: str | None) -> tuple[str | None, str]:
+    """The client and tenant IDs: argument, then MERGEMAIL365_CLIENT_ID /
+    MERGEMAIL365_TENANT_ID, then the config file; the tenant defaults to
+    "common"."""
+    config = load_config()
+    if not client_id:
+        client_id = os.environ.get("MERGEMAIL365_CLIENT_ID") or config.get("client_id")
+    if not tenant_id:
+        tenant_id = (
+            os.environ.get("MERGEMAIL365_TENANT_ID")
+            or config.get("tenant_id")
+            or "common"
+        )
+    return client_id, tenant_id
+
+
+def _log_sender(token: str) -> None:
+    """Say which account the emails go from, and warn if the cache holds
+    several (the acquire functions use the first)."""
+    from mail_merge.auth import account_name, cached_account_names
+
+    name = account_name(token)
+    if name:
+        logger.info("📤 Sending as %s", name)
+    names = cached_account_names()
+    if len(names) > 1:
+        logger.warning(
+            "%d accounts are signed in (%s); sending as %s. To send from another, "
+            "run mergemail365 --sign-out and sign in again with that account.",
+            len(names), ", ".join(names), name or names[0],
+        )
+
+
+def _skip_previously_sent(
+    recipients: list[dict[str, str]],
+    email_column: str,
+    previous: list[SendResult],
+    output: Path,
+) -> list[dict[str, str]]:
+    """Drop the rows a previous run sent. Rows are matched by address and
+    counted, not looked up: two recorded successes for an address skip the
+    first two rows with it, so a person with several rows (several emails)
+    still gets the ones not yet sent.
+
+    A row whose outcome is unknown (no answer from Graph) is skipped too,
+    with a warning: re-sending it could deliver the email twice."""
+    sent = Counter(r.email.lower() for r in previous if r.success)
+    unknown = Counter(r.email.lower() for r in previous if r.unknown)
+    remaining = []
+    for row in recipients:
+        address = row[email_column].lower()
+        if sent[address] > 0:
+            sent[address] -= 1
+        elif unknown[address] > 0:
+            unknown[address] -= 1
+            logger.warning(
+                "Not sending to %s again: %s records no answer from Microsoft, so the "
+                "email may have been delivered. If it wasn't, delete that line from "
+                "the report and run again.",
+                row[email_column], output,
+            )
+        else:
+            remaining.append(row)
+    return remaining
+
+
+def _previous_results_to_keep(
+    previous: list[SendResult], to_send: list[str],
+) -> list[SendResult]:
+    """The previous results that stay in the report: every success, and the
+    failures whose rows this run will not try again (rows held back by
+    ``batch_size``). Like :func:`_skip_previously_sent`, failures are
+    matched to rows by counting, earliest first."""
+    retrying = Counter(address.lower() for address in to_send)
+    kept = []
+    for r in previous:
+        address = r.email.lower()
+        if not r.success and not r.unknown and retrying[address] > 0:
+            retrying[address] -= 1
+            continue
+        kept.append(r)
+    return kept
+
+
 def send_merge(
     spreadsheet: str | Path,
     body: str | Path | None = None,
@@ -293,7 +442,8 @@ def send_merge(
             ``MERGEMAIL365_TENANT_ID``, config file, or defaults to ``"common"``.
         sheet: Worksheet name (default: first sheet).
         test_email: Send one email to this address using first recipient's data,
-            then return. Always sends regardless of ``send`` flag.
+            then return. Always sends regardless of ``send`` flag. Raises
+            ``SendAborted`` if the email is not accepted.
         send: If ``True``, authenticate and send emails. If ``False``
             (the default), validate and render only (dry run).
         output: Path to write a CSV report of results.
@@ -357,17 +507,11 @@ def send_merge(
             of an error; its ``results`` lists the emails attempted so far.
     """
     # --- Resolve client_id / tenant_id via config precedence ---
-    config = load_config()
+    client_id, tenant_id = resolve_ids(client_id, tenant_id)
 
-    if not client_id:
-        client_id = os.environ.get("MERGEMAIL365_CLIENT_ID") or config.get("client_id")
-
-    if not tenant_id:
-        tenant_id = (
-            os.environ.get("MERGEMAIL365_TENANT_ID")
-            or config.get("tenant_id")
-            or "common"
-        )
+    _check_options(batch_size, delay, max_retries, importance)
+    if not email_column:
+        raise ValueError("email_column is required")
 
     # --- BCC blast conflict checks and To address parsing ---
     blast_to: EmailAddress | None = None
@@ -380,7 +524,14 @@ def send_merge(
         if not bcc_blast_to:
             raise ValueError("bcc_blast_to is required when bcc_blast=True")
         # Support "Display Name <email>" format (RFC 2822)
-        blast_to = _parse_one_addr(bcc_blast_to)
+        blast_to = _parse_one_addr(bcc_blast_to, "BCC-mode To")
+
+    # --- Addresses the user typed: checked now, before anything is read or
+    # sent, like every other input (tests/test_input_validation.py) ---
+    cc_list = _parse_address_entries(cc, "CC")
+    bcc_list = _parse_address_entries(bcc, "BCC")
+    reply_to_list = _parse_address_entries(reply_to, "reply-to")
+    test_to_address = parse_address(test_email, "test email") if test_email else None
 
     # --- Read spreadsheet ---
     spreadsheet_path = Path(spreadsheet)
@@ -416,17 +567,13 @@ def send_merge(
             output_path = Path(output)
             if output_path.exists():
                 previous_results = read_csv(output_path)
-                successful_emails = {
-                    r.email.lower() for r in previous_results if r.success
-                }
                 total_before = len(recipients)
-                recipients = [
-                    r for r in recipients
-                    if r[email_column].lower() not in successful_emails
-                ]
+                recipients = _skip_previously_sent(
+                    recipients, email_column, previous_results, output_path,
+                )
                 logger.info(
                     "📋 %d previously sent, %d remaining of %d total",
-                    len(successful_emails),
+                    total_before - len(recipients),
                     len(recipients),
                     total_before,
                 )
@@ -435,10 +582,13 @@ def send_merge(
                     return previous_results
 
         if batch_size is not None:
-            recipients = recipients[:batch_size]
-            if not recipients:
-                logger.info("✅ No recipients in this batch")
-                return previous_results
+            recipients = recipients[:batch_size]  # at least 1: _check_options()
+
+        # The report keeps one line per row: a previous failure is replaced
+        # by this run's result when its row is tried again.
+        previous_results = _previous_results_to_keep(
+            previous_results, [r[email_column] for r in recipients],
+        )
 
     # --- Read body template ---
     if body_text is not None:
@@ -463,27 +613,44 @@ def send_merge(
     else:
         columns = list(recipients[0].keys())
         bad_subject = validate_template(subject, columns)
-        bad_body = validate_template(body_template, columns)
+        bad_body = validate_template(body_template, columns, html=html)
         bad = sorted(set(bad_subject + bad_body))
         if bad:
             raise ValueError(
                 f"Unresolvable placeholders: {', '.join(bad)} "
                 f"(available columns: {', '.join(columns)})"
             )
+        braced = unusable_columns(columns)
+        if braced:
+            logger.warning(
+                "⚠️  Column names containing { or } cannot be used as placeholders: %s",
+                ", ".join(braced),
+            )
 
-    # --- Validate importance ---
-    if importance is not None and importance not in ("low", "normal", "high"):
-        raise ValueError(
-            f"Invalid importance {importance!r}; expected 'low', 'normal', or 'high'"
-        )
+        # Numbers that Excel shows with a format (currency, separators,
+        # fixed decimals) go out as plain numbers: say so for the columns
+        # this message uses, since the spreadsheet looks different.
+        used = used_columns(subject, columns) | used_columns(body_template, columns, html=html)
+        for column, example in number_format_columns(spreadsheet_path, sheet).items():
+            if column in used:
+                logger.warning(
+                    "⚠️  Column %r is formatted as a number in Excel, but is sent without that "
+                    "formatting (for example: %s). Format the column as Text in Excel to "
+                    "control exactly what is sent.", column, example,
+                )
 
-    # --- Parse CC / BCC / reply-to ---
-    cc_list = _parse_address_entries(cc)
-    bcc_list = _parse_address_entries(bcc)
-    reply_to_list = _parse_address_entries(reply_to)
+    # A "{{" or "}}" left over is probably an unfinished placeholder
+    # ("{{name}"), which would otherwise go out exactly as typed.
+    for label, text in (("subject", subject), ("body", body_template)):
+        if has_stray_braces(text):
+            logger.warning(
+                "⚠️  The %s has a '{{' or '}}' that is not part of a {{placeholder}}; "
+                "it will be sent as written", label,
+            )
 
     # --- Process attachments ---
     attachment_list = _process_attachments(attachment)
+    _check_message_size(attachment_list, body_template)
 
     # --- Wrap HTML body for email compatibility ---
     if html:
@@ -519,7 +686,12 @@ def send_merge(
 
         from mail_merge.console import console
 
+        from mail_merge.auth import cached_account_names
+
+        signed_in = cached_account_names() if token_provider is None else []
+        sender_line = signed_in[0] if signed_in else "(you will be asked to sign in)"
         console.print()
+        console.print(f"[bold]From:[/bold]     {escape(sender_line)}")
         if bcc_blast:
             assert blast_to is not None
             reserved = 1 + len(msg_opts.cc or []) + len(msg_opts.bcc or [])
@@ -551,7 +723,16 @@ def send_merge(
     get_token = None
     if send or test_email:
         if token_provider is not None:
-            get_token = token_provider
+            provider = token_provider
+            logged_sender = False
+
+            def get_token() -> str:
+                nonlocal logged_sender
+                token = provider()
+                if not logged_sender:
+                    _log_sender(token)
+                    logged_sender = True
+                return token
         else:
             if not client_id:
                 raise RuntimeError(
@@ -581,6 +762,8 @@ def send_merge(
                         token = acquire_token(client_id, tenant_id)
             except Exception as exc:
                 raise RuntimeError(f"Authentication failed: {exc}") from exc
+
+            _log_sender(token)
 
             # Subsequent calls will use silent acquisition (cached refresh token)
             def get_token() -> str:
@@ -614,16 +797,20 @@ def send_merge(
                 "📧 BCC blast test: sending to %s via %s",
                 test_email, blast_to.address,
             )
-            return send_bcc_blast(
-                get_token, [test_email], blast_to, subject, body_template,
+            assert test_to_address is not None
+            results = send_bcc_blast(
+                get_token, [test_to_address.address], blast_to, subject, body_template,
                 dry_run=False, opts=msg_opts,
             )
+            _require_test_sent(test_email, results)
+            return results
 
         sample = recipients[0]
         rendered_subject = render(subject, sample)
-        rendered_body = render(body_template, sample)
+        rendered_body = render(body_template, sample, html=html)
+        assert test_to_address is not None
         test_to_name = sample.get(name_column, "").strip() or None if name_column else None
-        test_to = EmailAddress(address=test_email, name=test_to_name)
+        test_to = EmailAddress(address=test_to_address.address, name=test_to_name or test_to_address.name)
         logger.info(
             "📧 Sending test email to %s (using data from first recipient: %s)",
             test_email, sample.get(email_column, "?"),
@@ -631,6 +818,7 @@ def send_merge(
         result = send_one(
             get_token, test_to, rendered_subject, rendered_body, opts=msg_opts,
         )
+        _require_test_sent(test_email, [result])
         return [result]
 
     # --- Output CSV, written as the send goes ---
@@ -676,16 +864,10 @@ def send_merge(
         )
 
     # --- Merge with previous results when resuming ---
-    if previous_results:
-        merged: dict[str, SendResult] = {}
-        for r in previous_results:
-            merged[r.email.lower()] = r
-        for r in results:
-            merged[r.email.lower()] = r
-        results = list(merged.values())
+    results = previous_results + results
 
     # --- Report ---
-    print_summary(results)
+    print_summary(results, dry_run=not send and not test_email)
     if send and output:
         write_csv(results, output)
 

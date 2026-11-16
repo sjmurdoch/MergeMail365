@@ -536,7 +536,53 @@
         };
     }
 
+    /** Whether a finished test email or dry run did what was asked, from
+     *  its /api/job/<id>/status answer: `ok`, not `status`. A job whose
+     *  email Graph rejected still ends as "completed" (model: the page's
+     *  verdict in finishJob; invariant testPassHonest). */
+    function jobSucceeded(result) {
+        return result.ok === true;
+    }
+
+    /** What step 4 says about a test email that did not succeed, from its
+     *  /api/job/<id>/status answer. The advice comes from the failed
+     *  result's status code; the error text is never searched for digits,
+     *  which an address or a request ID can contain. With no result (the
+     *  job failed before sending, e.g. "Not signed in") or an unknown
+     *  outcome (no answer from Microsoft), the job's error is shown as it
+     *  is. */
+    function testEmailFailure(result) {
+        const failed = (result.results || []).find((r) => !r.success);
+        if (!failed || failed.unknown) return result.error || failed?.error || "Test email failed";
+        const code = failed.status_code;
+        if (!code) return `Could not reach Microsoft: ${failed.error || "no response"}`;
+        let advice;
+        if (code === 401 || code === 403) {
+            advice = "Permission denied. Check that your Azure AD app has Mail.Send permission and admin consent has been granted.";
+        } else if (code === 400) {
+            advice = "Email rejected by Microsoft. Check that all addresses, attachments, and fields are valid.";
+        } else if (code === 429) {
+            advice = "Rate limited by Microsoft. Wait a moment and retry.";
+        } else if (code >= 500 && code < 600) {
+            advice = "Microsoft server error. This is usually temporary. Try again in a few moments.";
+        } else {
+            return `Microsoft refused the email (HTTP ${code})${failed.error ? `: ${failed.error}` : ""}`;
+        }
+        return `${advice} (HTTP ${code})`;
+    }
+
+    /** An attachment's size for step 6: bytes under 1 KB (a 14-byte file
+     *  used to show as "0 KB"), then KB, then MB with one decimal. */
+    function formatSize(bytes) {
+        if (bytes < 1024) return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+        if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
     const WizardCore = {
+        jobSucceeded,
+        testEmailFailure,
+        formatSize,
         initialState,
         resetTestAndVerify,
         newMergeState,

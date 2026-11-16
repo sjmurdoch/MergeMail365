@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MergeMail365</title>
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
     <link rel="icon" href="{{ url_for('static', filename='icon-32.png') }}" type="image/png" sizes="32x32">
     <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css') }}">
@@ -41,8 +42,8 @@
         <!-- A send the app didn't finish last time (shown by render()) -->
         <div id="interrupted-send" class="callout callout-warning hidden" role="alert">
             <div id="interrupted-send-details"></div>
-            <button type="button" id="btn-interrupted-csv" class="outline" onclick="downloadInterruptedCsv()">Download CSV</button>
-            <button type="button" id="btn-dismiss-interrupted" class="outline secondary" onclick="dismissInterrupted()">Dismiss</button>
+            <button type="button" id="btn-interrupted-csv" class="outline" data-action="downloadInterruptedCsv()">Download CSV</button>
+            <button type="button" id="btn-dismiss-interrupted" class="outline secondary" data-action="dismissInterrupted()">Dismiss</button>
         </div>
 
         <!-- Auth -->
@@ -80,6 +81,7 @@
             <input type="file" id="spreadsheet-file" accept=".xlsx">
             <div id="spreadsheet-info" class="hidden">
                 <p id="spreadsheet-summary"></p>
+                <p id="number-format-note" class="hidden callout callout-info"></p>
                 <div>
                     <label for="sheet-select">Sheet</label>
                     <select id="sheet-select"><option value="">Default</option></select>
@@ -95,7 +97,7 @@
 
         <div class="nav-buttons">
             <div></div>
-            <button type="button" id="btn-next-1" onclick="goToStep(2)">Next &rarr;</button>
+            <button type="button" id="btn-next-1" data-action="goToStep(2)">Next &rarr;</button>
         </div>
     </div>
 
@@ -131,8 +133,8 @@
                 <legend>Message</legend>
                 <!-- Sending mode -->
                 <div class="mode-toggle" role="group">
-                    <button type="button" id="mode-individual" class="active-mode" onclick="setSendMode('individual')">Send as individual emails</button>
-                    <button type="button" id="mode-bcc" class="outline" onclick="setSendMode('bcc')">Send as BCC'd email</button>
+                    <button type="button" id="mode-individual" class="active-mode" data-action="setSendMode('individual')">Send as individual emails</button>
+                    <button type="button" id="mode-bcc" class="outline" data-action="setSendMode('bcc')">Send as BCC'd email</button>
                 </div>
                 <div id="bcc-blast-options" class="hidden">
                     <label for="bcc-blast-to"><em>To:</em> address when sending as BCC</label>
@@ -173,6 +175,7 @@
             <div id="placeholder-chips" class="hidden">
                 <small>Available placeholders (click to insert):</small>
                 <div class="chip-container" id="chips"></div>
+                <small id="chips-unusable"></small>
             </div>
             <div id="placeholder-errors" class="hidden callout callout-danger"></div>
             <div id="html-warnings" class="hidden callout callout-warning"></div>
@@ -225,8 +228,8 @@
             </section>
 
             <div class="nav-buttons">
-                <button type="button" class="outline" onclick="goToStep(1)">&larr; Back</button>
-                <button type="button" id="btn-next-2" onclick="goToStep(3)">Next &rarr;</button>
+                <button type="button" class="outline" data-action="goToStep(1)">&larr; Back</button>
+                <button type="button" id="btn-next-2" data-action="goToStep(3)">Next &rarr;</button>
             </div>
         </div>
     </div>
@@ -236,9 +239,9 @@
         <h3>Preview emails to send</h3>
         <div id="invalid-email-warning" class="hidden callout callout-warning"></div>
         <div class="preview-nav">
-            <button type="button" class="outline" onclick="changePreviewRecipient(-1)">&larr; Prev</button>
+            <button type="button" class="outline" data-action="changePreviewRecipient(-1)">&larr; Prev</button>
             <span id="preview-recipient-label">Previewing recipient 1 of ?</span>
-            <button type="button" class="outline" onclick="changePreviewRecipient(1)">Next &rarr;</button>
+            <button type="button" class="outline" data-action="changePreviewRecipient(1)">Next &rarr;</button>
         </div>
 
         <div class="preview-box">
@@ -275,8 +278,8 @@
         </details>
 
         <div class="nav-buttons">
-            <button type="button" class="outline" onclick="confirmGoBack(2)">&larr; Back</button>
-            <button type="button" id="btn-next-3" onclick="goToStep(4)">Next &rarr;</button>
+            <button type="button" class="outline" data-action="confirmGoBack(2)">&larr; Back</button>
+            <button type="button" id="btn-next-3" data-action="goToStep(4)">Next &rarr;</button>
         </div>
     </div>
 
@@ -300,16 +303,16 @@
         </div>
 
         <div class="button-row">
-            <button type="button" id="btn-send-test" onclick="sendTestEmail()">Send test email</button>
-            <button type="button" id="btn-retry-test" class="outline hidden" onclick="sendTestEmail()">Retry</button>
+            <button type="button" id="btn-send-test" data-action="sendTestEmail()">Send test email</button>
+            <button type="button" id="btn-retry-test" class="outline hidden" data-action="sendTestEmail()">Retry</button>
         </div>
 
         <div id="test-log" class="log-panel hidden"></div>
         <div id="test-result" class="hidden action-result"></div>
 
         <div class="nav-buttons">
-            <button type="button" class="outline" onclick="confirmGoBack(3)">&larr; Back</button>
-            <button type="button" id="btn-next-4" disabled onclick="goToStep(5)">Next &rarr;</button>
+            <button type="button" class="outline" data-action="confirmGoBack(3)">&larr; Back</button>
+            <button type="button" id="btn-next-4" disabled data-action="goToStep(5)">Next &rarr;</button>
         </div>
     </div>
 
@@ -322,8 +325,8 @@
         <div id="verify-result" class="hidden action-result"></div>
 
         <div class="nav-buttons">
-            <button type="button" class="outline" onclick="confirmGoBack(4)">&larr; Back</button>
-            <button type="button" id="btn-next-5" disabled onclick="goToStep(6)">Next &rarr;</button>
+            <button type="button" class="outline" data-action="confirmGoBack(4)">&larr; Back</button>
+            <button type="button" id="btn-next-5" disabled data-action="goToStep(6)">Next &rarr;</button>
         </div>
     </div>
 
@@ -341,13 +344,13 @@
             </div>
             <label for="send-confirm-input">Type <strong>SEND</strong> to confirm:</label>
             <input type="text" id="send-confirm-input" class="confirm-input" autocomplete="off">
-            <button type="button" id="btn-do-send" disabled onclick="startSend()">Send emails</button>
+            <button type="button" id="btn-do-send" disabled data-action="startSend()">Send emails</button>
         </div>
 
         <div id="send-progress" class="hidden">
             <div class="progress-info">
                 <span id="send-progress-text">Sending...</span>
-                <button type="button" id="btn-stop-send" class="outline secondary btn-stop" onclick="stopSend()">Stop sending</button>
+                <button type="button" id="btn-stop-send" class="outline secondary btn-stop" data-action="stopSend()">Stop sending</button>
             </div>
             <progress id="send-progress-bar" max="100" value="0"></progress>
         </div>
@@ -356,12 +359,12 @@
         <div id="send-result" class="hidden action-result"></div>
 
         <div class="nav-buttons" id="send-nav">
-            <button type="button" class="outline" id="btn-back-6" onclick="confirmGoBack(4)">&larr; Back</button>
+            <button type="button" class="outline" id="btn-back-6" data-action="confirmGoBack(4)">&larr; Back</button>
             <div></div>
         </div>
         <div class="nav-buttons hidden" id="send-done-nav">
-            <button type="button" id="btn-download-csv" class="outline" onclick="downloadCsv()">Download mail merge report</button>
-            <button type="button" id="btn-new-merge" onclick="newMerge()">New merge</button>
+            <button type="button" id="btn-download-csv" class="outline" data-action="downloadCsv()">Download mail merge report</button>
+            <button type="button" id="btn-new-merge" data-action="newMerge()">New merge</button>
         </div>
     </div>
 
@@ -371,7 +374,7 @@
             <p>Your security session has timed out due to inactivity or the 24-hour limit. To protect your data, the interface has been locked.</p>
             <p><strong>Don't worry:</strong> Your message subject and body have been saved to your browser and will be restored automatically.</p>
             <footer>
-                <button onclick="window.location.reload()">Restart session</button>
+                <button data-action="reloadPage()">Restart session</button>
             </footer>
         </article>
     </dialog>
@@ -380,11 +383,10 @@
 
 <footer class="app-footer">MergeMail365 v{{ app_version }}</footer>
 
-<script>
-const CSRF_TOKEN = {{ csrf_token | tojson }};
-</script>
 <script src="{{ url_for('static', filename='trix.js') }}"></script>
-<script>Trix.config.blockAttributes.default.tagName = "p";</script>
+<script src="{{ url_for('static', filename='trix-config.js') }}"></script>
+<script src="{{ url_for('static', filename='safe-html.js') }}"></script>
+<script src="{{ url_for('static', filename='template-core.js') }}"></script>
 <script src="{{ url_for('static', filename='wizard-core.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

@@ -1,5 +1,9 @@
 /* MergeMail365 — Wizard UI */
 
+// In a <meta> tag, not an inline script: the page's Content Security Policy
+// allows no inline script.
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -66,21 +70,17 @@ function getRecipients() { return state.getRecipients(); }
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-// Mirrors template.PLACEHOLDER_RE. Python's \w matches letters and digits
-// in any script, JavaScript's only ASCII ones, so the classes are spelled
-// out with the u flag: otherwise {{Prénom}} is substituted in the email but
-// not in the preview, and isn't checked against the columns.
-const PLACEHOLDER_SRC = String.raw`\{\{([\p{L}\p{N}_][\p{L}\p{N}_ ]*[\p{L}\p{N}_]|[\p{L}\p{N}_])\}\}`;
-function placeholderRe(flags = "") { return new RegExp(PLACEHOLDER_SRC, `u${flags}`); }
-
+// Placeholders ({{column name}}) are found, checked and substituted by
+// TemplateCore (template-core.js), which follows the same grammar and the
+// same test cases as template.py, so the preview shows what will be sent.
 function $(id) { return document.getElementById(id); }
 function hide(el) { if (typeof el === "string") el = $(el); el.classList.add("hidden"); }
 function show(el) { if (typeof el === "string") el = $(el); el.classList.remove("hidden"); }
-function escapeHtml(s) {
-    const d = document.createElement("div");
-    d.textContent = s;
-    return d.innerHTML;
-}
+// Markup is built with html`...` (every ${value} escaped) and put on the
+// page with setHtml(); nothing else in this file assigns innerHTML
+// (tests/test_spec_coverage.py TestHtmlSinks). See safe-html.js.
+const { html, joinHtml, setHtml } = SafeHtmlLib;
+function clear(el) { if (typeof el === "string") el = $(el); el.replaceChildren(); }
 
 // Requests the page waits for (WizardCore.startRequest): a response or job
 // completion is applied only while its request is current.
@@ -168,16 +168,33 @@ function updateStepUI(n) {
 
 function renderSpreadsheetSummary(data) {
     $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${data.total_rows} rows.`;
+    renderNumberFormatNote(data);
     if (data.total_rows > 99) {
-        $("spreadsheet-summary").innerHTML += ` <span class="badge badge-warning">Large file — filters required</span>`;
+        const badge = document.createElement("span");
+        badge.className = "badge badge-warning";
+        badge.textContent = "Large file — filters required";
+        $("spreadsheet-summary").append(" ", badge);
     }
+}
+
+// Dates and percentages are sent as Excel shows them, but other number
+// formats (currency symbols, thousands separators, fixed decimals) are not
+// applied: say which columns that affects. The tables below already show
+// exactly what will be sent.
+function renderNumberFormatNote(data) {
+    const el = $("number-format-note");
+    const columns = Object.entries(data.unformatted_numbers || {});
+    toggle(el, columns.length > 0);
+    if (columns.length === 0) return;
+    const examples = columns.map(([name, example]) => `${name} (for example ${example})`).join(", ");
+    el.textContent = `Numbers in ${columns.length === 1 ? "this column" : "these columns"} are sent without their Excel `
+        + `formatting, such as currency symbols, separators or fixed decimals: ${examples}. The table below shows `
+        + "exactly what will be sent. To control it, format the column as Text in Excel.";
 }
 
 function populateSheetSelect(sheets) {
     const sel = $("sheet-select");
-    sel.innerHTML = sheets.map(s =>
-        `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
-    ).join("");
+    setHtml(sel, sheets.map(s => html`<option value="${s}">${s}</option>`));
 }
 
 function populateColumnDropdowns(columns) {
@@ -310,14 +327,20 @@ function confirmGoBack(targetStep) {
 }
 
 function clearTestAndVerifyLogs() {
-    $("test-log").innerHTML = "";
+    clear("test-log");
     hide("test-log");
-    $("verify-log").innerHTML = "";
+    clear("verify-log");
 }
 
 // ---------------------------------------------------------------------------
 // Step 2: Compose — initialisation and validation
 // ---------------------------------------------------------------------------
+// A value the page saved in localStorage, or "" if there is none or
+// storage is unavailable.
+function savedSetting(key) {
+    try { return localStorage.getItem(key) || ""; } catch (_e) { return ""; }
+}
+
 function initComposeStep() {
     if (!state.spreadsheetData) return;
     const sd = state.spreadsheetData;
@@ -329,9 +352,11 @@ function initComposeStep() {
     buildComposePreviewTable(sd.columns, sd.rows, sd.total_rows);
 
     // Populate column dropdowns — preserve previous selections if they're
-    // still valid (user went back and came forward without changing data)
-    const prevEmail = $("email-column").value;
-    const prevName = $("name-column").value;
+    // still valid (user went back and came forward without changing data),
+    // or the ones saved before the app was last closed: on a fresh start
+    // the dropdowns are empty until a spreadsheet is uploaded.
+    const prevEmail = $("email-column").value || savedSetting("mm_email_col");
+    const prevName = $("name-column").value || savedSetting("mm_name_col");
     populateColumnDropdowns(sd.columns);
     if (prevEmail && sd.columns.includes(prevEmail)) {
         $("email-column").value = prevEmail;
@@ -373,8 +398,15 @@ function validateCompose() {
         alert("BCC mode requires a To: address.");
         return false;
     }
-    if (state.sendMode === "bcc" && placeholderRe().test(subject + body)) {
+    if (state.sendMode === "bcc" && TemplateCore.hasPlaceholders(subject + body)) {
         alert("BCC blast mode does not support {{placeholders}} in the subject or body. All recipients receive the same message.");
+        return false;
+    }
+    // A placeholder that names no column would otherwise only be refused
+    // later, by the test email or the dry run.
+    const bad = unresolvedPlaceholders();
+    if (state.sendMode !== "bcc" && bad.length > 0) {
+        alert(`No column named ${bad.map(p => `{{${p}}}`).join(", ")}. Fix the placeholder, or choose one from the list above the subject.`);
         return false;
     }
     // Quick pre-check using the total row count from the spreadsheet.
@@ -412,7 +444,7 @@ function setSendMode(mode) {
 function checkBccPlaceholders() {
     const subject = $("subject-input").value;
     const body = $("body-input").value;
-    const has = placeholderRe().test(subject + body);
+    const has = TemplateCore.hasPlaceholders(subject + body);
     if (has) {
         show("bcc-placeholder-warn");
     } else {
@@ -519,13 +551,15 @@ async function checkAuthStatus() {
 function showAuth(status) {
     const el = $("auth-display");
     if (status.authenticated) {
-        el.innerHTML = `<span class="dot green"></span> Signed in as <span class="email">${escapeHtml(status.email)}</span>`;
+        setHtml(el, html`<span class="dot green"></span> Signed in as <span class="email">${status.email}</span>`);
         if ($("test-email-input") && !$("test-email-input").value) {
             $("test-email-input").value = status.email;
+            // Step 4 shows its "Will send" line before this answer arrives.
+            updateTestPreview();
         }
         _auth.tokenExpiresAt = status.token_expires_at ? new Date(status.token_expires_at) : null;
     } else {
-        el.innerHTML = '<span class="dot gray"></span> Not signed in';
+        setHtml(el, html`<span class="dot gray"></span> Not signed in`);
         _auth.tokenExpiresAt = null;
     }
     updateSignInButton();
@@ -680,20 +714,21 @@ $("btn-test-connection").addEventListener("click", async () => {
         const data = await resp.json();
 
         // Build a summary of results
-        let summary = "";
+        let summary;
         if (data.error) {
-            summary = `<div class="callout callout-danger mt-0"><strong>Connection Error:</strong> ${escapeHtml(data.error)}</div>`;
+            summary = html`<div class="callout callout-danger mt-0"><strong>Connection Error:</strong> ${data.error}</div>`;
         } else if (data.token_valid) {
-            summary = `<div class="callout callout-success mt-0"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
+            summary = html`<div class="callout callout-success mt-0"><strong>Success:</strong> Connection is healthy and token is valid.</div>`;
         } else if (data.authority_reachable) {
-            summary = `<div class="callout callout-warning mt-0"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
+            summary = html`<div class="callout callout-warning mt-0"><strong>Partial Success:</strong> Authority is reachable, but you are not signed in or token has expired.</div>`;
         } else {
-            summary = `<div class="callout callout-danger mt-0"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
+            summary = html`<div class="callout callout-danger mt-0"><strong>Failure:</strong> Microsoft login authority is not reachable. Check your internet connection.</div>`;
         }
 
-        $("auth-diag-content").innerHTML = `${summary}<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        // The JSON holds the tenant ID, account names and error text.
+        setHtml($("auth-diag-content"), html`${summary}<pre>${JSON.stringify(data, null, 2)}</pre>`);
     } catch (e) {
-        $("auth-diag-content").innerHTML = `<div class="callout callout-danger mt-0"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
+        setHtml($("auth-diag-content"), html`<div class="callout callout-danger mt-0"><strong>Error:</strong> ${e.message}</div>`);
     }
 });
 
@@ -758,20 +793,15 @@ $("sheet-select").addEventListener("change", async () => {
 });
 
 function populateSelect(sel, cols, required) {
-    let html = required ? '<option value="">-- select --</option>' : '<option value="">-- none --</option>';
-    for (const c of cols) {
-        html += `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`;
-    }
-    sel.innerHTML = html;
+    const first = required ? html`<option value="">-- select --</option>` : html`<option value="">-- none --</option>`;
+    setHtml(sel, [first, ...cols.map(c => html`<option value="${c}">${c}</option>`)]);
 }
 
 function buildPreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#preview-table thead");
     const tbody = document.querySelector("#preview-table tbody");
-    thead.innerHTML = `<tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
-    tbody.innerHTML = rows.map(row =>
-        `<tr>${columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
-    ).join("");
+    setHtml(thead, html`<tr>${columns.map(c => html`<th>${c}</th>`)}</tr>`);
+    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
     // Show truncation notice if not all rows are displayed
     const caption = document.querySelector("#preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
@@ -785,10 +815,8 @@ function buildPreviewTable(columns, rows, totalRows) {
 function buildComposePreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#compose-preview-table thead");
     const tbody = document.querySelector("#compose-preview-table tbody");
-    thead.innerHTML = `<tr>${columns.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
-    tbody.innerHTML = rows.map(row =>
-        `<tr>${columns.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
-    ).join("");
+    setHtml(thead, html`<tr>${columns.map(c => html`<th>${c}</th>`)}</tr>`);
+    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
     const caption = document.querySelector("#compose-preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
         caption.textContent = `Showing ${rows.length} of ${totalRows} rows`;
@@ -801,8 +829,13 @@ function buildComposePreviewTable(columns, rows, totalRows) {
 function showPlaceholderChips(columns) {
     show("placeholder-chips");
     const container = $("chips");
-    container.innerHTML = "";
-    for (const col of columns) {
+    clear(container);
+    // A column whose name has a brace can't be named by a placeholder.
+    const unusable = TemplateCore.unusableColumns(columns);
+    $("chips-unusable").textContent = unusable.length > 0
+        ? `Not available as placeholders, because the name contains { or }: ${unusable.join(", ")}`
+        : "";
+    for (const col of columns.filter(c => !unusable.includes(c))) {
         const chip = document.createElement("span");
         chip.className = "chip";
         chip.textContent = `{{${col}}}`;
@@ -844,7 +877,7 @@ function showPlaceholderChips(columns) {
 function showFilterChips(columns) {
     show("filter-chips");
     const container = $("filter-chips-container");
-    container.innerHTML = "";
+    clear(container);
     for (const col of columns) {
         const chip = document.createElement("span");
         chip.className = "chip";
@@ -926,7 +959,7 @@ document.addEventListener('trix-before-paste', (e) => {
     if (!paste.html) return;
     const doc = document.implementation.createHTMLDocument("");
     const div = doc.createElement("div");
-    div.innerHTML = paste.html;
+    div.innerHTML = paste.html;  // inert document: nothing loads or runs
     // Remove empty paragraphs/divs (margin-only spacers)
     for (const el of div.querySelectorAll("p, div")) {
         if (!el.textContent.trim() && !el.querySelector("img, table")) {
@@ -1016,21 +1049,33 @@ $("bcc-input").addEventListener("input", onTemplateChange);
 $("reply-to-input").addEventListener("input", onTemplateChange);
 $("filter-input").addEventListener("input", onTemplateChange);
 
+// The placeholders in the subject and body that name no column. The body
+// of an HTML email is read as HTML (the editor writes {{R&amp;D budget}}).
+function unresolvedPlaceholders() {
+    if (!state.spreadsheetData) return [];
+    const columns = state.spreadsheetData.columns;
+    return [...new Set([
+        ...TemplateCore.unresolved($("subject-input").value, columns),
+        ...TemplateCore.unresolved($("body-input").value, columns, $("html-toggle").checked),
+    ])].sort();
+}
+
 function validatePlaceholders() {
     if (!state.spreadsheetData) return;
-    const subject = $("subject-input").value;
-    const body = $("body-input").value;
-    const combined = subject + body;
-    const used = [...combined.matchAll(placeholderRe("g"))].map(m => m[1]);
-    const colsLower = state.spreadsheetData.columns.map(c => c.toLowerCase());
-    const bad = used.filter(p => !colsLower.includes(p.toLowerCase()));
+    const messages = [];
+    const available = state.spreadsheetData.columns.join(", ");
+    for (const p of unresolvedPlaceholders()) {
+        messages.push(html`No column named <strong>{{${p}}}</strong>. Available: ${available}`);
+    }
+    // An unfinished placeholder, such as {{name}, would be sent as typed.
+    for (const [label, id] of [["subject", "subject-input"], ["body", "body-input"]]) {
+        if (TemplateCore.hasStrayBraces($(id).value)) {
+            messages.push(html`The ${label} has a <strong>{{</strong> or <strong>}}</strong> that is not part of a placeholder. It will be sent as written: check for a missing brace.`);
+        }
+    }
     const el = $("placeholder-errors");
-    if (bad.length > 0) {
-        const unique = [...new Set(bad)];
-        const available = state.spreadsheetData.columns.map(escapeHtml).join(", ");
-        el.innerHTML = unique.map(p =>
-            `No column named <strong>{{${escapeHtml(p)}}}</strong>. Available: ${available}`
-        ).join("<br>");
+    if (messages.length > 0) {
+        setHtml(el, joinHtml(messages, html`<br>`));
         show(el);
     } else {
         hide(el);
@@ -1062,62 +1107,48 @@ function validateHtmlBody() {
     const warnings = [];
 
     if (!HTML_TAG_RE.test(body)) {
-        warnings.push(
-            "<strong>No HTML tags detected.</strong> The body appears to be plain text " +
-            "but will be sent as HTML. Line breaks will not be visible to recipients. " +
-            "Use <code>&lt;br&gt;</code> for line breaks or <code>&lt;p&gt;</code> for paragraphs."
-        );
+        warnings.push(html`<strong>No HTML tags detected.</strong> The body appears to be plain text
+            but will be sent as HTML. Line breaks will not be visible to recipients.
+            Use <code>&lt;br&gt;</code> for line breaks or <code>&lt;p&gt;</code> for paragraphs.`);
     } else if (/\n/.test(body) && !BLOCK_OR_BR_RE.test(body)) {
-        warnings.push(
-            "<strong>Line breaks may not render.</strong> The body contains newlines but no " +
-            "<code>&lt;br&gt;</code>, <code>&lt;p&gt;</code>, or <code>&lt;div&gt;</code> tags. " +
-            "Newlines are ignored in HTML — use <code>&lt;br&gt;</code> for line breaks."
-        );
+        warnings.push(html`<strong>Line breaks may not render.</strong> The body contains newlines but no
+            <code>&lt;br&gt;</code>, <code>&lt;p&gt;</code>, or <code>&lt;div&gt;</code> tags.
+            Newlines are ignored in HTML — use <code>&lt;br&gt;</code> for line breaks.`);
     }
 
     if (STRIPPED_TAGS_RE.test(body)) {
         const found = [];
         for (const tag of ["script", "iframe", "form", "embed", "object"]) {
-            if (new RegExp(`<${tag}\\b`, "i").test(body)) found.push(`&lt;${tag}&gt;`);
+            if (new RegExp(`<${tag}\\b`, "i").test(body)) found.push(`<${tag}>`);
         }
-        warnings.push(
-            `<strong>Unsupported tags:</strong> ${found.join(", ")} will be stripped by email clients.`
-        );
+        warnings.push(html`<strong>Unsupported tags:</strong> ${found.join(", ")} will be stripped by email clients.`);
     }
 
     if (EXT_STYLESHEET_RE.test(body)) {
-        warnings.push(
-            "<strong>External stylesheets ignored:</strong> <code>&lt;link rel=\"stylesheet\"&gt;</code> " +
-            "is not supported in email. Use inline <code>style</code> attributes instead."
-        );
+        warnings.push(html`<strong>External stylesheets ignored:</strong> <code>&lt;link rel="stylesheet"&gt;</code>
+            is not supported in email. Use inline <code>style</code> attributes instead.`);
     }
 
     if (STYLE_BLOCK_RE.test(body)) {
-        warnings.push(
-            "<strong>Inline &lt;style&gt; blocks may be stripped</strong> by email clients " +
-            "(Gmail, Outlook.com). Use inline <code>style</code> attributes on each " +
-            "element for reliable rendering."
-        );
+        warnings.push(html`<strong>Inline &lt;style&gt; blocks may be stripped</strong> by email clients
+            (Gmail, Outlook.com). Use inline <code>style</code> attributes on each
+            element for reliable rendering.`);
     }
 
     if (FULL_HTML_DOC_RE.test(body)) {
-        warnings.push(
-            "<strong>Full HTML document tags detected</strong> (&lt;!DOCTYPE&gt;, &lt;html&gt;, " +
-            "&lt;head&gt;, &lt;body&gt;). These will be stripped before sending — the app " +
-            "always adds its own email compatibility wrappers. Just provide the body content."
-        );
+        warnings.push(html`<strong>Full HTML document tags detected</strong> (&lt;!DOCTYPE&gt;, &lt;html&gt;,
+            &lt;head&gt;, &lt;body&gt;). These will be stripped before sending — the app
+            always adds its own email compatibility wrappers. Just provide the body content.`);
     }
 
     const sizeKb = new Blob([body]).size / 1024 + EMAIL_WRAPPER_KB;
     if (sizeKb > GMAIL_CLIP_KB) {
-        warnings.push(
-            `<strong>Large body (~${Math.round(sizeKb)} KB with email wrapper):</strong> Gmail clips ` +
-            "emails over ~102 KB. Recipients may see a truncated message."
-        );
+        warnings.push(html`<strong>Large body (~${Math.round(sizeKb)} KB with email wrapper):</strong> Gmail clips
+            emails over ~102 KB. Recipients may see a truncated message.`);
     }
 
     if (warnings.length > 0) {
-        el.innerHTML = warnings.join("<hr>");
+        setHtml(el, joinHtml(warnings, html`<hr>`));
         show(el);
     } else {
         hide(el);
@@ -1139,6 +1170,15 @@ async function loadPreview(isCurrent = () => true) {
         form.set("filters", $("filter-input").value);
         if ($("sheet-select").value) {
             form.set("sheet", $("sheet-select").value);
+        }
+        // Checked by the server with the recipients, so a mistyped address
+        // is reported now.
+        form.set("cc", $("cc-input").value);
+        form.set("bcc", $("bcc-input").value);
+        form.set("reply_to", $("reply-to-input").value);
+        if (state.sendMode === "bcc") {
+            form.set("bcc_blast", "true");
+            form.set("bcc_blast_to", $("bcc-blast-to").value);
         }
 
         const resp = await apiFetch("/api/get-recipients", {
@@ -1183,6 +1223,18 @@ async function loadPreview(isCurrent = () => true) {
     }
 }
 
+// Show an HTML email in the preview frame. Each preview gets a new frame,
+// a copy of the empty one in index.html (so still sandbox=""): on Windows,
+// WebView2 left the reused frame blank after New merge, for every recipient
+// (phase H), which Chromium doesn't reproduce.
+function showPreviewHtml(doc) {
+    const old = $("preview-body-html");
+    const frame = old.cloneNode(false);
+    frame.removeAttribute("srcdoc");
+    frame.srcdoc = doc;  // sandbox="" (no script, no forms)
+    old.replaceWith(frame);
+}
+
 function renderPreviewRecipient() {
     const recipients = getRecipients();
     if (!recipients || recipients.length === 0) return;
@@ -1192,18 +1244,17 @@ function renderPreviewRecipient() {
 
     // Client-side template rendering for preview
     // In BCC mode all recipients get the same message — no substitution
+    // In an HTML body the values are escaped, as they are when sent.
+    const isHtml = $("html-toggle").checked;
     const rendered_subject = state.sendMode === "bcc" ? subject : renderTemplate(subject, row);
-    const rendered_body = state.sendMode === "bcc" ? body : renderTemplate(body, row);
+    const rendered_body = state.sendMode === "bcc" ? body : renderTemplate(body, row, isHtml);
 
     $("preview-subject").textContent = rendered_subject;
-    const isHtml = $("html-toggle").checked;
     if (isHtml) {
         hide("preview-body");
         show("preview-body-html");
         const w = state.emailWrapper;
-        $("preview-body-html").srcdoc = w
-            ? w.head + stripHtmlDocTags(rendered_body) + w.tail
-            : rendered_body;
+        showPreviewHtml(w ? w.head + stripHtmlDocTags(rendered_body) + w.tail : rendered_body);
     } else {
         show("preview-body");
         hide("preview-body-html");
@@ -1232,14 +1283,8 @@ function renderPreviewRecipient() {
     $("preview-recipient-label").textContent = `Previewing recipient ${state.previewIndex + 1} of ${recipients.length}`;
 }
 
-function renderTemplate(template, data) {
-    const lowerData = {};
-    for (const [k, v] of Object.entries(data)) {
-        lowerData[k.toLowerCase()] = v;
-    }
-    return template.replace(placeholderRe("g"), (match, key) => {
-        return lowerData[key.toLowerCase()] !== undefined ? lowerData[key.toLowerCase()] : match;
-    });
+function renderTemplate(template, data, isHtml = false) {
+    return TemplateCore.render(template, data, isHtml);
 }
 
 function changePreviewRecipient(delta) {
@@ -1257,10 +1302,8 @@ function buildRecipientsTable() {
     const cols = [emailCol, ...state.spreadsheetData.columns.filter(c => c !== emailCol)];
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
-    thead.innerHTML = `<tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr>`;
-    tbody.innerHTML = recipients.map(row =>
-        `<tr>${cols.map(c => `<td>${escapeHtml(row[c] || "")}</td>`).join("")}</tr>`
-    ).join("");
+    setHtml(thead, html`<tr>${cols.map(c => html`<th>${c}</th>`)}</tr>`);
+    setHtml(tbody, recipients.map(row => html`<tr>${cols.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
 }
 
 function showInvalidEmailWarning(invalidEmails, totalBefore) {
@@ -1272,12 +1315,8 @@ function showInvalidEmailWarning(invalidEmails, totalBefore) {
     const recipients = getRecipients();
     const validCount = recipients ? recipients.length : 0;
     const skippedList = invalidEmails.map(e =>
-        `<li><strong>${escapeHtml(e.address || "(empty)")}</strong>: ${escapeHtml(e.reason)}</li>`
-    ).join("");
-    el.innerHTML =
-        `<strong>${invalidEmails.length} invalid email${invalidEmails.length > 1 ? " addresses" : " address"} skipped</strong>` +
-        ` (${validCount} of ${totalBefore} recipients remain)` +
-        `<ul class="skipped-list">${skippedList}</ul>`;
+        html`<li><strong>${e.address || "(empty)"}</strong>: ${e.reason}</li>`);
+    setHtml(el, html`<strong>${invalidEmails.length} invalid email${invalidEmails.length > 1 ? " addresses" : " address"} skipped</strong> (${validCount} of ${totalBefore} recipients remain)<ul class="skipped-list">${skippedList}</ul>`);
     show(el);
 }
 
@@ -1297,10 +1336,7 @@ function updateTestPreview() {
     const subject = $("subject-input").value;
     const rendered = renderTemplate(subject, row);
     const testAddr = $("test-email-input").value || "(enter test address above)";
-    $("test-preview-info").innerHTML =
-        `<strong>To:</strong> ${escapeHtml(testAddr)}<br>` +
-        `<strong>Subject:</strong> ${escapeHtml(rendered)}<br>` +
-        `<small>Using data from first recipient: ${escapeHtml(row[$("email-column").value] || "?")}</small>`;
+    setHtml($("test-preview-info"), html`<strong>To:</strong> ${testAddr}<br><strong>Subject:</strong> ${rendered}<br><small>Using data from first recipient: ${row[$("email-column").value] || "?"}</small>`);
 }
 
 $("test-email-input").addEventListener("input", updateTestPreview);
@@ -1315,13 +1351,13 @@ function sendTestEmail() {
 async function runJob(mode, id) {
     const isCurrent = () => requestIsCurrent(id);
     const logPanel = mode === "test_email" ? "test-log" : "verify-log";
-    if (mode === "test_email") {
-        show("test-log");
-    } else {
+    // New merge hides both panels.
+    show(logPanel);
+    if (mode !== "test_email") {
         const recipients = getRecipients();
         $("verify-count").textContent = recipients ? recipients.length : "?";
     }
-    $(logPanel).innerHTML = "";
+    clear(logPanel);
     saveState();
 
     const form = buildJobFormData(mode);
@@ -1338,16 +1374,27 @@ async function runJob(mode, id) {
         }
         await dispatch({ type: "jobStarted", id, jobId: data.job_id });
         streamEvents(data.job_id, logPanel, (result) => {
-            const ok = result.status === "completed";
+            // result.ok, not the status: a job whose email was rejected
+            // still runs to the end (spec/wizard.qnt, testPassHonest).
+            const ok = WizardCore.jobSucceeded(result);
             if (mode === "test_email") {
-                completed(ok, ok ? "Test email sent successfully!" : categoriseError(result.error || "Test email failed"));
+                completed(ok, ok ? "Test email sent successfully!" : WizardCore.testEmailFailure(result));
             } else {
-                completed(ok, ok ? dryRunSummary() : result.error || "Verification failed");
+                completed(ok, ok ? dryRunSummary() : jobFailureText(result, "Verification failed"));
             }
         }, null, isCurrent);
     } catch (e) {
         if (isCurrent()) await completed(false, `Error: ${e.message}`);
     }
+}
+
+// Why a job that didn't succeed failed: its error, or the first rejected
+// email's, or `fallback`.
+function jobFailureText(result, fallback) {
+    if (result.error) return result.error;
+    const failed = (result.results || []).find(r => !r.success);
+    if (failed) return `${failed.status_code || ""} ${failed.error || ""}`.trim() || fallback;
+    return fallback;
 }
 
 // What a passed dry run reports: the count, the time it will take, and a
@@ -1377,21 +1424,18 @@ function prepareSend() {
     $("send-count").textContent = n;
 
     // Build details
-    let details = "";
+    const details = [];
     const authEmail = $("auth-display").querySelector(".email");
-    if (authEmail) details += `<strong>From:</strong> ${escapeHtml(authEmail.textContent)}<br>`;
-    details += `<strong>Recipients:</strong> ${n}<br>`;
-    if ($("cc-input").value) details += `<strong>CC:</strong> ${escapeHtml($("cc-input").value)}<br>`;
-    if ($("bcc-input").value) details += `<strong>BCC:</strong> ${escapeHtml($("bcc-input").value)}<br>`;
+    if (authEmail) details.push(html`<strong>From:</strong> ${authEmail.textContent}<br>`);
+    details.push(html`<strong>Recipients:</strong> ${n}<br>`);
+    if ($("cc-input").value) details.push(html`<strong>CC:</strong> ${$("cc-input").value}<br>`);
+    if ($("bcc-input").value) details.push(html`<strong>BCC:</strong> ${$("bcc-input").value}<br>`);
     const attInput = $("attachment-input");
     if (attInput.files.length > 0) {
-        const attList = Array.from(attInput.files).map(f => {
-            const sizeKb = (f.size / 1024).toFixed(0);
-            return `${escapeHtml(f.name)} (${sizeKb} KB)`;
-        });
-        details += `<strong>Attachments:</strong> ${attList.join(", ")}<br>`;
+        const attList = Array.from(attInput.files).map(f => `${f.name} (${WizardCore.formatSize(f.size)})`);
+        details.push(html`<strong>Attachments:</strong> ${attList.join(", ")}<br>`);
     }
-    $("send-confirm-details").innerHTML = details;
+    setHtml($("send-confirm-details"), details);
 
     state.sendOutcome = null;
     $("send-confirm-input").value = "";
@@ -1407,7 +1451,7 @@ function startSend() {
 
 // The "startSendJob" effect: start the send for request `id`.
 async function startSendJob(id) {
-    $("send-log").innerHTML = "";
+    clear("send-log");
     $("send-progress-text").textContent = "Sending...";
     $("send-progress-bar").value = 0;
     window.addEventListener("beforeunload", beforeUnloadWarn);
@@ -1470,32 +1514,44 @@ async function fetchResults(jobId) {
 function showResults(data) {
     window.removeEventListener("beforeunload", beforeUnloadWarn);
     const summary = data.summary || {};
-    let html = `<h4>Results</h4>`;
+    const parts = [html`<h4>Results</h4>`];
     if (data.status === "stopped") {
-        html += `<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`;
+        parts.push(html`<div class="callout callout-warning">Sending was stopped. Recipients not listed below were not sent an email.</div>`);
     } else if (data.status === "failed") {
-        html += `<div class="callout callout-danger">Sending failed: ${escapeHtml(data.error || "unknown error")}. Recipients not listed below were not sent an email.</div>`;
+        parts.push(html`<div class="callout callout-danger">Sending failed: ${data.error || "unknown error"}. Recipients not listed below were not sent an email.</div>`);
     }
-    html += `<p><strong>Total:</strong> ${summary.total || 0} | `;
-    html += `<span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | `;
-    html += `<span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span></p>`;
+    const unknownCount = summary.unknown
+        ? html` | <span class="unknown"><strong>Unknown:</strong> ${summary.unknown}</span>`
+        : "";
+    parts.push(html`<p><strong>Total:</strong> ${summary.total || 0} | <span class="success"><strong>Sent:</strong> ${summary.sent || 0}</span> | <span class="failure"><strong>Failed:</strong> ${summary.failed || 0}</span>${unknownCount}</p>`);
+    if (summary.unknown) {
+        parts.push(html`<div class="callout callout-warning">Microsoft did not answer for ${summary.unknown === 1 ? "one email" : `${summary.unknown} emails`}, which may have been delivered. Check Sent Items before sending ${summary.unknown === 1 ? "it" : "them"} again.</div>`);
+    }
 
     if (state.sendResults.length > 0) {
-        html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>`;
-        for (const r of state.sendResults) {
-            const cls = r.success ? "success" : "failure";
-            html += `<tr class="${cls}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : "Failed"} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${escapeHtml(r.error || "")}</td></tr>`;
-        }
-        html += `</tbody></table>`;
+        const rows = state.sendResults.map(r => html`<tr class="${resultClass(r)}"><td>${r.email}</td><td>${resultLabel(r)} ${r.status_code ? `(${r.status_code})` : ""}</td><td>${r.error || ""}</td></tr>`);
+        parts.push(html`<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table>`);
     }
 
-    $("send-result").innerHTML = html;
+    setHtml($("send-result"), parts);
+}
+
+// One send result, as the results tables show it. An unknown outcome (no
+// answer from Microsoft) may have been delivered, so it is not "Failed".
+function resultClass(r) {
+    if (r.success) return "success";
+    return r.unknown ? "unknown" : "failure";
+}
+
+function resultLabel(r) {
+    if (r.success) return "Sent";
+    return r.unknown ? "Unknown: may have been delivered" : "Failed";
 }
 
 // The "showSendError" effect.
 function showSendError(message) {
     window.removeEventListener("beforeunload", beforeUnloadWarn);
-    $("send-result").innerHTML = `<div class="callout callout-danger">${escapeHtml(message)}</div>`;
+    setHtml($("send-result"), html`<div class="callout callout-danger">${message}</div>`);
 }
 
 function sanitizeCsvValue(val) {
@@ -1513,20 +1569,16 @@ function downloadCsv() {
 // The "showInterrupted" effect: what each unfinished send had sent.
 // Addresses come from the spreadsheet, so they are escaped.
 function showInterrupted() {
-    let html = "";
+    const parts = [];
     for (const send of state.interrupted) {
         const sent = send.results.filter(r => r.success).length;
-        html += `<p><strong>The app closed while sending</strong> (started ${escapeHtml(send.started || "at an unknown time")}). `;
-        html += `${sent} email${sent === 1 ? " was" : "s were"} recorded as sent. Recipients not listed were not sent an email, except perhaps the one being sent when the app stopped.</p>`;
+        parts.push(html`<p><strong>The app closed while sending</strong> (started ${send.started || "at an unknown time"}). ${sent} email${sent === 1 ? " was" : "s were"} recorded as sent. Recipients not listed were not sent an email, except perhaps the one being sent when the app stopped.</p>`);
         if (send.results.length > 0) {
-            html += `<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th></tr></thead><tbody>`;
-            for (const r of send.results) {
-                html += `<tr class="${r.success ? "success" : "failure"}"><td>${escapeHtml(r.email)}</td><td>${r.success ? "Sent" : `Failed: ${escapeHtml(r.error || "")}`}</td></tr>`;
-            }
-            html += `</tbody></table>`;
+            const rows = send.results.map(r => html`<tr class="${resultClass(r)}"><td>${r.email}</td><td>${r.success || r.unknown ? resultLabel(r) : `Failed: ${r.error || ""}`}</td></tr>`);
+            parts.push(html`<table class="striped results-table"><thead><tr><th>Email</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`);
         }
     }
-    $("interrupted-send-details").innerHTML = html;
+    setHtml($("interrupted-send-details"), parts);
 }
 
 function downloadInterruptedCsv() {
@@ -1539,9 +1591,9 @@ function dismissInterrupted() {
 }
 
 function saveCsv(results, fileName) {
-    let csv = "email,success,status_code,error\n";
+    let csv = "email,success,status_code,error,unknown\n";
     for (const r of results) {
-        csv += `"${sanitizeCsvValue(r.email)}",${r.success},${r.status_code || ""},"${sanitizeCsvValue((r.error || "").replace(/"/g, '""'))}"\n`;
+        csv += `"${sanitizeCsvValue(r.email)}",${r.success},${r.status_code || ""},"${sanitizeCsvValue((r.error || "").replace(/"/g, '""'))}",${Boolean(r.unknown)}\n`;
     }
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -1570,8 +1622,8 @@ function clearForm() {
     // Clear Step 2 — compose fields
     $("subject-input").value = "";
     $("body-input").value = "";
-    $("email-column").innerHTML = '<option value="">-- select --</option>';
-    $("name-column").innerHTML = '<option value="">-- none --</option>';
+    setHtml($("email-column"), html`<option value="">-- select --</option>`);
+    setHtml($("name-column"), html`<option value="">-- none --</option>`);
     $("html-toggle").checked = false;
     $("source-toggle").checked = false;
     if (state.trixEditor) {
@@ -1603,24 +1655,24 @@ function clearForm() {
     $("preview-body").textContent = "";
     hide("preview-body-html");
     hide("invalid-email-warning");
-    document.querySelector("#recipients-table thead").innerHTML = "";
-    document.querySelector("#recipients-table tbody").innerHTML = "";
+    clear(document.querySelector("#recipients-table thead"));
+    clear(document.querySelector("#recipients-table tbody"));
 
     // Clear Step 4 (Test)
     $("test-email-input").value = "";
-    $("test-log").innerHTML = "";
+    clear("test-log");
     hide("test-log");
-    $("test-result").innerHTML = "";
+    clear("test-result");
 
     // Clear Step 5 (Verify)
-    $("verify-log").innerHTML = "";
+    clear("verify-log");
     hide("verify-log");
-    $("verify-result").innerHTML = "";
+    clear("verify-result");
 
     // Clear Step 6 (Send)
     $("send-confirm-input").value = "";
-    $("send-log").innerHTML = "";
-    $("send-result").innerHTML = "";
+    clear("send-log");
+    clear("send-result");
     $("send-progress-bar").value = 0;
 
     // Clear localStorage
@@ -1774,29 +1826,35 @@ function updateSessionTimer() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Categorised error messages for test email
-// ---------------------------------------------------------------------------
-function categoriseError(msg) {
-    if (!msg) return msg;
-    if (/401|403|Forbidden|Unauthorized/i.test(msg)) {
-        return "Permission denied. Check that your Azure AD app has Mail.Send permission and admin consent has been granted.";
-    }
-    if (/400|Bad Request/i.test(msg)) {
-        return "Email rejected by Microsoft. Check that all addresses, attachments, and fields are valid.";
-    }
-    if (/429|Too Many Requests|throttl/i.test(msg)) {
-        return "Rate limited by Microsoft. Wait a moment and retry.";
-    }
-    if (/5\d\d|Server Error|Internal/i.test(msg)) {
-        return "Microsoft server error. This is usually temporary. Try again in a few moments.";
-    }
-    return msg;
-}
 
 // ---------------------------------------------------------------------------
-// Expose functions called from HTML onclick attributes
+// Buttons. The template names what each does in a data-action attribute,
+// written as a call: data-action="goToStep(2)". No inline onclick handlers:
+// the page's Content Security Policy forbids inline script, so that injected
+// markup can't run any either. Only the functions listed here can be called,
+// with at most one number or quoted-string argument.
 // ---------------------------------------------------------------------------
+const CLICK_ACTIONS = {
+    goToStep, setSendMode, confirmGoBack, changePreviewRecipient, sendTestEmail,
+    startSend, stopSend, downloadCsv, newMerge, dismissInterrupted, downloadInterruptedCsv,
+    reloadPage: () => window.location.reload(),
+};
+
+function runDataAction(text) {
+    const m = /^(\w+)\((?:'([^']*)'|(-?\d+))?\)$/.exec(text);
+    const action = m && Object.hasOwn(CLICK_ACTIONS, m[1]) ? CLICK_ACTIONS[m[1]] : null;
+    if (!action) throw new Error(`Unknown data-action: ${text}`);
+    if (m[2] !== undefined) return action(m[2]);
+    if (m[3] !== undefined) return action(Number(m[3]));
+    return action();
+}
+
+document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-action]");
+    if (el && !el.disabled) runDataAction(el.dataset.action);
+});
+
+// Also on window, for the browser tests and the console.
 window.goToStep = goToStep;
 window.setSendMode = setSendMode;
 window.confirmGoBack = confirmGoBack;
@@ -1835,8 +1893,13 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             localStorage.setItem("mm_subject", $("subject-input").value);
             localStorage.setItem("mm_body", $("body-input").value);
-            localStorage.setItem("mm_email_col", $("email-column").value);
-            localStorage.setItem("mm_name_col", $("name-column").value);
+            // Only once the dropdowns list a spreadsheet's columns: before
+            // an upload they are empty, and saving them would wipe the
+            // columns chosen before the app was last closed.
+            if ($("email-column").options.length > 1) {
+                localStorage.setItem("mm_email_col", $("email-column").value);
+                localStorage.setItem("mm_name_col", $("name-column").value);
+            }
             localStorage.setItem("mm_html", $("html-toggle").checked ? "1" : "");
         } catch (_e) { /* ignore */ }
     }, 5000);

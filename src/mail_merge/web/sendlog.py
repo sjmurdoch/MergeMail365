@@ -12,11 +12,11 @@ user dismisses the report.
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
 
+from mail_merge._paths import open_private_append, private_dir
 from mail_merge.sender import SendResult
 
 logger = logging.getLogger(__name__)
@@ -30,14 +30,12 @@ class SendLog:
         return self.directory / f"send-{job_id}.jsonl"
 
     def _append(self, job_id: str, entry: dict[str, Any]) -> None:
-        path = self._path(job_id)
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
+        with open_private_append(self._path(job_id)) as f:
             f.write(json.dumps(entry) + "\n")
 
     def start(self, job_id: str) -> None:
         try:
-            self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            private_dir(self.directory)
             self._append(job_id, {"started": time.strftime("%Y-%m-%d %H:%M:%S")})
         except OSError:
             logger.warning("Could not write the send log in %s", self.directory, exc_info=True)
@@ -47,6 +45,7 @@ class SendLog:
             self._append(job_id, {
                 "email": result.email, "success": result.success,
                 "status_code": result.status_code, "error": result.error,
+                "unknown": result.unknown,
             })
         except OSError:
             logger.warning("Could not write the send log in %s", self.directory, exc_info=True)

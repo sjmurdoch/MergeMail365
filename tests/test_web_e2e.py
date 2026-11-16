@@ -548,18 +548,32 @@ class TestComposeStep:
     def test_trix_paste_does_not_run_pasted_handlers(
         self, authenticated_page: Page, sample_xlsx: Path,
     ):
-        """Event handlers in pasted HTML must not run while it is being cleaned."""
+        """Event handlers in pasted HTML must not run while it is being cleaned,
+        and its images must not load (the inert document in app.js)."""
         page = authenticated_page
         _upload_and_go_to_compose(page, sample_xlsx)
         page.check("#html-toggle")
         page.wait_for_function("() => window.state.trixEditor !== null")
+        requested: list[str] = []
+        page.on("request", lambda request: requested.append(request.url))
+        # Chromium 156 reports a policy violation as soon as an inline
+        # handler attribute is parsed into a document that shares the page's
+        # policy, inert or not, although nothing runs: probed with and
+        # without the policy, the image is never fetched and no error event
+        # fires. So reports of that one kind are expected here, and the
+        # test checks the fetch and the handler instead.
+        page.expect_csp_violations = True  # type: ignore[attr-defined]
         self._before_paste(
             page,
-            '<p>Hi</p><img src="x" onerror="window._xssFired=1">'
-            '<svg><image href="x" onerror="window._xssFired=2"></image></svg>',
+            '<p>Hi</p><img src="pasted-image.png" onerror="window._xssFired=1">'
+            '<svg><image href="pasted-svg.png" onerror="window._xssFired=2"></image></svg>',
         )
         page.wait_for_timeout(500)
         assert page.evaluate("() => window._xssFired === undefined")
+        assert not [u for u in requested if "pasted-" in u], requested
+        other = [v for v in page.csp_violations  # type: ignore[attr-defined]
+                 if "inline event handler" not in v]
+        assert not other, other
 
     def _open_trix(self, page: Page, sample_xlsx: Path) -> None:
         _upload_and_go_to_compose(page, sample_xlsx)
@@ -1024,14 +1038,14 @@ class TestReportDownload:
             ];
         }""")
         # The button (on step 6) calls downloadCsv().
-        assert page.get_attribute("#btn-download-csv", "onclick") == "downloadCsv()"
+        assert page.get_attribute("#btn-download-csv", "data-action") == "downloadCsv()"
         with page.expect_download() as download:
             page.evaluate("downloadCsv()")
         assert download.value.suggested_filename == "mergemail365-results.csv"
         assert Path(download.value.path()).read_text(encoding="utf-8") == (
-            "email,success,status_code,error\n"
-            '"a@example.com",true,202,""\n'
-            '"\t=b@example.com",false,400,"Bad ""request"""\n'
+            "email,success,status_code,error,unknown\n"
+            '"a@example.com",true,202,"",false\n'
+            '"\t=b@example.com",false,400,"Bad ""request""",false\n'
         )
         # A download, not a navigation: the wizard is still on screen.
         expect(page.locator("#step-1")).to_be_visible()
@@ -1109,3 +1123,118 @@ class TestFullWizardFlow:
         # Data should be preserved
         assert page.locator("#subject-input").input_value() == "Subject test 123"
         assert page.locator("#body-input").input_value() == "Body test"
+
+
+class TestPlaceholderGrammarInThePage:
+    """docs/review-fixes-plan.md, F4 and F8: the page uses the same grammar
+    as the email (tests/data/template_vectors.json covers the grammar; these
+    check that the page applies it)."""
+
+    def test_punctuated_columns_and_spaces_inside_braces_preview_as_values(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "For {{ first name }}")
+        page.fill("#body-input", "Budget {{R&D budget}}, price {{Price <GBP>}}, {{O'Brien \"Q\"}}")
+        page.wait_for_timeout(700)  # the debounced check
+        expect(page.locator("#placeholder-errors")).to_be_hidden()
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        expect(page.locator("#preview-subject")).to_have_text("For Alice")
+        expect(page.locator("#preview-body")).to_have_text("Budget £5k & up, price <10, Q1")
+
+    def test_next_is_refused_for_a_placeholder_naming_no_column(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Hello {{Firstname}}")
+        page.fill("#body-input", "Body")
+        alerts: list[str] = []
+        page.on("dialog", lambda dialog: (alerts.append(dialog.message), dialog.accept()))
+        page.click("#btn-next-2")
+        page.wait_for_timeout(1000)
+        expect(page.locator("#step-2")).to_have_class(re.compile("active"))
+        assert len(alerts) == 1 and "{{Firstname}}" in alerts[0]
+        expect(page.locator("#placeholder-errors")).to_contain_text("No column named {{Firstname}}")
+
+    def test_unfinished_placeholder_is_warned_about_but_not_blocked(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Hello {{First Name}")
+        page.fill("#body-input", "Body")
+        expect(page.locator("#placeholder-errors")).to_contain_text("The subject has a {{ or }}", timeout=5000)
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        expect(page.locator("#preview-subject")).to_have_text("Hello {{First Name}")
+
+    def test_html_preview_shows_cell_values_escaped(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        """A cell is data: in the HTML preview "<10" is text, not a tag."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Price {{Price <GBP>}}")
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        page.check("#source-toggle")
+        source = "<p>Price: <b id=\"mine\">{{Price &lt;GBP&gt;}}</b> and {{R&D budget}}</p>"
+        page.fill("#html-source", source)
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        # The subject is plain text: not escaped.
+        expect(page.locator("#preview-subject")).to_have_text("Price <10")
+        srcdoc = page.get_attribute("#preview-body-html", "srcdoc")
+        assert '<b id="mine">&lt;10</b> and £5k &amp; up</p>' in srcdoc
+        frame = page.frame_locator("#preview-body-html")
+        expect(frame.locator("#mine")).to_have_text("<10")
+
+    def test_rich_text_editor_placeholder_for_a_column_with_markup_characters(
+        self, authenticated_page: Page, special_columns_xlsx: Path,
+    ):
+        """The editor stores {{R&D budget}} as {{R&amp;D budget}}; it must
+        still be that column."""
+        page = authenticated_page
+        _upload_and_go_to_compose(page, special_columns_xlsx)
+        page.fill("#subject-input", "Hi")
+        page.check("#html-toggle")
+        page.wait_for_function("() => window.state.trixEditor !== null")
+        page.evaluate("state.trixEditor.insertString('Budget: {{R&D budget}} / {{Price <GBP>}}')")
+        page.wait_for_function("() => document.getElementById('body-input').value.includes('&amp;D')")
+        page.wait_for_timeout(700)
+        expect(page.locator("#placeholder-errors")).to_be_hidden()
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        srcdoc = page.get_attribute("#preview-body-html", "srcdoc")
+        assert "Budget: £5k &amp; up / &lt;10" in srcdoc
+
+
+class TestNumberFormatNote:
+    def test_note_names_columns_sent_without_their_excel_format(
+        self, authenticated_page: Page, tmp_path: Path, sample_xlsx: Path,
+    ):
+        """docs/review-fixes-plan.md, F6 (D4)."""
+        import datetime
+
+        path = tmp_path / "invoices.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["email", "due", "amount <GBP>"])
+        ws.append(["a@example.com", datetime.datetime(2026, 12, 1), 1250.5])
+        ws["C2"].number_format = "£#,##0.00"
+        wb.save(path)
+
+        page = authenticated_page
+        page.set_input_files("#spreadsheet-file", str(path))
+        note = page.locator("#number-format-note")
+        expect(note).to_be_visible(timeout=5000)
+        expect(note).to_contain_text("amount <GBP> (for example 1250.5)")
+        expect(page.locator("#preview-table tbody")).to_contain_text("2026-12-01")
+        expect(page.locator("#preview-table tbody")).not_to_contain_text("00:00:00")
+
+        # A spreadsheet with nothing to say: the note goes.
+        page.set_input_files("#spreadsheet-file", str(sample_xlsx))
+        expect(note).to_be_hidden(timeout=5000)

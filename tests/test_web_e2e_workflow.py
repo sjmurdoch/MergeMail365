@@ -323,6 +323,117 @@ class TestButtonState:
         expect(page.locator("#btn-back-6")).to_be_enabled()
 
 
+    def test_new_merge_shows_the_dry_run_log(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
+    ):
+        """Phase H, macOS and Windows: after New merge, Verify showed only
+        the summary line, because New merge hid the log panel and nothing
+        showed it again."""
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        expect(page.locator("#verify-log")).to_be_visible()
+        _send_all(page)
+        page.click("#btn-new-merge")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+        expect(page.locator("#verify-log")).to_be_visible()
+
+
+class TestHtmlPreview:
+    def test_preview_frame_after_new_merge(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, Windows: after New merge the HTML preview stayed blank in
+        WebView2. Each preview now gets a new frame; it must stay sandboxed,
+        be the only one, and hold the recipient's email."""
+        page = wizard
+
+        def preview_html() -> None:
+            page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+            page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+            page.click("#btn-next-1")
+            page.wait_for_selector("#step-2.active", timeout=5000)
+            page.fill("#subject-input", "Hello {{name}}")
+            page.check("#html-toggle")
+            page.check("#source-toggle")
+            page.fill("#html-source", "<p>Dear <b>{{name}}</b></p>")
+            page.click("#btn-next-2")
+            page.wait_for_selector("#step-3.active", timeout=5000)
+            for name in ("Alice", "Bob"):
+                frames = page.locator("iframe#preview-body-html")
+                expect(frames).to_have_count(1)
+                expect(frames).to_be_visible()
+                assert frames.get_attribute("sandbox") == ""
+                assert f"<p>Dear <b>{name}</b></p>" in (frames.get_attribute("srcdoc") or "")
+                expect(page.frame_locator("#preview-body-html").locator("b")).to_have_text(name)
+                if name == "Alice":
+                    page.click("[data-action='changePreviewRecipient(1)']")
+
+        preview_html()
+        page.evaluate("newMerge()")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        preview_html()
+
+
+class TestTestAddress:
+    def test_prefilled_address_is_shown_after_new_merge(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, macOS rc3: after New merge, step 4's address field was
+        filled with the account once the sign-in check answered, but "Will
+        send" still said "(enter test address above)"."""
+        page = wizard
+        page.evaluate("newMerge()")
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        page.fill("#subject-input", "Hello {{name}}")
+        page.fill("#body-input", "Hi {{name}}")
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
+        expect(page.locator("#test-email-input")).to_have_value("me@example.com")
+        expect(page.locator("#test-preview-info")).to_contain_text("To: me@example.com")
+
+
+class TestRestoreAfterRestart:
+    def test_saved_columns_are_chosen_after_upload(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, Windows: after quitting and reopening the desktop app,
+        the subject and body came back but the name column did not, because
+        the dropdowns are empty until a spreadsheet is uploaded."""
+        page = wizard
+        page.evaluate("localStorage.setItem('mm_email_col', 'email'); localStorage.setItem('mm_name_col', 'name')")
+        page.reload()
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        assert page.input_value("#email-column") == "email"
+        assert page.input_value("#name-column") == "name"
+
+    def test_autosave_before_upload_keeps_saved_columns(self, wizard: Page, workflow_xlsx: Path):
+        """Phase H, Windows rc4: the name column still came back as "none",
+        because an auto-save after the reload (restoring an HTML body fires
+        an edit) wrote the still-empty dropdowns over the saved columns."""
+        page = wizard
+        page.evaluate("localStorage.setItem('mm_email_col', 'email'); localStorage.setItem('mm_name_col', 'name')")
+        page.reload()
+        page.wait_for_selector("#step-1.active", timeout=5000)
+        page.evaluate("document.getElementById('subject-input').dispatchEvent(new Event('input'))")
+        page.wait_for_timeout(5500)  # the auto-save runs every 5 s
+        assert page.evaluate("localStorage.getItem('mm_name_col')") == "name"
+        page.set_input_files("#spreadsheet-file", str(workflow_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        assert page.input_value("#email-column") == "email"
+        assert page.input_value("#name-column") == "name"
+
+
 class TestReload:
     def test_reload_during_test_email_stays_off_send_step(
         self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
@@ -547,6 +658,34 @@ class TestSendOutcome:
         expect(page.locator("#send-result")).to_contain_text("Not signed in")
         expect(page.locator("#send-result .results-table")).to_contain_text("alice@example.com")
 
+    def test_unknown_outcome_is_not_shown_as_failed(
+        self, wizard: Page, gate: JobGate, workflow_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A read timeout: the email may have gone (docs/review-fixes-plan.md, D2)."""
+        from mail_merge.sender import NO_ANSWER, SendResult
+
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        _pass_test(page)
+        _pass_verify(page)
+
+        def one_unknown(**kwargs: Any) -> list[Any]:
+            return [SendResult(email="alice@example.com", success=True, status_code=202),
+                    SendResult(email="bob@example.com", success=False, error=NO_ANSWER, unknown=True)]
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", one_unknown)
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=10000)
+        result = page.locator("#send-result")
+        expect(result).to_contain_text("Failed: 0")
+        expect(result).to_contain_text("Unknown: 1")
+        row = result.locator("tr", has_text="bob@example.com")
+        expect(row).to_contain_text("Unknown: may have been delivered")
+        expect(row).not_to_contain_text("Failed")
+
     def test_second_send_starts_with_fresh_progress(
         self, wizard: Page, gate: JobGate, workflow_xlsx: Path,
     ):
@@ -600,6 +739,7 @@ class TestInterruptedSend:
         # Spreadsheet content is untrusted: it must not reach the page as HTML.
         log.record("old", SendResult(email="<img src=x onerror=window.pwned=1>@example.com",
                                      success=False, status_code=400, error="<b>bad</b>"))
+        log.record("old", SendResult(email="c@example.com", success=False, error="no answer", unknown=True))
         store = web_app._job_store
         monkeypatch.setattr(store, "send_log", None)
         monkeypatch.setattr(store, "interrupted", [])
@@ -611,10 +751,14 @@ class TestInterruptedSend:
         expect(report).to_contain_text("1 email was recorded as sent")
         expect(report).to_contain_text("<img src=x onerror=window.pwned=1>@example.com")
         assert page.evaluate("window.pwned") is None
+        expect(report.locator("tr", has_text="c@example.com")).to_contain_text("may have been delivered")
 
         with page.expect_download() as download:
             page.click("#btn-interrupted-csv")
-        assert "a@example.com" in Path(download.value.path()).read_text(encoding="utf-8")
+        csv_text = Path(download.value.path()).read_text(encoding="utf-8")
+        assert "a@example.com" in csv_text
+        assert csv_text.splitlines()[0] == "email,success,status_code,error,unknown"
+        assert csv_text.splitlines()[3].endswith(",true")
 
         page.click("#btn-dismiss-interrupted")
         expect(report).to_be_hidden()
@@ -626,3 +770,47 @@ class TestInterruptedSend:
         page.reload()
         page.wait_for_selector("text=Data")
         expect(report).to_be_hidden()
+
+
+class TestRejectedTestEmail:
+    def test_rejected_test_email_is_shown_as_a_failure(
+        self, wizard: Page, workflow_xlsx: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Model: rejectedTestEmailTest / testPassHonest (R19).
+
+        The job runs to the end ("completed") although Graph rejected the
+        email, which is how sender.send_one() reports a 403. The page used to
+        show "Test email sent successfully!" and enable Next."""
+        from mail_merge.sender import SendResult
+
+        def rejected(**kwargs: Any) -> list[Any]:
+            return [SendResult(email="me@example.com", success=False, status_code=403,
+                               error="ErrorAccessDenied: Access is denied.")]
+
+        monkeypatch.setattr(mail_merge.api, "send_merge", rejected)
+        page = wizard
+        _to_step4(page, workflow_xlsx)
+        page.click("#btn-send-test")
+        expect(page.locator("#test-result")).to_contain_text("Permission denied", timeout=10000)
+        expect(page.locator("#test-result")).to_contain_text("(HTTP 403)")  # WizardCore.testEmailFailure
+        expect(page.locator("#test-result")).not_to_contain_text("successfully")
+        expect(page.locator("#btn-next-4")).to_be_disabled()
+        expect(page.locator("#btn-retry-test")).to_be_visible()
+        assert page.evaluate("state.testPassed") is False
+
+
+class TestLayout:
+    def test_diagnostics_stay_inside_the_column(self, wizard: Page):
+        """Phase H, macOS and Windows: a long line in the Test connection
+        diagnostics (home_account_id) ran past the page column, because a
+        fieldset grows to fit unbreakable content."""
+        page = wizard
+        widths = page.evaluate("""() => {
+            show("auth-diagnostics");
+            const data = {home_account_id: "x".repeat(80) + "." + "y".repeat(80)};
+            setHtml($("auth-diag-content"), html`<p>Success</p><pre>${JSON.stringify(data, null, 2)}</pre>`);
+            const right = (el) => el.getBoundingClientRect().right;
+            return {box: right($("auth-diag-content")),
+                    column: right(document.querySelector("main"))};
+        }""")
+        assert widths["box"] <= widths["column"], widths

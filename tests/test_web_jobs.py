@@ -215,6 +215,15 @@ class TestSendLog:
         assert list(tmp_path.iterdir()) == []
         thread.join(5)
 
+    def test_log_keeps_an_unknown_outcome(self, tmp_path):
+        from mail_merge.web.sendlog import SendLog
+
+        log = SendLog(tmp_path)
+        log.start("old-job")
+        log.record("old-job", SendResult(email="a@x.com", success=False, error="no answer", unknown=True))
+        [send] = SendLog(tmp_path).interrupted()
+        assert send["results"][0]["unknown"] is True
+
     def test_next_process_reports_then_dismisses(self, tmp_path):
         from mail_merge.web.sendlog import SendLog
 

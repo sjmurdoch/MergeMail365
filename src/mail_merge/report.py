@@ -17,47 +17,71 @@ def _sanitize_csv(value: str) -> str:
     return value
 
 
+def _unsanitize_csv(value: str) -> str:
+    """Undo :func:`_sanitize_csv`: the tab it adds is always followed by one
+    of the guarded characters, so one leading tab followed by one of them
+    was added by it."""
+    if value.startswith("\t") and value[1:].startswith(_CSV_FORMULA_PREFIXES):
+        return value[1:]
+    return value
+
+
 def summarize(results: list[SendResult]) -> dict[str, object]:
-    """Return structured summary: total, sent, failed counts + failed details."""
-    total = len(results)
-    sent = sum(1 for r in results if r.success)
-    failed = total - sent
-    failed_details = [
-        {"email": r.email, "status_code": r.status_code, "error": r.error}
-        for r in results
-        if not r.success
-    ]
+    """Return structured summary: total, sent, failed and unknown counts,
+    and the details of each failure and each unknown outcome. ``failed``
+    counts the emails known not to have gone; ``unknown`` those that may
+    have (no answer from Graph)."""
+    def details(r: SendResult) -> dict[str, object]:
+        return {"email": r.email, "status_code": r.status_code, "error": r.error}
+
+    failed = [details(r) for r in results if not r.success and not r.unknown]
+    unknown = [details(r) for r in results if r.unknown]
     return {
-        "total": total,
-        "sent": sent,
-        "failed": failed,
-        "failed_details": failed_details,
+        "total": len(results),
+        "sent": sum(1 for r in results if r.success),
+        "failed": len(failed),
+        "unknown": len(unknown),
+        "failed_details": failed,
+        "unknown_details": unknown,
     }
 
 
-def print_summary(results: list[SendResult]) -> None:
+def print_summary(results: list[SendResult], *, dry_run: bool = False) -> None:
     summary = summarize(results)
-    total = summary["total"]
-    sent = summary["sent"]
-    failed = summary["failed"]
+    if dry_run:
+        logger.info(
+            "Dry run summary (nothing sent): Total: %d, Would send: %d, Failed: %d",
+            summary["total"], summary["sent"], summary["failed"],
+        )
+    elif summary["unknown"]:
+        logger.info(
+            "Summary: Total: %d, Sent: %d, Failed: %d, Unknown: %d",
+            summary["total"], summary["sent"], summary["failed"], summary["unknown"],
+        )
+    else:
+        logger.info(
+            "Summary: Total: %d, Sent: %d, Failed: %d",
+            summary["total"], summary["sent"], summary["failed"],
+        )
+    for r in results:
+        if r.unknown:
+            logger.warning("No answer for %s: the email may have been delivered", r.email)
+        elif not r.success:
+            logger.warning("Failed: %s [%s] %s", r.email, r.status_code, r.error)
 
-    logger.info("Summary: Total: %d, Sent: %d, Failed: %d", total, sent, failed)
 
-    if failed:
-        for r in results:
-            if not r.success:
-                logger.warning("Failed: %s [%s] %s", r.email, r.status_code, r.error)
+_HEADER = ["email", "success", "status_code", "error", "unknown"]
 
 
 def _row(r: SendResult) -> list[object]:
-    return [_sanitize_csv(r.email), r.success, r.status_code or "", _sanitize_csv(r.error)]
+    return [_sanitize_csv(r.email), r.success, r.status_code or "", _sanitize_csv(r.error), r.unknown]
 
 
 def write_csv(results: list[SendResult], path: str | Path, *, quiet: bool = False) -> None:
     path = Path(path)
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["email", "success", "status_code", "error"])
+        writer.writerow(_HEADER)
         for r in results:
             writer.writerow(_row(r))
     if not quiet:
@@ -84,9 +108,11 @@ def read_csv(path: str | Path) -> list[SendResult]:
         for row in reader:
             status_raw = row.get("status_code", "")
             results.append(SendResult(
-                email=row["email"],
+                email=_unsanitize_csv(row["email"]),
                 success=row["success"] == "True",
                 status_code=int(status_raw) if status_raw else None,
-                error=row.get("error", ""),
+                error=_unsanitize_csv(row.get("error") or ""),
+                # Reports from 0.6.0 and earlier have no "unknown" column.
+                unknown=row.get("unknown") == "True",
             ))
     return results

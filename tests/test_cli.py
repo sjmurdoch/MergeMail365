@@ -784,3 +784,101 @@ class TestFileLogging:
                 "--log-level", "DEBUG",
             ])
             mock_file_log.assert_not_called()
+
+
+class TestAccount:
+    """Which account the email goes from (docs/review-fixes-plan.md, E1)."""
+
+    @pytest.fixture
+    def captured_console(self, monkeypatch):
+        import io
+
+        from rich.console import Console
+
+        console = Console(file=io.StringIO(), width=200, color_system=None)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+        monkeypatch.setattr("mail_merge.console.console", console)
+        return console
+
+    def _argv(self, sample_xlsx, body_template_file, *extra):
+        return ["--spreadsheet", str(sample_xlsx), "--body", str(body_template_file),
+                "--subject", "Hi {{name}}", "--email-column", "email",
+                "--client-id", "fake-client-id", *extra]
+
+    @pytest.mark.parametrize(("names", "shown"), [
+        (["alice@contoso.com"], "From:     alice@contoso.com"),
+        ([], "From:     (you will be asked to sign in)"),
+        (["[x]@contoso.com", "b@contoso.com"], "From:     [x]@contoso.com"),
+    ])
+    def test_prompt_names_the_account(self, sample_xlsx, body_template_file, captured_console,
+                                      monkeypatch, names, shown):
+        monkeypatch.setattr("mail_merge.auth.cached_account_names", lambda: names)
+        assert main(self._argv(sample_xlsx, body_template_file, "--send")) == 130
+        assert shown in captured_console.file.getvalue()
+
+    def test_logs_the_account_it_sends_as(self, sample_xlsx, body_template_file, monkeypatch, caplog):
+        import logging
+
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda *a, **kw: "fake-token")
+        monkeypatch.setattr("mail_merge.auth.cached_account_names", lambda: ["alice@contoso.com"])
+        with responses.RequestsMock() as rsps, caplog.at_level(logging.INFO):
+            rsps.add(responses.POST, GRAPH_SEND_URL, status=202)
+            assert main(self._argv(sample_xlsx, body_template_file, "--test-email", "me@example.com")) == 0
+        assert "📤 Sending as alice@contoso.com" in caplog.messages
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING and r.name == "mail_merge.api"]
+
+    def test_warns_when_several_accounts_are_signed_in(self, sample_xlsx, body_template_file,
+                                                       monkeypatch, caplog):
+        import logging
+
+        monkeypatch.setattr("mail_merge.auth.acquire_token_interactive_flow", lambda *a, **kw: "fake-token")
+        monkeypatch.setattr("mail_merge.auth.acquire_token", lambda *a, **kw: "fake-token")
+        monkeypatch.setattr("mail_merge.auth.cached_account_names", lambda: ["a@contoso.com", "b@contoso.com"])
+        with responses.RequestsMock() as rsps, caplog.at_level(logging.INFO):
+            rsps.add(responses.POST, GRAPH_SEND_URL, status=202)
+            main(self._argv(sample_xlsx, body_template_file, "--test-email", "me@example.com"))
+        [warning] = [r.getMessage() for r in caplog.records
+                     if r.levelno == logging.WARNING and r.name == "mail_merge.api"]
+        assert "2 accounts" in warning and "a@contoso.com" in warning and "--sign-out" in warning
+
+
+class TestSignOut:
+    def test_sign_out_needs_no_other_arguments(self, monkeypatch, caplog):
+        import logging
+
+        calls = []
+        monkeypatch.setattr("mail_merge.auth.sign_out", lambda c, t="common": calls.append((c, t)) or True)
+        with caplog.at_level(logging.INFO):
+            assert main(["--sign-out", "--client-id", "cid", "--tenant-id", "contoso.com"]) == 0
+        assert calls == [("cid", "contoso.com")]
+        assert any("Signed out" in m for m in caplog.messages)
+
+    def test_sign_out_reads_the_client_id_like_a_send(self, monkeypatch, tmp_path):
+        import mail_merge.config
+
+        mail_merge.config.DEFAULT_PATH.write_text('client-id = "from-config"\n', encoding="utf-8")
+        calls = []
+        monkeypatch.setattr("mail_merge.auth.sign_out", lambda c, t="common": calls.append((c, t)) or False)
+        assert main(["--sign-out"]) == 0
+        monkeypatch.setenv("MERGEMAIL365_CLIENT_ID", "from-env")
+        assert main(["--sign-out"]) == 0
+        assert calls == [("from-config", "common"), ("from-env", "common")]
+
+    def test_sign_out_without_a_client_id_is_an_error(self, caplog):
+        assert main(["--sign-out"]) == 1
+        assert any("client-id" in m for m in caplog.messages)
+
+    def test_other_arguments_are_still_required(self, capsys):
+        with pytest.raises(SystemExit) as info:
+            main(["--subject", "x"])
+        assert info.value.code == 2
+        assert "--spreadsheet" in capsys.readouterr().err
+
+
+def test_help_shows_both_forms(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    assert "mergemail365 --spreadsheet SPREADSHEET --body BODY --subject SUBJECT --email-column EMAIL_COLUMN [options]" in out
+    assert "mergemail365 --sign-out [--client-id CLIENT_ID]" in out

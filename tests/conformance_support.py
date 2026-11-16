@@ -51,11 +51,22 @@ class Handle:
         self.acks: queue.Queue[None] = queue.Queue()
 
 
+def job_command(picks: dict) -> str:
+    """The command for a completeJob step: "fail" (the job raised), "ok", or
+    "reject" (the job ran to the end but Graph rejected the test email; a
+    dry run sends nothing, so `accepted` doesn't apply to it)."""
+    if not picks["ok"]:
+        return "fail"
+    return "ok" if picks["accepted"] or picks["j"]["kind"] != "Test" else "reject"
+
+
 class FakeSendMerge:
     """send_merge() for the server tier. Test emails and dry runs wait for
-    "ok" or "fail"; a send waits for "next" before each step of its loop, in
-    which the real should_stop, token provider and on_result decide what
-    happens, or "fail" (the Graph API failing the send)."""
+    "ok", "fail" or "reject" (the email was rejected: a failed result, with
+    no exception, which is how sender.send_one() reports it); a send waits
+    for "next" before each step of its loop, in which the real should_stop,
+    token provider and on_result decide what happens, or "fail" (the Graph
+    API failing the send)."""
 
     def __init__(self) -> None:
         self.started: queue.Queue[Handle] = queue.Queue()
@@ -74,10 +85,14 @@ class FakeSendMerge:
         self.handles.append(h)
         self.started.put(h)
         if mode != "send":
-            if h.commands.get(timeout=60) != "ok":
+            cmd = h.commands.get(timeout=60)
+            if cmd not in ("ok", "reject"):
                 raise RuntimeError("job failed")
             if mode == "test_email":
                 kw["token_provider"]()
+                accepted = cmd == "ok"
+                return [SendResult(email="me@example.com", success=accepted,
+                                   status_code=202 if accepted else 403)]
             return []
         results: list[Any] = []
         while True:

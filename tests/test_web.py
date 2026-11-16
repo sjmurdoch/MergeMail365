@@ -261,6 +261,19 @@ class TestUpload:
         assert len(data["rows"]) == 2
         assert data["rows"][0]["name"] == "Alice"
 
+    def test_upload_accepts_upper_case_extension(self, web_client, sample_xlsx_web):
+        """Windows and some exports name files RECIPIENTS.XLSX (F16)."""
+        csrf = get_csrf(web_client)
+        with open(sample_xlsx_web, "rb") as f:
+            resp = web_client.post(
+                "/api/upload-spreadsheet",
+                data={"spreadsheet": (f, "RECIPIENTS.XLSX")},
+                headers={"X-CSRF-Token": csrf},
+                content_type="multipart/form-data",
+            )
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["file_name"] == "RECIPIENTS.XLSX"
+
     def test_upload_non_xlsx_rejected(self, web_client, tmp_path):
         csrf = get_csrf(web_client)
         txt_file = tmp_path / "bad.txt"
@@ -804,27 +817,75 @@ class TestAuth:
         assert resp.status_code == 302
         mock_flow.assert_called_once_with("from-query", "my-tenant", "http://localhost:5050/auth/callback")
 
-    def test_auth_host_consistency_redirect(self, client):
-        """Test that starting on 127.0.0.1 redirects to localhost for session consistency.
-
-        This test would have caught the 'No auth flow in session' bug where the
-        session was set on 127.0.0.1 but the callback returned to localhost.
+    def test_sign_in_started_on_127_0_0_1_ends_on_a_working_page(self, web_client):
+        """The redirect URI is on localhost, and cookies set on 127.0.0.1 are
+        not sent there. A sign-in started on 127.0.0.1 is handed over to
+        localhost with a one-time pass; without it the user ended on the
+        "Forbidden" page after signing in (docs/review-fixes-plan.md, F10).
         """
-        # 1. Start on 127.0.0.1 - should redirect to localhost/auth/login...
-        resp = client.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/")
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("http://localhost:5050/auth/login")
+        # web_client authenticated on localhost; start again on 127.0.0.1.
+        c = web_client.application.test_client()
+        assert c.get("/?token=test-token-abc", base_url="http://127.0.0.1:5050/").status_code == 302
 
-        # 2. Follow to localhost - should now proceed to Microsoft and set session on localhost
-        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+        resp = c.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/")
+        assert resp.status_code == 302
+        handover = resp.headers["Location"]
+        assert handover.startswith("http://localhost:5050/auth/login?")
+        assert "handoff=" in handover and "client_id=test" in handover
+        assert "test-token-abc" not in handover, "the startup token must not travel in the redirect"
+
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow, \
+             patch("mail_merge.auth.acquire_token_by_auth_code", return_value="tok"):
             mock_flow.return_value = {"auth_uri": "https://microsoft.com/auth", "state": "abc"}
-            resp = client.get(resp.headers["Location"], base_url="http://localhost:5050/")
+            resp = c.get(handover)
             assert resp.status_code == 302
             assert "microsoft.com" in resp.headers["Location"]
-
-            # Verify session is set on localhost
-            with client.session_transaction() as sess:
+            with c.session_transaction(base_url="http://localhost:5050/") as sess:
                 assert "auth_flow" in sess
+
+            resp = c.get("/auth/callback?code=x&state=abc", base_url="http://localhost:5050/")
+            assert resp.status_code == 302 and resp.headers["Location"].endswith("#auth-success")
+
+        assert c.get("/", base_url="http://localhost:5050/").status_code == 200
+
+    def test_handoff_pass_works_once(self, web_client):
+        resp = web_client.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/")
+        # web_client's session is on localhost, so on 127.0.0.1 it has none.
+        assert resp.status_code == 403
+        c = web_client.application.test_client()
+        c.get("/?token=test-token-abc", base_url="http://127.0.0.1:5050/")
+        handover = c.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/").headers["Location"]
+
+        stranger = web_client.application.test_client()
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+            mock_flow.return_value = {"auth_uri": "https://microsoft.com/auth", "state": "abc"}
+            assert stranger.get(handover).status_code == 302
+            again = web_client.application.test_client()
+            assert again.get(handover).status_code == 403, "a handoff pass must be single-use"
+
+    def test_handoff_pass_expires(self, web_client, monkeypatch):
+        c = web_client.application.test_client()
+        c.get("/?token=test-token-abc", base_url="http://127.0.0.1:5050/")
+        handover = c.get("/auth/login?client_id=test", base_url="http://127.0.0.1:5050/").headers["Location"]
+        real = time.monotonic
+        monkeypatch.setattr("mail_merge.web.app.time.monotonic", lambda: real() + 61)
+        assert web_client.application.test_client().get(handover).status_code == 403
+
+    @pytest.mark.parametrize("query", ["", "?handoff=", "?handoff=guess", "?client_id=attacker-app"])
+    def test_auth_login_needs_the_session(self, client, query):
+        """Any web page can send the browser to http://localhost:5050/auth/login.
+        Without the startup-token session that must not start a sign-in
+        (it used to, for whatever client_id the page chose)."""
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+            resp = client.get(f"/auth/login{query}", base_url="http://localhost:5050/")
+        assert resp.status_code == 403
+        mock_flow.assert_not_called()
+
+    def test_sign_in_that_cannot_start_returns_to_the_page_with_the_reason(self, web_client):
+        with patch("mail_merge.auth.initiate_auth_code_flow", side_effect=ValueError("Invalid tenant_id 'a b'")):
+            resp = web_client.get("/auth/login?client_id=x&tenant_id=a%20b", base_url="http://localhost:5050/")
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/#auth-error=Invalid%20tenant_id%20%27a%20b%27"
 
     @patch("mail_merge.auth._load_cache")
     @patch("mail_merge.auth.msal.PublicClientApplication", autospec=True)
@@ -1468,8 +1529,11 @@ class TestAttachmentSaving:
         "../escaped.txt",
         "../../escaped.txt",
         "sub/../../escaped.txt",
-        "..\\escaped.txt",
-        "C:\\Users\\victim\\escaped.txt",
+        # Backslashes doubled: in a quoted multipart filename a backslash
+        # escapes the next character (Werkzeug 3.1.9 and later), so these
+        # reach the server as ..\escaped.txt and C:\Users\victim\...
+        "..\\\\escaped.txt",
+        "C:\\\\Users\\\\victim\\\\escaped.txt",
         "{abs}",
     ])
     def test_traversal_filename_stays_in_temp_dir(
@@ -1478,7 +1542,9 @@ class TestAttachmentSaving:
         """A filename with path components can't write outside the temp dir."""
         abs_target = tmp_path / "outside" / "escaped.txt"
         abs_target.parent.mkdir()
-        evil_name = evil_name.format(abs=abs_target)
+        # Escaped like the backslash cases above, so a Windows path keeps
+        # its separators on the way through the multipart header.
+        evil_name = evil_name.format(abs=str(abs_target).replace("\\", "\\\\"))
         resp, captured, tmp_dir = self._start_with_attachments(
             web_client, sample_xlsx_web, [(evil_name, b"payload")], monkeypatch)
         assert resp.status_code == 200
@@ -1490,6 +1556,21 @@ class TestAttachmentSaving:
         assert not (root.parent / "escaped.txt").exists()
         assert not (root.parent.parent / "escaped.txt").exists()
         assert not abs_target.exists()
+
+    @pytest.mark.parametrize(("name", "expected"), [
+        ("report.pdf", "report.pdf"),
+        ("../escaped.txt", "escaped.txt"),
+        ("..\\escaped.txt", "escaped.txt"),
+        ("C:\\Users\\victim\\escaped.txt", "escaped.txt"),
+        ("/etc/passwd", "passwd"),
+        ("Q3 report (final) é.pdf", "Q3 report (final) é.pdf"),
+        ("..", None), (".", None), ("", None), ("dir/", None), ("a\x00b", None),
+    ])
+    def test_attachment_basename(self, name, expected):
+        """The rule itself, apart from how the HTTP layer delivers the name."""
+        from mail_merge.web.app import _attachment_basename
+
+        assert _attachment_basename(name) == expected
 
     def test_drive_relative_filename_stays_in_temp_dir(
         self, web_client, sample_xlsx_web, monkeypatch
@@ -2033,7 +2114,258 @@ def test_entry_point_keeps_send_logs_in_the_state_dir(monkeypatch, tmp_path):
 
     monkeypatch.setattr(_paths, "state_dir", lambda: tmp_path)
     monkeypatch.setattr("mail_merge.web.app.create_app", fake_create_app)
-    monkeypatch.setattr(web_pkg, "_find_open_port", lambda port: port)
+    monkeypatch.setattr(web_pkg, "_find_open_port", lambda port, host="127.0.0.1": port)
     with pytest.raises(SystemExit):
         web_pkg.main([])
     assert seen["send_log_dir"] == tmp_path / "sends"
+
+
+# ---- Every route is protected unless marked public (docs/review-fixes-plan.md, G6) ----
+
+# The only routes reachable without the startup-token session. "static"
+# serves the page's assets; "auth_callback" is where Microsoft's redirect
+# lands, and does nothing without the session that started the sign-in.
+PUBLIC_ENDPOINTS = {"static", "auth_callback"}
+
+
+def _route_cases(application):
+    cases = []
+    for rule in application.url_map.iter_rules():
+        url = rule.rule.replace("<job_id>", "no-such-job").replace("<path:filename>", "style.css")
+        assert "<" not in url, f"route {rule.rule} has a parameter this test doesn't know how to fill"
+        for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
+            cases.append((rule.endpoint, method, url))
+    return cases
+
+
+class TestRouteTable:
+    """Walks the whole route table, so a new route is covered without anyone
+    writing a test for it."""
+
+    @pytest.fixture(params=[False, True], ids=["browser", "desktop"])
+    def application(self, request):
+        application = create_app(startup_token="test-token-abc", port=5050, desktop_mode=request.param,
+                                 client_id="fixed-client")
+        application.config["TESTING"] = True
+        return application
+
+    def test_only_the_expected_routes_are_public(self, application):
+        marked = {
+            endpoint for endpoint, view in application.view_functions.items()
+            if getattr(view, "_public", False)
+        } | {"static"}
+        assert marked == PUBLIC_ENDPOINTS
+
+    def test_no_route_answers_without_the_session(self, application):
+        cases = _route_cases(application)
+        assert len(cases) >= 20, "the route table looks empty: has the walk broken?"
+        for endpoint, method, url in cases:
+            resp = application.test_client().open(url, method=method, base_url="http://localhost:5050/")
+            if endpoint in PUBLIC_ENDPOINTS:
+                assert resp.status_code != 403, f"{method} {url} should be public"
+            else:
+                assert resp.status_code == 403, (
+                    f"{method} {url} ({endpoint}) answered {resp.status_code} without the startup token"
+                )
+
+    def test_no_state_changing_route_answers_without_the_csrf_token(self, application):
+        c = application.test_client()
+        c.get("/?token=test-token-abc")
+        for endpoint, method, url in _route_cases(application):
+            if method == "GET":
+                continue
+            resp = c.open(url, method=method)
+            assert resp.status_code == 403 and "CSRF" in resp.get_data(as_text=True), (
+                f"{method} {url} ({endpoint}) answered {resp.status_code} without a CSRF token"
+            )
+
+    def test_public_callback_does_nothing_without_a_sign_in_in_progress(self, application):
+        with patch("mail_merge.auth.acquire_token_by_auth_code") as exchange:
+            resp = application.test_client().get("/auth/callback?code=x&state=y", base_url="http://localhost:5050/")
+        assert resp.status_code == 400
+        exchange.assert_not_called()
+
+
+class TestFixedClientId:
+    """--client-id / --tenant-id fix the app registration; nothing a request
+    sends may change it (the fields are hidden in the page, but that is not
+    a control)."""
+
+    @pytest.fixture
+    def fixed(self):
+        application = create_app(startup_token="test-token-abc", port=5050,
+                                 client_id="fixed-client", tenant_id="fixed-tenant")
+        c = application.test_client()
+        c.get("/?token=test-token-abc")
+        return c
+
+    def test_login_ignores_the_query_string(self, fixed):
+        with patch("mail_merge.auth.initiate_auth_code_flow") as mock_flow:
+            mock_flow.return_value = {"auth_uri": "https://microsoft.com/auth", "state": "abc"}
+            fixed.get("/auth/login?client_id=other-app&tenant_id=other-tenant", base_url="http://localhost:5050/")
+        mock_flow.assert_called_once_with("fixed-client", "fixed-tenant", "http://localhost:5050/auth/callback")
+
+    def test_session_values_do_not_override(self, fixed):
+        with fixed.session_transaction() as sess:
+            sess["client_id"] = "other-app"
+            sess["tenant_id"] = "other-tenant"
+        with patch("mail_merge.auth.diagnose_auth", return_value={}) as diagnose:
+            fixed.get("/auth/debug")
+        diagnose.assert_called_once_with("fixed-client", "fixed-tenant")
+
+    def test_interactive_sign_in_ignores_the_request_body(self):
+        application = create_app(startup_token="test-token-abc", port=5050, desktop_mode=True,
+                                 client_id="fixed-client", tenant_id="fixed-tenant")
+        c = application.test_client()
+        c.get("/?token=test-token-abc")
+        started = threading.Event()
+        seen = []
+
+        def fake_flow(cid, tid, timeout=None):
+            seen.append((cid, tid))
+            started.set()
+            return "tok"
+
+        with patch("mail_merge.auth.acquire_token_interactive_flow", side_effect=fake_flow):
+            resp = c.post("/auth/interactive", json={"client_id": "other-app", "tenant_id": "other-tenant"},
+                          headers={"X-CSRF-Token": get_csrf(c)})
+            assert resp.status_code == 200
+            assert started.wait(5)
+        assert seen == [("fixed-client", "fixed-tenant")]
+
+
+class TestSecurityHeaders:
+    """docs/review-fixes-plan.md, G7: the policy is the second defence behind
+    escaping, so it must be on every answer, errors included."""
+
+    @pytest.mark.parametrize("path", ["/", "/api/config", "/static/app.js", "/no-such-page", "/api/log-path"])
+    def test_policy_and_nosniff_on_every_response(self, web_client, path):
+        from mail_merge.web.app import CONTENT_SECURITY_POLICY
+
+        resp = web_client.get(path)
+        assert resp.headers["Content-Security-Policy"] == CONTENT_SECURITY_POLICY
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert resp.headers["Referrer-Policy"] == "no-referrer"
+
+    def test_forbidden_page_has_the_policy_too(self, client):
+        resp = client.get("/")
+        assert resp.status_code == 403
+        assert "script-src 'self'" in resp.headers["Content-Security-Policy"]
+
+    def test_pages_and_api_answers_are_not_cached_but_static_files_may_be(self, web_client):
+        assert web_client.get("/").headers["Cache-Control"] == "no-store"
+        assert web_client.get("/api/config").headers["Cache-Control"] == "no-store"
+        assert "no-store" not in web_client.get("/static/app.js").headers.get("Cache-Control", "")
+
+    def test_page_carries_the_csrf_token_in_a_meta_tag_not_a_script(self, web_client):
+        page = web_client.get("/").get_data(as_text=True)
+        with web_client.session_transaction() as sess:
+            token = sess["csrf_token"]
+        assert f'<meta name="csrf-token" content="{token}">' in page
+        assert page.count(token) == 1
+        assert "<script>" not in page
+
+
+class TestCellFormattingInTheWizard:
+    """docs/review-fixes-plan.md, F6: the page shows, and the job sends, the
+    same readable text for dates and percentages, and names the columns
+    whose Excel number format is not applied."""
+
+    @pytest.fixture
+    def formatted_xlsx(self, tmp_path):
+        import datetime
+
+        path = tmp_path / "invoices.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["email", "due", "share", "amount"])
+        ws.append(["a@example.com", datetime.datetime(2026, 12, 1), 0.25, 1250.5])
+        ws["C2"].number_format = "0%"
+        ws["D2"].number_format = "£#,##0.00"
+        ws2 = wb.create_sheet("Plain")
+        ws2.append(["email", "n"])
+        ws2.append(["b@example.com", 5])
+        wb.save(path)
+        return path
+
+    def test_upload_preview_recipients_and_config_agree(self, web_client, formatted_xlsx):
+        headers = {"X-CSRF-Token": get_csrf(web_client)}
+        with open(formatted_xlsx, "rb") as f:
+            data = web_client.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "invoices.xlsx")},
+                                   headers=headers).get_json()
+        expected = {"email": "a@example.com", "due": "2026-12-01", "share": "25%", "amount": "1250.5"}
+        assert data["rows"] == [expected]
+        assert data["unformatted_numbers"] == {"amount": "1250.5"}
+
+        recipients = web_client.post("/api/get-recipients", data={"email_column": "email"},
+                                     headers=headers).get_json()["recipients"]
+        assert recipients == [expected]
+
+        config = web_client.get("/api/config").get_json()["spreadsheet"]
+        assert config["rows"] == [expected] and config["unformatted_numbers"] == {"amount": "1250.5"}
+
+        other = web_client.post("/api/change-sheet", json={"sheet": "Plain"}, headers=headers).get_json()
+        assert other["unformatted_numbers"] == {}
+
+    @responses.activate
+    def test_sent_email_has_the_same_text_as_the_preview(self, web_client, formatted_xlsx, monkeypatch):
+        import json as _json
+
+        responses.add(responses.POST, GRAPH_SEND_URL, status=202)
+        monkeypatch.setattr("mail_merge.auth.acquire_token_silent", lambda *a, **kw: "tok")
+        monkeypatch.setattr("mail_merge.web.app.WEB_SEND_DELAY", 0)
+        web_client.application.config["FIXED_CLIENT_ID"] = "cid"
+        headers = {"X-CSRF-Token": get_csrf(web_client)}
+        with open(formatted_xlsx, "rb") as f:
+            web_client.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "invoices.xlsx")}, headers=headers)
+        job_id = web_client.post("/api/start-job", data={
+            "mode": "send", "email_column": "email", "subject": "Due {{due}}",
+            "body": "You owe {{amount}}, {{share}} of the total.",
+        }, headers=headers).get_json()["job_id"]
+        assert wait_for_job(web_client, job_id)["ok"]
+        message = _json.loads(responses.calls[0].request.body)["message"]
+        assert message["subject"] == "Due 2026-12-01"
+        assert message["body"]["content"] == "You owe 1250.5, 25% of the total."
+
+
+class TestComposeAddressesAreCheckedWithTheRecipients:
+    """docs/review-fixes-plan.md, F7: leaving the Compose step reports a
+    mistyped CC, BCC, reply-to or BCC-mode To address."""
+
+    @pytest.fixture
+    def uploaded(self, web_client, sample_xlsx_web):
+        headers = {"X-CSRF-Token": get_csrf(web_client)}
+        with open(sample_xlsx_web, "rb") as f:
+            web_client.post("/api/upload-spreadsheet", data={"spreadsheet": (f, "test.xlsx")}, headers=headers)
+        return web_client, headers
+
+    @pytest.mark.parametrize(("field", "value", "label"), [
+        ("cc", "boss@example.com, not-an-address", "CC"),
+        ("bcc", "a@", "BCC"),
+        ("reply_to", "Doe, Jane <jane@example.com>", "reply-to"),
+    ])
+    def test_bad_address_is_reported(self, uploaded, field, value, label):
+        client, headers = uploaded
+        resp = client.post("/api/get-recipients", data={"email_column": "email", field: value}, headers=headers)
+        assert resp.status_code == 400
+        assert resp.get_json()["error"].startswith(f"Invalid {label} address")
+
+    def test_bcc_mode_needs_a_valid_to_address(self, uploaded):
+        client, headers = uploaded
+        for to in ("", "nobody", "a@example.com, b@example.com"):
+            resp = client.post("/api/get-recipients", headers=headers,
+                               data={"email_column": "email", "bcc_blast": "true", "bcc_blast_to": to})
+            assert resp.status_code == 400 and "BCC-mode To" in resp.get_json()["error"], to
+        # Not in BCC mode, the field is ignored.
+        resp = client.post("/api/get-recipients", headers=headers,
+                           data={"email_column": "email", "bcc_blast_to": "nobody"})
+        assert resp.status_code == 200
+
+    def test_good_addresses_pass(self, uploaded):
+        client, headers = uploaded
+        resp = client.post("/api/get-recipients", headers=headers, data={
+            "email_column": "email", "cc": '"Doe, Jane" <jane@example.com>; boss@example.com',
+            "bcc": "", "reply_to": "[Team] Lead <lead@example.com>",
+            "bcc_blast": "true", "bcc_blast_to": "List <list@example.com>",
+        })
+        assert resp.status_code == 200 and len(resp.get_json()["recipients"]) == 2

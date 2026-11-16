@@ -4,8 +4,62 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-16
+
+### Security
+
+- Updated bundled libraries with security fixes: certifi, the list of certificate authorities used to check the connection to Microsoft, no longer trusts a root whose intermediate certificates' keys were compromised; Werkzeug, the web UI's server library, no longer lets Windows device names through when serving the app's files (GHSA-6q48-6c7w-9gw2, GHSA-g6x2-hccm-hh4m). The macOS and Windows apps also get newer versions of the libraries behind their window (pyobjc 13, pythonnet 3.2).
+- Log files no longer contain access tokens or the content of your emails. Since file logging was added, each email sent was logged with its full request, including the `Authorization` header (a token that can send mail as you for about an hour after it was issued) and the message, recipients and attachments. The macOS and Windows apps always write a log file, and `--log-file` turns it on elsewhere. **If you have run an earlier version with file logging, delete the old log files**, and don't send them to anyone: `~/Library/Logs/mergemail365/` on macOS, `%LOCALAPPDATA%\mergemail365\logs\` on Windows, `~/.local/state/mergemail365/log/` on Linux. Tokens in them have long expired, but the emails and addresses are still there. This version doesn't clean up what earlier versions wrote: if you used 0.4.1 to 0.6.0, delete the old log file (macOS `~/Library/Logs/mergemail365/mergemail365.log`, Windows `%LOCALAPPDATA%\mergemail365\logs\mergemail365.log`) before sending it to anyone. The tokens in it have long expired.
+- The log file also no longer records the web UI's access token, the sign-in redirect's authorisation code, or the rendered body of each email in a dry run (a dry run at `--log-level DEBUG` still shows the bodies in the terminal).
+- Web UI: the sign-in route (`/auth/login`) now requires the app's access token like every other page. Before, any web page open in your browser could send it to `http://localhost:5050/auth/login` with an app registration of its choosing and start a Microsoft sign-in for it, and the choice replaced a client ID fixed with `--client-id`. A fixed client or tenant ID can no longer be overridden by a request.
+- Web UI: the page now has a Content Security Policy that only allows the app's own scripts to run, as a second line of defence if text from a spreadsheet or a server response were ever shown without escaping. All text placed on the page now goes through one escaping function. This also fixes the "Test connection" panel, which showed its diagnostic details (including the tenant ID and error text) without escaping them, and column names containing a double quote, which could not be selected as the email or name column.
+- `mergemail365-web --host` with an address other computers can reach (`0.0.0.0`, a LAN address or name) is refused unless `--allow-remote` is also given, and then starts with a warning: the connection is plain HTTP, and anyone who learns the access URL can send email as the signed-in account.
+- Log files and the folder they are in are now readable by you only, as is the token cache from the moment it is written (it used to be created readable by others and restricted a moment later). Existing log files are restricted when the app next starts.
+
+### Changed
+
+- **Placeholders accept any column name, and spaces inside the braces.** `{{First-Name}}`, `{{E-mail}}` and `{{Price <GBP>}}` now work; before, a placeholder for a column whose name had punctuation was never filled in, and went out to recipients exactly as typed, with no warning. `{{ name }}` (with spaces inside the braces) is now the column `name`; before, it too was sent as typed. If you relied on either being left alone, note the change.
+- **In an HTML email, values from the spreadsheet are now escaped.** A cell containing `<`, `>` or `&` is shown to the recipient as typed, and line breaks within a cell are kept. Before, the cell's text was inserted as HTML, so `R&D <team>` could lose text or break the layout, and a spreadsheet built from other people's answers (a form, say) let them put their own links or images into your email. If you deliberately keep HTML in cells, it will now be shown as text; put the markup in the body instead.
+- **Dates, times, percentages and numbers from the spreadsheet are written as you'd expect.** A date cell is now `2026-12-01` (it was `2026-12-01 00:00:00`), with the time added only when there is one (`2026-12-01 14:30`); a cell formatted as a percentage is `25%` (it was `0.25`); numbers never appear as `3.0` or `1.23e+19`. Other Excel number formats, such as currency symbols, thousands separators and a fixed number of decimals, are still not applied (`£1,250.50` is sent as `1250.5`): the web UI lists the affected columns when you upload the spreadsheet, and the command line warns when a message uses one. To control exactly what is sent, format the column as Text in Excel.
+- A placeholder that names no column stops the send, as before, and the web UI now says so when you press Next on the Compose step instead of at the test email. A `{{` or `}}` that isn't part of a placeholder (such as `{{name}`) gives a warning, since it is probably a typo and will be sent as written.
+
+### Fixed
+
+- A display name in curly quotes is accepted in CC, BCC, Reply-To and the other address fields: `“Murdoch, Steven” <steven@example.com>`. macOS replaces straight quotes with curly ones as you type, so in the desktop app a name containing a comma could not be typed; it was refused with "An email address must have an @-sign".
+- Desktop app: the subject, body and chosen columns are restored when you open the app again, as they are in a browser. The desktop window used to forget them when it closed. (In a browser too, the chosen columns weren't restored once the spreadsheet was uploaded again, and editing the message before uploading it forgot them.)
+- Opening the app a second time while it is running no longer makes the two share one port on Windows, where the second window then talked to the first copy's server. On macOS and Linux the second copy failed to start; now it uses the next free port, as intended.
+- Web UI: on the Test step after New merge, the summary under the address said "(enter test address above)" although the field held your address.
+- Web UI: after New merge, the Verify step shows the dry run's log again; it showed only the summary line.
+- Desktop app on Windows: after New merge, the Preview step could show an empty box in place of an HTML email, for every recipient. Each preview now uses a new frame.
+- Web UI: the log of a test email or send names the account it is sent from ("Sending as …"), as the command line does.
+- A dry run's summary says "Would send", not "Sent", and that nothing was sent.
+- Web UI: an attachment smaller than 1 KB is shown with its size in bytes on the Send step, not as "0 KB". The sign-in diagnostics no longer run past the edge of the window.
+- Web UI: the advice shown for a failed test email is chosen from Microsoft's status code. It used to be chosen by searching the error text for numbers, so an address or request ID containing, say, `403` or `500` could produce the wrong advice. A network failure now says "Could not reach Microsoft".
+- `--log-level` with a misspelt level (`--log-level DEGUB`) is refused; it used to be quietly treated as `INFO`. At `DEBUG`, an unexpected error on the command line is now followed by its traceback.
+- Web UI: a spreadsheet whose name ends in upper-case `.XLSX` was refused as "Only .xlsx files are supported".
+- **A network timeout could send an email twice.** When Microsoft received a request but no answer came back in time (a read timeout), the email was sent again, up to `--max-retries` times, although the first attempt may well have been delivered. It is now not retried, and is reported as "outcome unknown: may have been delivered" rather than as failed: in the summary, in a new `unknown` column of the `--output` report, and in the web UI's results. Resuming from the report doesn't send it again, and says so; delete its line from the report to send it anyway. Connection errors, where nothing reached Microsoft, are still retried.
+- **Resuming a send skipped rows that share an address.** If the spreadsheet had several rows for one address (one person, several personalised emails) and a run stopped after the first of them, re-running with `--output` never sent the others, because any recorded success for the address skipped every row with it. Rows are now counted: each recorded success skips one row. The report also keeps one line per row instead of one per address.
+- Resuming a send re-sent to an address starting with `+`, `-`, `=` or `@` (such as `+tag@example.com`) every time, because the character that the report adds to stop spreadsheets reading such a value as a formula was not taken off again when the report was read back.
+- CC, BCC and reply-to addresses are checked before anything is sent, like the recipients' addresses. A mistyped address used to be discovered only when Microsoft rejected the email, once for every recipient. The web UI reports it when you leave the Compose step. The test address and BCC mode's To address are checked too.
+- A display name containing a comma now works when quoted: `"Doe, Jane" <jane@example.com>` used to be split into the "addresses" `Doe` and `Jane`. Addresses may also be separated by semicolons, as in Outlook.
+- `--batch-size`, `--delay` and `--max-retries` refuse values that make no sense. `--batch-size -1` used to send to everyone except the last recipient. `--batch-size 0`, which did nothing, is now an error too.
+- Several attachments that each fit but together exceed what one message can carry (about 3 MB) are refused before sending, instead of failing for every recipient.
+- `--sheet` with a name that isn't in the workbook gives a message listing the sheets, instead of "Unexpected error".
+- **A test email that Microsoft rejected was reported as sent.** In the web UI, step 4 showed "Test email sent successfully!" and let you continue even when Microsoft Graph refused the email (for example, a permission error or an invalid address). It now shows the failure and offers Retry. On the command line, a rejected `--test-email` exited with status 1 but printed nothing; it now says why. In the Python API, `send_merge(test_email=...)` raises `SendAborted` if the test email is not accepted, instead of returning a failed result.
+- Web UI: signing in after opening the app at `127.0.0.1` (rather than `localhost`) ended on a "Forbidden" page, although the sign-in itself had worked. It now returns to the app.
+- Web UI: a sign-in that can't start (no network, a mistyped tenant ID) shows the reason on the page instead of an "Internal Server Error" page.
+- Web UI: a spreadsheet with many columns or long column headings (a survey export, for example) could make the app forget the upload, answering "No spreadsheet uploaded" or "Forbidden" at the next step. The session's data was kept in a browser cookie, which browsers discard once it passes about 4 KB; it is now kept in the app, and the cookie is only an identifier.
+- Web UI: attachments are deleted from the temporary folder when the job that used them ends. A copy used to be kept for every test email, dry run and send until the next upload or until the app closed.
+- Web UI: an upload over 64 MB is refused with a message instead of being written to disk first.
+- `mergemail365-web`: the search for a free port now checks the address the server will listen on, not always `127.0.0.1`.
+- Signing in no longer changes the permissions of your home directory. On macOS and Linux, saving the token cache set the home directory to mode 0700 each time, which could stop other accounts and services (file sharing, a web server's user directories) from reaching files you had shared.
+- A token cache file that is damaged (for example by a crash while it was being written) no longer blocks sign-in: it is ignored with a warning and replaced the next time you sign in. The cache is now written atomically, so a crash can't truncate it.
+
 ### Added
 
+- The command line says which account it sends from: `Sending as you@example.com` once signed in, and a `From:` line in the confirmation prompt before a send (or "you will be asked to sign in"). If more than one account is signed in, a warning lists them and names the one used.
+- `mergemail365 --sign-out` signs out of every cached account. Before, only the web UI could sign out.
+- `-v` / `--verbose` (short for `--log-level DEBUG`) on `mergemail365` and `mergemail365-web`, and the log level can be set with the `MERGEMAIL365_LOG_LEVEL` environment variable or `log-level` in `~/.mergemail365.toml`.
 - Web UI: a footer showing the running version, e.g. "MergeMail365 v0.6.0".
 
 ## [0.6.0] — 2026-10-04
@@ -104,7 +158,8 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 - Tests now fail if they make a real network request, check calls against the real `msal` and `pywebview` APIs, and include contract tests that run real `msal` against mocked Microsoft Entra endpoints.
 - Added browser tests for pasting into the editor, toolbar formatting and links, plus checks for invalid HTML in the web UI.
 
-[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sjmurdoch/MergeMail365/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sjmurdoch/MergeMail365/compare/v0.4.0...v0.4.1
