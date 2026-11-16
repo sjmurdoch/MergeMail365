@@ -147,7 +147,7 @@ What reproducing finding 9 showed: the port stays busy only if a connection is s
 
 Since run in CI on Linux, macOS and Windows (pull request #5): both pass on all three.
 
-### Phase 4 (G-D1, G-D2): done on macOS; the Windows run is still to do
+### Phase 4 (G-D1, G-D2): done
 
 Both run on a developer's machine before a release, not in CI: `scripts/pre-release-checks.sh` (or with `webkit` or `window` for one of them).
 
@@ -163,4 +163,4 @@ Both run on a developer's machine before a release, not in CI: `scripts/pre-rele
 
 What writing it showed: pywebview's `evaluate_js()` does not work in this app, because it wraps the script in `eval()` and the Content Security Policy refuses that in the real window, as it should. The driver uses `run_js()` (the script as it is) and the page posts each answer back to the app's own port, where a WSGI layer added by the driver takes it. So the policy is known to be in force in the desktop window, which no test had shown.
 
-**Not done: the Windows run.** `tests/test_window.py` has only been run on macOS. On the Windows PC: `uv sync --all-extras`, then `scripts/pre-release-checks.sh window` from Git Bash (or set `MERGEMAIL365_WINDOW_TESTS=1` and run `pytest tests/test_window.py`). Until that has passed once, the driver itself is unproven on WebView2 (the file upload through `DataTransfer`, and `run_js`). Instructions for whoever does it: `docs/windows-window-test.md`.
+**The Windows run (2026-11-16).** Windows 10 Enterprise 22H2 (build 19045.7807), Microsoft Edge WebView2 Runtime 157.0.4341.46, pywebview 6.2.1, Python 3.14.2, following `docs/windows-window-test.md`. `tests/test_window.py` passed on the first run (26 s), with no change to the driver or the app: `run_js()` with answers posted back to the app's port, and the upload through `DataTransfer`, both work on WebView2. The window's storage was where the test expects it (`storage_path` under the temporary home's `AppData\mergemail365\webview`), so the developer's own was not touched. With `private_mode=True` put back in `webview.start()` the test failed in the `reopen` half, as on macOS ("timed out waiting for the remembered sheet"), so it guards finding 6 on Windows too; the line was then restored. No finding about the app. Not checked: the HTML preview at step 3 by eye (finding 2), since nobody watched the window; it stays in `TODO.md`.
