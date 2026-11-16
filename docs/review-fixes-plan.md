@@ -234,8 +234,8 @@ Written 2026-11-15, at the end of phase C, for an agent (or person) with no memo
 
 - **Branch:** `review-fixes`, branched from `master` at `ec3e8d3`, pushed as pull request #4. `git log --oneline master..review-fixes` lists the steps in order; each commit message says which finding and guard it covers. This section was written at the end of phase C and its instructions for D to H are kept as the record of what was asked; [Status](#status) says what was done.
 - **Done:** phases A to G and H1 to H4 (findings F1–F16; guards G1–G9; requirement R19; documents; dependency updates; the release candidates tested on macOS and Windows).
-- **Remaining:** H5, the real release, which is the user's, and the open items in `TODO.md`.
-- **Version and release:** the version in `pyproject.toml` is still 0.6.0; pre-releases `v0.7.0rc1` to `rc5` are tagged. All changelog entries are under "Unreleased" in `CHANGELOG.md`. The next release is 0.7.0, with everything on this branch (decided 2026-11-15). Bumping the version and releasing are the user's call; ask, don't do it.
+- **Remaining:** the open items in `TODO.md`.
+- **Version and release:** the branch ends with the version bump to 0.7.0 (2026-11-16), to be merged to `master`, tagged `v0.7.0` and released; pre-releases `v0.7.0rc1` to `rc5` came before it.
 - **Last verified state:** see "Checks at the last commit" in [Status](#status).
 
 ### How the user wants this run
@@ -446,9 +446,9 @@ The command-line tool is not part of what the release workflow builds. If the us
 
 ## Status
 
-Updated 2026-11-15 (phase H tests complete). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
+Updated 2026-11-16 (version 0.7.0). Work is on the `review-fixes` branch, one commit per step. At each phase boundary this section is updated and the user is asked whether to continue.
 
-**Where things stand:** phases A to G are complete. Phase H: H1 to H4 are done; the last candidate, `v0.7.0rc5` at `4ee682b`, passed its retests on macOS (rc3) and Windows (rc4, rc5). H5, the real release, is the user's. The branch is pushed (pull request #4), pre-releases rc1 to rc5 are published, and the version has not been bumped; changelog entries are under "Unreleased".
+**Where things stand:** phases A to G are complete. Phase H: H1 to H4 are done; the last candidate, `v0.7.0rc5` at `4ee682b`, passed its retests on macOS (rc3) and Windows (rc4, rc5). H5: the branch (pull request #4) ends with the version bump to 0.7.0 and its changelog section, for merging and release.
 
 **Checks at the last commit:** the full test suite passes (1263 passed, 14 skipped at `ae576fb`), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps. Apalache was run at A1 and again on 2026-11-16 with Quint 0.33.1 and the Apalache it installs (`spec/check.sh --all fixed`); the model has not changed since A1.
 
@@ -546,7 +546,7 @@ Checked 2026-11-15. "Allowed" is the newest version public for at least 7 days (
 | 6. Biome | 2.5.14 → 2.6.6 (11-06) | 2.6 promotes 59 rules to stable, most recommended, among them `useDomNodeTextContent` and `useIframeSandbox`, which may report findings in `app.js` | `biome lint` | **Needs a trial first**: running Biome 2.6.6 through `npx` was blocked by the session's permission check (downloading and running a new tool). Run it once (with your approval, or install it with Homebrew yourself), fix or configure what it reports, then pin it in CI and `biome.json` |
 | 7. Python | 3.14 (CI and release get the latest patch, 3.14.10) | 3.15.0 released 2026-10-09, now 3.15.2. Every dependency above supports it | — | **Hold** at 3.14; adding 3.15 to the CI matrix is your call (it doubles the test jobs' minutes) |
 
-### Phase H: released build on real systems — tests complete, H5 waiting
+### Phase H: released build on real systems — complete
 
 | Step | State | Notes |
 |---|---|---|
@@ -558,7 +558,7 @@ Checked 2026-11-15. "Allowed" is the newest version public for at least 7 days (
 | H4 round 3 | Done | macOS 26.7.1 on rc3, 2026-11-15: the retest items 1, 2, 6, 9, 11, 12 and 15 all passed (smart-quote CC accepted and shown as `Murdoch, Steven`; HTML preview, dry-run log and restored columns after New merge and restart; "Sending as" in the log, no secrets in rc3's lines). Fixed since: rc3's port probe treated a port left in TIME_WAIT by a mid-send quit as busy, so the restart moved to 5051, another origin, and lost the saved fields (the probe now sets SO_REUSEADDR outside Windows, as Werkzeug does); after New merge, step 4's summary said "(enter test address above)" next to the pre-filled address. CI green at `e5b697d`. Pre-release `v0.7.0rc4` at `08932cd`, bundles attached, for the Windows retest. |
 | H4 round 4 | Done | Windows 11 26H2 on rc4, 2026-11-15: items 1, 2, 11, 15 and the second-copy check passed (diagnostics box wraps inside the column; HTML preview, dry-run log and test-address summary after New merge; a restart straight after closing mid-send kept port 5050; a second copy got 5051 and an empty window; "Sending as" logged, no secrets in rc4's lines). SmartScreen: "Run anyway" did nothing for the self-signed build; left until the app has a trusted certificate (user's decision). Item 12 failed: the name column came back as "none" after a restart, because an edit before the upload (restoring the HTML body) made the auto-save write the empty dropdowns over the saved columns; fixed in `5fdbcb0` (columns are saved only once the dropdowns list a spreadsheet's columns). Left as minor: Test connection's result stays on screen after Sign out. Pre-release `v0.7.0rc5` at `4ee682b`, CI green, bundles attached. Next: retest item 12 on Windows. |
 | H4 round 5 | Done | Windows 11 26H2 on rc5, 2026-11-15: the footer and item 12 passed. After closing mid-send and reopening, then waiting before the upload, the Email and Name columns came back (twice), and a deliberate `-- none --` was remembered too. No "Port 5050 in use", "Sending as" logged, and no secrets in rc5's lines. No failures. |
-| H5 | Waiting for the user | The real release (version number, tag, release notes from the changelog). Open items left as they are: no trusted code-signing certificate (SmartScreen "Run anyway" did nothing on rc4); Cmd+Q mid-send has no confirmation; New merge leaves the diagnostics and options panels open; the preview table's header row is tall; Test connection's result stays on screen after Sign out; earlier versions' log lines are left in place (changelog note); no single-instance lock. |
+| H5 | Version 0.7.0 | The user asked on 2026-11-16 for the branch to be merged and released as 0.7.0: version bumped and the changelog section dated in the last commit of the branch; the tag and GitHub release follow the merge. Open items left as they are: no trusted code-signing certificate (SmartScreen "Run anyway" did nothing on rc4); Cmd+Q mid-send has no confirmation; New merge leaves the diagnostics and options panels open; the preview table's header row is tall; Test connection's result stays on screen after Sign out; earlier versions' log lines are left in place (changelog note); no single-instance lock. |
 
 
 What each step involves, file by file, is under [Remaining work, in detail](#remaining-work-in-detail) in the Handover section. Add a table here for each phase as it is done, in the style of the ones above.

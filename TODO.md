@@ -14,7 +14,7 @@ Left over when the plan in `archive/quint-model-plan.md` was closed (2026-10-03)
 
 ## Open after the November 2026 review fixes
 
-From `docs/review-fixes-plan.md` ("Loose ends and things not verified", and the open items of phase H). The next release is 0.7.0; the first item under "Release and packaging" should be looked at before it, and none of the rest blocks it.
+From `docs/review-fixes-plan.md` ("Loose ends and things not verified", and the open items of phase H). Open when 0.7.0 was released (2026-11-16); the first item under "Release and packaging" was not checked before the release.
 
 - **The 4 MB request limit.** `api._check_message_size()` and the per-attachment check assume Microsoft Graph accepts about 4 MB per `sendMail` request (3 MB of files once base64-encoded). That figure is not in the copies of Microsoft's documentation in `docs/`; check it against the current documentation.
 - **Filters and address warnings.** Recipients' addresses are validated before filters are applied, so rows a filter excludes can still produce "invalid address" warnings.
@@ -27,11 +27,11 @@ From `docs/review-fixes-plan.md` ("Loose ends and things not verified", and the 
 - **Sign-in uses the query response mode.** msal warns (`UserWarning`, seen in the test run) that `response_mode='form_post'` is recommended for the authorisation code flow, so that the code is not in the callback URL. The callback would have to accept a POST from Microsoft's origin, which the session cookie's `SameSite` setting and the CSRF check don't allow as they are; the log already redacts `code=`.
 - **File modes on Windows.** `write_private()` and `private_dir()` set modes only on POSIX, and the permission tests are skipped on Windows, where the files rely on the profile directory's ACL. Not checked beyond that.
 - **Python 3.15.** Held at 3.14 only. Every dependency supports 3.15; adding it to the CI matrix doubles the test jobs' minutes.
-- **This plan** moves to `archive/` once 0.7.0 is released.
+- **This plan** has not been moved to `archive/`: comments in the tests, the source and `spec/` cite it at `docs/review-fixes-plan.md` and would need changing with it.
 
 ### Release and packaging
 
-- **Windows SmartScreen.** On `v0.7.0rc4`, a bundle downloaded in a browser (so carrying the Mark of the Web) was blocked by SmartScreen, and "Run anyway" did nothing: the build is self-signed. Tested once only, and not compared with 0.6.0, so it is not known whether this is new. Check that a user can start a downloaded build before releasing 0.7.0; the lasting fix is a trusted code-signing certificate (`docs/codesigning.md`).
+- **Windows SmartScreen.** On `v0.7.0rc4`, a bundle downloaded in a browser (so carrying the Mark of the Web) was blocked by SmartScreen, and "Run anyway" did nothing: the build is self-signed. Tested once only, and not compared with 0.6.0, so it is not known whether this is new. Check that a user can start a downloaded 0.7.0 build; the lasting fix is a trusted code-signing certificate (`docs/codesigning.md`).
 - **A rejected test email was not tried on a real system.** Checklist item 10 of phase H (Graph refuses the test email, the step must show a failure) needs an account Graph refuses, such as one without a mailbox; none was available on either platform. `tests/test_outcomes.py` and `TestRejectedTestEmail` cover it against mocked answers.
 - **The command-line tool** was not part of phase H: the release workflow builds only the desktop app. Its sending path is covered by the mocked tests and shares `send_merge()` with the app.
 - **Log lines from earlier versions.** Versions 0.4.1 to 0.6.0 wrote access tokens (expired within about an hour) and message bodies to the log file; upgrading leaves those lines in place, with a changelog note saying where the file is. Deleting or rotating the old file on first start would remove them.
