@@ -6,6 +6,7 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ### Fixed
 
+- The sheet you chose is chosen again when you reopen the app and upload the workbook, like the columns. It was only restored when the page was reloaded while the app kept running; after a restart the first sheet was silently used.
 - Web UI: New merge closes the panels you had opened (Additional options, All recipients, Preview data) and removes Test connection's result, so the page is as it is when first opened.
 - Web UI: Test connection's result, which describes the account that was signed in, is removed when you sign out.
 

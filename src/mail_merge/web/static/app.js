@@ -509,14 +509,7 @@ function showRestoredSpreadsheet() {
     showPlaceholderChips(s.columns);
     showFilterChips(s.columns);
 
-    // Restore saved sheet selection — if it differs from the
-    // server's active sheet, re-fetch the preview for that sheet.
-    const savedSheet = localStorage.getItem("mm_sheet");
-    if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== (s.active_sheet || s.sheets[0])) {
-        $("sheet-select").value = savedSheet;
-        // Trigger a change to re-fetch the sheet's data
-        $("sheet-select").dispatchEvent(new Event("change"));
-    }
+    restoreSavedSheet(s);
 
     // Restore chosen columns if they match what's in the sheet
     const savedEmailCol = localStorage.getItem("mm_email_col");
@@ -526,6 +519,18 @@ function showRestoredSpreadsheet() {
     const savedNameCol = localStorage.getItem("mm_name_col");
     if (savedNameCol && s.columns.includes(savedNameCol)) {
         $("name-column").value = savedNameCol;
+    }
+}
+
+// Choose the sheet that was chosen last time, if the workbook has one of
+// that name and the server read another: after a reload, and after the
+// spreadsheet is uploaded again once the app has been reopened.
+function restoreSavedSheet(s) {
+    const savedSheet = savedSetting("mm_sheet");
+    if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== (s.active_sheet || s.sheets[0])) {
+        $("sheet-select").value = savedSheet;
+        // Trigger a change to re-fetch the sheet's data
+        $("sheet-select").dispatchEvent(new Event("change"));
     }
 }
 
@@ -768,6 +773,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         // Build preview table on step 1
         buildPreviewTable(data.columns, data.rows, data.total_rows);
         showFilterChips(data.columns);
+        restoreSavedSheet(data);
     } catch (e) {
         alert(`Upload error: ${e.message}`);
     }
