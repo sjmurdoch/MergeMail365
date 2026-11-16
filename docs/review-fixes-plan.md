@@ -450,7 +450,7 @@ Updated 2026-11-15 (phase H tests complete). Work is on the `review-fixes` branc
 
 **Where things stand:** phases A to G are complete. Phase H: H1 to H4 are done; the last candidate, `v0.7.0rc5` at `4ee682b`, passed its retests on macOS (rc3) and Windows (rc4, rc5). H5, the real release, is the user's. The branch is pushed (pull request #4), pre-releases rc1 to rc5 are published, and the version has not been bumped; changelog entries are under "Unreleased".
 
-**Checks at the last commit:** the full test suite passes (count in the commit message), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps (run on the model as of A1; the model has not changed since).
+**Checks at the last commit:** the full test suite passes (1263 passed, 14 skipped at `ae576fb`), mypy, Ruff and Biome are clean, the Quint scenarios pass for all four variants, and Apalache reports that `allInvariants` holds for `fixed` at 16 steps. Apalache was run at A1 and again on 2026-11-16 with Quint 0.33.1 and the Apalache it installs (`spec/check.sh --all fixed`); the model has not changed since A1.
 
 ### Phase A: urgent fixes — complete
 
