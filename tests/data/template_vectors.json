@@ -738,6 +738,139 @@
       "unresolved": [],
       "rendered": "A",
       "stray": false
+    },
+    {
+      "name": "curly apostrophe typed for a straight one in the column",
+      "template": "Ask {{Manager’s name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city",
+        "Manager's name": "Bob",
+        "Quote \"mark\"": "q"
+      },
+      "unresolved": [],
+      "rendered": "Ask Bob",
+      "stray": false
+    },
+    {
+      "name": "curly double quotes typed for straight ones",
+      "template": "{{Quote “mark”}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city",
+        "Manager's name": "Bob",
+        "Quote \"mark\"": "q"
+      },
+      "unresolved": [],
+      "rendered": "q",
+      "stray": false
+    },
+    {
+      "name": "straight apostrophe typed for a curly one in the column",
+      "template": "Ask {{Manager's name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city",
+        "Manager’s name": "Bob"
+      },
+      "unresolved": [],
+      "rendered": "Ask Bob",
+      "stray": false
+    },
+    {
+      "name": "narrow no-break space and zero-width space in a name",
+      "template": "{{First Name}} {{First​ Name}} {{﻿name}}",
+      "html": false,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "Alice Alice Alice",
+      "stray": false
+    },
+    {
+      "name": "curly apostrophe in an HTML body",
+      "template": "<p>Ask {{Manager’s name}}</p>",
+      "html": true,
+      "row": {
+        "name": "Alice",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city",
+        "Manager's name": "Bob",
+        "Quote \"mark\"": "q"
+      },
+      "unresolved": [],
+      "rendered": "<p>Ask Bob</p>",
+      "stray": false
+    },
+    {
+      "name": "a value keeps its curly quotes",
+      "template": "{{name}}",
+      "html": false,
+      "row": {
+        "name": "“Al” O’Brien",
+        "First Name": "Alice",
+        "E-mail": "alice@example.com",
+        "First-Name": "Al",
+        "Price <GBP>": "12 < 20",
+        "R&D budget": "AT&T \"quoted\" it's",
+        "Größe": "groß",
+        "address": "1 High St\nOxford",
+        "other": "{{name}}",
+        "tag": "<b>bold</b>",
+        "İstanbul": "city"
+      },
+      "unresolved": [],
+      "rendered": "“Al” O’Brien",
+      "stray": false
     }
   ],
   "chip_columns": [

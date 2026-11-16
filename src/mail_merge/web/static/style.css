@@ -57,19 +57,31 @@ body > main {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 1rem;
     padding: 0.5rem 0;
     margin-bottom: 1rem;
     border-bottom: 1px solid var(--pico-muted-border-color);
 }
 
+/* A long account name wraps inside the header instead of widening the page. */
 .header-bar .identity {
     font-size: 0.9rem;
     color: var(--pico-muted-color);
+    min-width: 0;
+    text-align: right;
+}
+
+.header-bar .identity .auth-indicator {
+    white-space: nowrap;  /* "Signed in as" stays whole; the address wraps */
+    max-width: 100%;
 }
 
 .header-bar .identity .email {
     color: var(--pico-color);
     font-weight: 600;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .app-footer {
@@ -83,7 +95,9 @@ body > main {
 .step-indicator {
     display: flex;
     justify-content: center;
+    flex-wrap: wrap;  /* a narrow window gets two rows of steps */
     gap: 0;
+    row-gap: 0.5rem;
     margin: 1.5rem 0;
     padding: 0;
     list-style: none;
@@ -457,6 +471,18 @@ trix-editor p {
     max-height: 300px;
     max-width: 840px;
     overflow-y: auto;
+}
+
+/* One line per row, as in a spreadsheet: with many columns the browser
+   otherwise squeezes each to a few characters and the rows grow hundreds of
+   pixels tall. A long heading or value is cut short (its title has it in
+   full) and the table scrolls sideways. */
+.table-wrap th,
+.table-wrap td {
+    white-space: nowrap;
+    max-width: 24rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Auth status inline */

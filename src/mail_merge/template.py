@@ -7,7 +7,9 @@ the email cannot differ):
 * A placeholder is ``{{``, any text without braces, ``}}``. The text names
   a column: surrounding spaces are ignored, runs of spaces count as one, and
   case doesn't matter. So ``{{ First   name }}`` is the column
-  ``First Name``.
+  ``First Name``. Curly quotes count as straight ones, no-break spaces as
+  spaces, and invisible characters are ignored (``typed_text.plain``):
+  macOS types ``{{Manager’s name}}`` for the column ``Manager's name``.
 * Any column name without braces can be used, whatever punctuation it has
   (``{{E-mail}}``, ``{{Price <GBP>}}``).
 * A placeholder that names no column is *unresolved*: an error, never text
@@ -21,6 +23,8 @@ the email cannot differ):
 """
 
 import re
+
+from mail_merge.typed_text import plain
 
 PLACEHOLDER_RE = re.compile(r"\{\{([^{}]*)\}\}")
 _TAG_RE = re.compile(r"<[^<>]*>")
@@ -50,8 +54,9 @@ def unescape_entities(text: str) -> str:
 
 def normalize_name(name: str) -> str:
     """A column or placeholder name as compared: trimmed, single-spaced,
-    lower case."""
-    return _SPACES_RE.sub(" ", name).strip().lower()
+    lower case, with the characters a system substitutes while typing
+    as the plain ones."""
+    return _SPACES_RE.sub(" ", plain(name)).strip().lower()
 
 
 def display_name(raw: str) -> str:

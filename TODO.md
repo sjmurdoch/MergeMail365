@@ -31,6 +31,7 @@ From `docs/review-fixes-plan.md` ("Loose ends and things not verified", and the 
 
 ### Release and packaging
 
+- **A blank HTML preview cannot be seen by a test.** Phase H's blank preview on Windows (after New merge) held the right document and drew nothing; look at step 3 by eye on Windows before a release.
 - **Windows SmartScreen.** On `v0.7.0rc4`, a bundle downloaded in a browser (so carrying the Mark of the Web) was blocked by SmartScreen, and "Run anyway" did nothing: the build is self-signed. Tested once only, and not compared with 0.6.0, so it is not known whether this is new. Check that a user can start a downloaded 0.7.0 build; the lasting fix is a trusted code-signing certificate (`docs/codesigning.md`).
 - **A rejected test email was not tried on a real system.** Checklist item 10 of phase H (Graph refuses the test email, the step must show a failure) needs an account Graph refuses, such as one without a mailbox; none was available on either platform. `tests/test_outcomes.py` and `TestRejectedTestEmail` cover it against mocked answers.
 - **The command-line tool** was not part of phase H: the release workflow builds only the desktop app. Its sending path is covered by the mocked tests and shares `send_merge()` with the app.
@@ -41,6 +42,3 @@ From `docs/review-fixes-plan.md` ("Loose ends and things not verified", and the 
 - **Quitting during a send.** Cmd+Q (or closing the window) mid-send quits without asking. The next start reports which emails went out, but a confirmation would be kinder.
 - **No single-instance lock.** A second copy of the app opens on the next port with an empty wizard, and each copy reports the other's running send as interrupted (the "Two web processes" item above).
 - **No way to continue after Stop.** Step 6 offers only New merge after a stopped send; sending to the rest means starting again and filtering out those already sent. Deliberate (the safe path), but the web UI has no resume like the command line's `--output`.
-- **New merge** leaves the diagnostics and options panels open.
-- **Test connection's result** stays on screen after Sign out.
-- **The preview table's header row** is tall when column headings are long.

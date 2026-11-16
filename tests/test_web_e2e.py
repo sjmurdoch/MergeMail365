@@ -191,6 +191,16 @@ def authenticated_page(page: Page, live_server: str) -> Page:
     return page
 
 
+def _allow_clipboard(page: Page) -> None:
+    """Let the page write to the clipboard. Only Chromium has a permission
+    for it, so the real-paste tests are skipped in the WebKit run
+    (scripts/pre-release-checks.sh)."""
+    browser = page.context.browser
+    if browser is None or browser.browser_type.name != "chromium":
+        pytest.skip("writing to the clipboard from a test needs Chromium")
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+
+
 def _assert_dom_valid(page: Page) -> None:
     """Run client-side validateDOM() and fail if any issues are found."""
     errors = page.evaluate("validateDOM()")
@@ -622,7 +632,7 @@ class TestComposeStep:
         leave there.
         """
         page = authenticated_page
-        page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+        _allow_clipboard(page)
         self._open_trix(page, sample_xlsx)
         page.evaluate("""async () => {
             window._pasteSeen = null;
@@ -646,7 +656,7 @@ class TestComposeStep:
 
     def _clipboard_paste(self, page: Page, sample_xlsx: Path, html: str | None, text: str) -> str:
         """Paste via the real clipboard into Trix and return the resulting body HTML."""
-        page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+        _allow_clipboard(page)
         self._open_trix(page, sample_xlsx)
         page.evaluate("""async ([html, text]) => {
             const items = {'text/plain': new Blob([text], {type: 'text/plain'})};

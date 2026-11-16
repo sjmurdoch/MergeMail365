@@ -17,6 +17,7 @@ from mail_merge.excel import number_format_columns, read_recipients
 from mail_merge.template import (
     extract_placeholders,
     has_stray_braces,
+    normalize_name,
     render,
     unusable_columns,
     used_columns,
@@ -28,11 +29,13 @@ from mail_merge.sender import (
     MessageOptions,
     SendAborted,
     SendResult,
+    count,
     send_all,
     send_bcc_blast,
     send_one,
 )
 from mail_merge.report import append_csv, print_summary, read_csv, write_csv
+from mail_merge.typed_text import plain, strip_invisible
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +64,14 @@ def _parse_address_entries(
 def _normalize_column(
     column: str, recipients: list[dict[str, str]], label: str,
 ) -> str:
-    """Resolve a column name case-insensitively against recipient headers.
+    """Resolve a column name against recipient headers, as a placeholder's
+    name is (``template.normalize_name``): case, spacing and the characters
+    a system substitutes while typing don't matter.
 
     Raises ``ValueError`` if the column is not found.
     """
-    match = next((k for k in recipients[0] if k.lower() == column.lower()), None)
+    wanted = normalize_name(column)
+    match = next((k for k in recipients[0] if normalize_name(k) == wanted), None)
     if match is None:
         raise ValueError(
             f"{label} {column!r} not found "
@@ -243,6 +249,7 @@ def _parse_filter(expr: str) -> tuple[str, str, str]:
         f"Invalid filter syntax: {expr!r} "
         f"(expected 'column=value' or 'column!=value')"
     )
+    expr = strip_invisible(expr)  # pasted text can hide one inside "!="
     for op in ("!=", "="):
         if op in expr:
             parts = expr.split(op, 1)
@@ -279,7 +286,10 @@ def apply_filters(
 ) -> list[dict[str, str]]:
     """Apply all filter expressions (AND logic) to recipients.
 
-    Column names and values are compared case-insensitively.
+    Column names and values are compared case-insensitively, and with the
+    characters a system substitutes while typing as the plain ones
+    (``typed_text.plain``): the value in ``Company!=O’Neil``, as macOS
+    types it, must exclude the cell ``O'Neil``, not silently nobody.
     Raises ``ValueError`` for bad syntax or unknown columns.
     """
     parsed = [_parse_filter(f) for f in filters]
@@ -289,7 +299,7 @@ def apply_filters(
 
     # Validate and resolve column names once
     resolved = [
-        (_normalize_column(col, recipients, "Filter column"), op, val.lower())
+        (_normalize_column(col, recipients, "Filter column"), op, plain(val).strip().lower())
         for col, op, val in parsed
     ]
 
@@ -297,7 +307,7 @@ def apply_filters(
     for row in recipients:
         match = True
         for actual_key, op, val_lower in resolved:
-            cell = str(row.get(actual_key, "")).lower()
+            cell = plain(str(row.get(actual_key, ""))).lower()
             if op == "=" and cell != val_lower:
                 match = False
                 break
@@ -556,9 +566,9 @@ def send_merge(
             raise ValueError(
                 f"No recipients match the filter(s): {', '.join(filters)}"
             )
-        logger.info("📋 Loaded %d recipients (filtered from %d)", len(recipients), total)
+        logger.info("📋 Loaded %s (filtered from %d)", count(len(recipients), "recipient"), total)
     else:
-        logger.info("📋 Loaded %d recipients", len(recipients))
+        logger.info("📋 Loaded %s", count(len(recipients), "recipient"))
 
     # --- Resume and batch size (skip for test emails) ---
     previous_results: list[SendResult] = []
@@ -699,11 +709,11 @@ def send_merge(
             blast_batch_count = max(1, (len(recipients) + max_per_batch - 1) // max_per_batch)
             console.print(f"[bold]Subject:[/bold]  {escape(subject)}")
             console.print(f"[bold]To:[/bold]       {escape(blast_to.address)}")
-            console.print(f"[bold]BCC:[/bold]      {len(recipients)} recipients in {blast_batch_count} batch(es)")
+            console.print(f"[bold]BCC:[/bold]      {count(len(recipients), 'recipient')} in {count(blast_batch_count, 'batch', 'batches')}")
         else:
             sample = recipients[0]
             console.print(f"[bold]Subject:[/bold]  {escape(render(subject, sample))}")
-            console.print(f"[bold]To:[/bold]       {len(recipients)} recipients")
+            console.print(f"[bold]To:[/bold]       {count(len(recipients), 'recipient')}")
         if msg_opts.cc:
             console.print(f"[bold]CC:[/bold]       {escape(_format_addrs(msg_opts.cc))}")
         if not bcc_blast and msg_opts.bcc:

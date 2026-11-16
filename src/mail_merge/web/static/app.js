@@ -167,7 +167,7 @@ function updateStepUI(n) {
 }
 
 function renderSpreadsheetSummary(data) {
-    $("spreadsheet-summary").textContent = `${data.file_name}: ${data.columns.length} columns, ${data.total_rows} rows.`;
+    $("spreadsheet-summary").textContent = `${data.file_name}: ${WizardCore.count(data.columns.length, "column")}, ${WizardCore.count(data.total_rows, "row")}.`;
     renderNumberFormatNote(data);
     if (data.total_rows > 99) {
         const badge = document.createElement("span");
@@ -346,7 +346,7 @@ function initComposeStep() {
     const sd = state.spreadsheetData;
     // Update compose data summary
     $("compose-data-summary").textContent =
-        `${sd.file_name}: ${sd.columns.length} columns, ${sd.total_rows} rows.`;
+        `${sd.file_name}: ${WizardCore.count(sd.columns.length, "column")}, ${WizardCore.count(sd.total_rows, "row")}.`;
 
     // Build the read-only preview table on the compose step
     buildComposePreviewTable(sd.columns, sd.rows, sd.total_rows);
@@ -509,14 +509,7 @@ function showRestoredSpreadsheet() {
     showPlaceholderChips(s.columns);
     showFilterChips(s.columns);
 
-    // Restore saved sheet selection — if it differs from the
-    // server's active sheet, re-fetch the preview for that sheet.
-    const savedSheet = localStorage.getItem("mm_sheet");
-    if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== (s.active_sheet || s.sheets[0])) {
-        $("sheet-select").value = savedSheet;
-        // Trigger a change to re-fetch the sheet's data
-        $("sheet-select").dispatchEvent(new Event("change"));
-    }
+    restoreSavedSheet(s);
 
     // Restore chosen columns if they match what's in the sheet
     const savedEmailCol = localStorage.getItem("mm_email_col");
@@ -526,6 +519,18 @@ function showRestoredSpreadsheet() {
     const savedNameCol = localStorage.getItem("mm_name_col");
     if (savedNameCol && s.columns.includes(savedNameCol)) {
         $("name-column").value = savedNameCol;
+    }
+}
+
+// Choose the sheet that was chosen last time, if the workbook has one of
+// that name and the server read another: after a reload, and after the
+// spreadsheet is uploaded again once the app has been reopened.
+function restoreSavedSheet(s) {
+    const savedSheet = savedSetting("mm_sheet");
+    if (savedSheet && s.sheets.includes(savedSheet) && savedSheet !== (s.active_sheet || s.sheets[0])) {
+        $("sheet-select").value = savedSheet;
+        // Trigger a change to re-fetch the sheet's data
+        $("sheet-select").dispatchEvent(new Event("change"));
     }
 }
 
@@ -582,6 +587,12 @@ function hideAuthMessage() {
     el.classList.add("hidden");
 }
 
+// The Test connection result describes the account that was signed in.
+function hideAuthDiagnostics() {
+    hide("auth-diagnostics");
+    clear("auth-diag-content");
+}
+
 // Sign-in button state management
 
 function updateSignInButton() {
@@ -629,6 +640,7 @@ async function doSignOut() {
     btn.setAttribute("aria-busy", "true");
     try {
         await apiFetch("/auth/logout", { method: "POST" });
+        hideAuthDiagnostics();
         showAuthMessage("Signed out successfully.", "info");
     } catch (e) {
         showAuthMessage(`Sign-out failed: ${e.message}`, "error");
@@ -761,6 +773,7 @@ $("spreadsheet-file").addEventListener("change", async (e) => {
         // Build preview table on step 1
         buildPreviewTable(data.columns, data.rows, data.total_rows);
         showFilterChips(data.columns);
+        restoreSavedSheet(data);
     } catch (e) {
         alert(`Upload error: ${e.message}`);
     }
@@ -800,8 +813,8 @@ function populateSelect(sel, cols, required) {
 function buildPreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#preview-table thead");
     const tbody = document.querySelector("#preview-table tbody");
-    setHtml(thead, html`<tr>${columns.map(c => html`<th>${c}</th>`)}</tr>`);
-    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
+    setHtml(thead, html`<tr>${columns.map(c => html`<th title="${c}">${c}</th>`)}</tr>`);
+    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td title="${row[c] || ""}">${row[c] || ""}</td>`)}</tr>`));
     // Show truncation notice if not all rows are displayed
     const caption = document.querySelector("#preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
@@ -815,8 +828,8 @@ function buildPreviewTable(columns, rows, totalRows) {
 function buildComposePreviewTable(columns, rows, totalRows) {
     const thead = document.querySelector("#compose-preview-table thead");
     const tbody = document.querySelector("#compose-preview-table tbody");
-    setHtml(thead, html`<tr>${columns.map(c => html`<th>${c}</th>`)}</tr>`);
-    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
+    setHtml(thead, html`<tr>${columns.map(c => html`<th title="${c}">${c}</th>`)}</tr>`);
+    setHtml(tbody, rows.map(row => html`<tr>${columns.map(c => html`<td title="${row[c] || ""}">${row[c] || ""}</td>`)}</tr>`));
     const caption = document.querySelector("#compose-preview-table caption") || document.createElement("caption");
     if (totalRows > rows.length) {
         caption.textContent = `Showing ${rows.length} of ${totalRows} rows`;
@@ -1210,8 +1223,8 @@ async function loadPreview(isCurrent = () => true) {
         showInvalidEmailWarning(data.invalid_emails || [], data.total_before_validation || 0);
 
         // Update verify/send recipient counts
-        $("verify-count").textContent = rows.length;
-        $("send-count").textContent = rows.length;
+        $("verify-count").textContent = WizardCore.count(rows.length, "email");
+        $("send-count").textContent = WizardCore.count(rows.length, "real email");
         return true;
 
     } catch (e) {
@@ -1265,7 +1278,7 @@ function renderPreviewRecipient() {
     if (state.sendMode === "bcc") {
         $("preview-to").textContent = $("bcc-blast-to").value || "(none)";
         $("preview-cc").textContent = "(none in BCC mode)";
-        $("preview-bcc").textContent = `[all ${recipients.length} recipients]`;
+        $("preview-bcc").textContent = `[${WizardCore.count(recipients.length, "recipient")}]`;
     } else {
         const emailCol = $("email-column").value;
         const nameCol = $("name-column").value;
@@ -1302,8 +1315,8 @@ function buildRecipientsTable() {
     const cols = [emailCol, ...state.spreadsheetData.columns.filter(c => c !== emailCol)];
     const thead = document.querySelector("#recipients-table thead");
     const tbody = document.querySelector("#recipients-table tbody");
-    setHtml(thead, html`<tr>${cols.map(c => html`<th>${c}</th>`)}</tr>`);
-    setHtml(tbody, recipients.map(row => html`<tr>${cols.map(c => html`<td>${row[c] || ""}</td>`)}</tr>`));
+    setHtml(thead, html`<tr>${cols.map(c => html`<th title="${c}">${c}</th>`)}</tr>`);
+    setHtml(tbody, recipients.map(row => html`<tr>${cols.map(c => html`<td title="${row[c] || ""}">${row[c] || ""}</td>`)}</tr>`));
 }
 
 function showInvalidEmailWarning(invalidEmails, totalBefore) {
@@ -1355,7 +1368,7 @@ async function runJob(mode, id) {
     show(logPanel);
     if (mode !== "test_email") {
         const recipients = getRecipients();
-        $("verify-count").textContent = recipients ? recipients.length : "?";
+        $("verify-count").textContent = WizardCore.count(recipients ? recipients.length : "?", "email");
     }
     clear(logPanel);
     saveState();
@@ -1403,7 +1416,7 @@ function dryRunSummary() {
     const recs = getRecipients();
     const n = recs ? recs.length : "?";
     const estSec = recs ? recs.length * 2 : "?";
-    let msg = `${n} emails ready to send. Estimated time: ~${estSec} seconds (2-second delay between sends).`;
+    let msg = `${WizardCore.count(n, "email")} ready to send. Estimated time: ~${WizardCore.count(estSec, "second")} (2-second delay between sends).`;
     if (_auth.tokenExpiresAt && recs) {
         const estEndMs = Date.now() + recs.length * 2000;
         if (estEndMs > _auth.tokenExpiresAt.getTime()) {
@@ -1421,7 +1434,7 @@ function prepareSend() {
     state.sendResults = null;
     const recipients = getRecipients();
     const n = recipients ? recipients.length : "?";
-    $("send-count").textContent = n;
+    $("send-count").textContent = WizardCore.count(n, "real email");
 
     // Build details
     const details = [];
@@ -1611,9 +1624,18 @@ function newMerge() {
     return dispatch({ type: "newMerge" });
 }
 
+// Which collapsible panels are open when the page loads.
+const DETAILS_AT_LOAD = [...document.querySelectorAll("details")].map((el) => [el, el.open]);
+
 // The "clearForm" effect of New merge: empty every field the previous merge
-// filled in.
+// filled in, so that the page shows what a newly loaded one does
+// (TestSecondPass in tests/test_web_e2e_workflow.py compares the two).
 function clearForm() {
+    // Panels the user opened, and the Test connection result
+    for (const [el, open] of DETAILS_AT_LOAD) el.open = open;
+    hideAuthDiagnostics();
+    hideAuthMessage();
+
     // Clear Step 1 — spreadsheet
     $("spreadsheet-file").value = "";
     hide("spreadsheet-info");

@@ -16,6 +16,7 @@ quote a name too: macOS substitutes them for straight quotes as you type.
 import re
 
 from mail_merge.sender import EmailAddress
+from mail_merge.typed_text import strip_invisible
 
 _NAME_AND_ADDRESS_RE = re.compile(r"^(.*)<([^<>]*)>$", re.DOTALL)
 
@@ -85,7 +86,10 @@ def parse_addresses(value: str | list[str] | None, label: str) -> list[EmailAddr
     if value is None:
         return []
     texts = [value] if isinstance(value, str) else list(value)
-    return [_parse_one(entry, label) for text in texts for entry in split_addresses(text)]
+    # An address copied from Outlook or a web page can carry characters
+    # that take no space; the validator would refuse them, with a message
+    # about something the user cannot see.
+    return [_parse_one(entry, label) for text in texts for entry in split_addresses(strip_invisible(text))]
 
 
 def parse_address(value: str, label: str) -> EmailAddress:

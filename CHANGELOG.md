@@ -4,6 +4,18 @@ All notable changes to MergeMail365 are recorded here. The format is based on [K
 
 ## [Unreleased]
 
+### Fixed
+
+- **A filter typed with a curly apostrophe or a no-break space matched nothing.** macOS turns a typed `'` into `’`, in the desktop app too, so `Company!=O'Neil` was compared as `O’Neil`, matched no row, and excluded nobody: the people you meant to leave out would have been sent the email. Filter values and column names are now compared with curly quotes as straight ones, no-break spaces as spaces, and invisible characters (pasted from a web page or Outlook) ignored.
+- A placeholder typed with a curly apostrophe or quote names the column spelt with a straight one, and the reverse: `{{Manager’s name}}` is the column `Manager's name`. Before, it was refused as naming no column, and in the macOS app the straight form could not be typed.
+- An address pasted with invisible characters around it (Outlook and Teams add direction marks when you copy one) is accepted in CC, BCC, Reply-To and the other address fields. It was refused with "Internationalized characters before the @-sign", about a character you could not see.
+- One of something is no longer counted in the plural: "1 recipient", "1 column, 1 row", "1 email ready to send". An attachment just under 1 MB is shown as "1.0 MB", not "1024 KB".
+- Web UI: a long account name wraps inside the header instead of making the page scroll sideways, and in a narrow window the row of steps wraps.
+- Web UI: the data tables keep each row on one line and scroll sideways. With many columns of long headings, each column used to be squeezed to a few characters and the header row grew hundreds of pixels tall. A value or heading that is cut short shows in full when you point at it.
+- The sheet you chose is chosen again when you reopen the app and upload the workbook, like the columns. It was only restored when the page was reloaded while the app kept running; after a restart the first sheet was silently used.
+- Web UI: New merge closes the panels you had opened (Additional options, All recipients, Preview data) and removes Test connection's result, so the page is as it is when first opened.
+- Web UI: Test connection's result, which describes the account that was signed in, is removed when you sign out.
+
 ## [0.7.0] — 2026-11-16
 
 ### Security
