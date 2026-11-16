@@ -55,7 +55,7 @@ Each is a test that fails for the class, not for one bug, and each must be shown
 | G-B | B | Start a server, fill in the wizard, stop the server, start a new one on the same port, open it in the same browser profile: every field the app says it remembers (the `mm_*` keys, read from `app.js`, so a new key needs a row) is restored. Repeated with the auto-save firing before the upload, after it, and with "none" chosen on purpose. | Chromium, in the suite |
 | G-C | C | Run the real `mergemail365-web` as a subprocess: kill it with a client connected and start it again (same port); start a second copy while the first runs (a different port, and the first still answers). | All three platforms in CI; a few seconds |
 | G-D1 | D | The browser tests that don't depend on Chromium also pass in Playwright's WebKit, the engine nearest WKWebView. | Local, before a release (CI cost) |
-| G-D2 | D | A smoke test of the real window: start `mergemail365-web --desktop` with Graph and sign-in faked, drive the wizard through pywebview's `evaluate_js`, quit and reopen, check what is remembered. | Local on macOS; Windows needs a decision (CI minutes, or the user's PC) |
+| G-D2 | D | A smoke test of the real window: start `mergemail365-web --desktop` with Graph and sign-in faked, drive the wizard through pywebview's `evaluate_js`, quit and reopen, check what is remembered. | Local, before a release, on macOS and on the Windows PC |
 | G-E | E | A table of the substitutions macOS and Windows make while typing (curly quotes, dashes, ellipsis, non-breaking and narrow spaces, full-width `@` and `<>`), run against every field that parses what the user types (addresses, filters, placeholders, the SEND box): each row says whether the field accepts it as the plain character or refuses it with a message naming the character. | In the suite |
 | G-F | F | At every step, with a wide spreadsheet of long headings, long cell values, a long account name and long error text, at three window widths: nothing with an `id` extends past the page column, the page doesn't scroll sideways, and no table row is taller than a set limit. | Chromium, in the suite |
 | G-G | G | A dry-run row in the outcome matrix (no interface may say "sent"); the command line and a web job run the same send and must log the same lines, apart from a listed few; boundary cases for every number the page formats. | In the suite |
@@ -69,7 +69,7 @@ At the end of each phase: full suite, commit, update Status below, and ask befor
 | 1 | G-A | The largest class. Findings 4 and 5 are still open, so the guard will fail on them until they are fixed or listed. |
 | 2 | G-B, G-C | G-C adds a subprocess test to CI on three platforms. |
 | 3 | G-E, G-F, G-G | Finding 13 is still open. |
-| 4 | G-D1, G-D2 | Needs decisions: WebKit download, and whether the real-window smoke test runs anywhere but locally. |
+| 4 | G-D1, G-D2 | Decided 2026-11-16: both run locally before a release, not in CI. |
 
 ## Status
 
@@ -122,6 +122,8 @@ The lines are compared as a set, not in order: a web job fetches its token when 
 
 Left as they are: an address in the spreadsheet's own column with an invisible character is still skipped as invalid, with a warning naming it; a filter value in quotes (`Company="Acme"`) is compared with the quotes.
 
+### Phase 2 (G-B, G-C): done
+
 **G-B, `tests/test_web_e2e_restart.py`** (16 tests, about 28 seconds). The server is stopped and a new one started on the same port, with a new startup token and no sessions, as reopening the app does. Each of the six remembered fields is changed last in turn (a field whose change doesn't lead to a save would be the bug), and the spreadsheet is uploaded again either at once or after the auto-save has run with no spreadsheet loaded. A deliberate "none" for the name column must stay "none", and New merge must not be undone by a restart. The table of remembered fields is compared with the `mm_*` keys in `app.js`. The 5-second auto-save is driven by `page.clock`, so nothing waits for it.
 
 | Bug put back | Caught? |
@@ -143,4 +145,22 @@ The first version of the test chose `E-mail` as the address column and passed fo
 
 What reproducing finding 9 showed: the port stays busy only if a connection is still unanswered when the app dies (30 seconds on macOS, twice `net.inet.tcp.msl`); a connection whose request has been answered doesn't hold it. The test therefore holds an open connection, as the page's event stream is during a send. The first version sent a request first, and passed with the fix removed.
 
-Not yet run on Linux or Windows: the branch has not been pushed.
+Since run in CI on Linux, macOS and Windows (pull request #5): both pass on all three.
+
+### Phase 4 (G-D1, G-D2): done on macOS; the Windows run is still to do
+
+Both run on a developer's machine before a release, not in CI: `scripts/pre-release-checks.sh` (or with `webkit` or `window` for one of them).
+
+**G-D1, the browser tests in WebKit.** `pytest --browser webkit` over the six browser test files. Everything passes except the five tests that paste from the real clipboard, which need a permission only Chromium has; they are skipped in WebKit (`_allow_clipboard()` in `tests/test_web_e2e.py`). No fault was found: the page behaves the same in both engines.
+
+**G-D2, `tests/test_window.py`** (one test, about 15 seconds, skipped unless `MERGEMAIL365_WINDOW_TESTS=1`). `tests/window_driver.py` runs `mergemail365-web --desktop` in a separate process with a temporary home directory (`CFFIXED_USER_HOME` moves the window's own storage there too, so the developer's is not touched). Sign-in is a token cache holding one account and Graph answers 202; everything else is the app, in its real window. The driver uploads a two-sheet workbook, chooses the second sheet and columns the page would not choose by itself, writes an HTML body, and goes through preview, test email, dry run and send. It closes the window, starts the app again, uploads the workbook and reads the six remembered fields.
+
+| Bug put back | Caught? |
+|---|---|
+| Finding 6 (pywebview's private mode) | Yes: the reopened window has not kept the sheet |
+| Finding 2 (blank HTML preview on Windows) | No. The test checks the preview frame is shown, has a size and holds the email, but a frame that holds the right document and draws nothing looks the same from inside the page. It needs a person, or a screenshot comparison |
+| Finding 17 (Cmd+Q during a send) | Not tested: still open (`TODO.md`) |
+
+What writing it showed: pywebview's `evaluate_js()` does not work in this app, because it wraps the script in `eval()` and the Content Security Policy refuses that in the real window, as it should. The driver uses `run_js()` (the script as it is) and the page posts each answer back to the app's own port, where a WSGI layer added by the driver takes it. So the policy is known to be in force in the desktop window, which no test had shown.
+
+**Not done: the Windows run.** `tests/test_window.py` has only been run on macOS. On the Windows PC: `uv sync --all-extras`, then `scripts/pre-release-checks.sh window` from Git Bash (or set `MERGEMAIL365_WINDOW_TESTS=1` and run `pytest tests/test_window.py`). Until that has passed once, the driver itself is unproven on WebView2 (the file upload through `DataTransfer`, and `run_js`).

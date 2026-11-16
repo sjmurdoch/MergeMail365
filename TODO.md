@@ -31,6 +31,8 @@ From `docs/review-fixes-plan.md` ("Loose ends and things not verified", and the 
 
 ### Release and packaging
 
+- **The real-window test has not been run on Windows.** `tests/test_window.py` (a merge in the desktop window, closed and reopened) passes on macOS only. Run `scripts/pre-release-checks.sh window` on the Windows PC before the next release; see `docs/phase-h-guards-plan.md`, phase 4.
+- **A blank HTML preview cannot be seen by a test.** Phase H's blank preview on Windows (after New merge) held the right document and drew nothing; look at step 3 by eye on Windows before a release.
 - **Windows SmartScreen.** On `v0.7.0rc4`, a bundle downloaded in a browser (so carrying the Mark of the Web) was blocked by SmartScreen, and "Run anyway" did nothing: the build is self-signed. Tested once only, and not compared with 0.6.0, so it is not known whether this is new. Check that a user can start a downloaded 0.7.0 build; the lasting fix is a trusted code-signing certificate (`docs/codesigning.md`).
 - **A rejected test email was not tried on a real system.** Checklist item 10 of phase H (Graph refuses the test email, the step must show a failure) needs an account Graph refuses, such as one without a mailbox; none was available on either platform. `tests/test_outcomes.py` and `TestRejectedTestEmail` cover it against mocked answers.
 - **The command-line tool** was not part of phase H: the release workflow builds only the desktop app. Its sending path is covered by the mocked tests and shares `send_merge()` with the app.
