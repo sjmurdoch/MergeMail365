@@ -1018,3 +1018,198 @@ class TestSecondPass:
         assert not unexpected, "after Sign out the page differs from a signed-out page:\n" + _report(unexpected)
         stale = set(SIGN_OUT_DIFFERENCES) - {d[:3] for d in found}
         assert not stale, f"listed as intended differences, but no longer differ: {sorted(stale)}"
+
+
+# ---------------------------------------------------------------------------
+# One of everything (docs/phase-h-guards-plan.md, class G)
+# ---------------------------------------------------------------------------
+
+# "1 rows", "1 real emails": one of something, named in the plural.
+ONE_OF_MANY = re.compile(r"(?<![\d.,:/-])1 (?:[a-z]+ )?[a-z]{3,}s\b")
+
+
+class TestOneOfEverything:
+    """The smallest merge (one column, one row, one attachment of a few
+    bytes) is the one a first try uses and the one whose wording nobody
+    reads: phase H's "(0 KB)" for a 14-byte attachment was of this kind."""
+
+    def test_the_page_never_counts_one_in_the_plural(
+        self, wizard: Page, gate: JobGate, tmp_path: Path,
+    ):
+        page = wizard
+        xlsx = tmp_path / "one.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["email"])
+        ws.append(["alice@example.com"])
+        wb.save(xlsx)
+        attachment = tmp_path / "a.txt"
+        attachment.write_text("x")
+        wrong: list[str] = []
+
+        def read(step: str) -> None:
+            page.wait_for_timeout(150)
+            text = page.evaluate("document.body.innerText")
+            wrong.extend(f"{step}: {line.strip()}" for line in text.splitlines() if ONE_OF_MANY.search(line))
+            assert "0 KB" not in text and "NaN" not in text and "undefined" not in text, step
+
+        page.set_input_files("#spreadsheet-file", str(xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        read("1 uploaded")
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        page.fill("#subject-input", "Hello")
+        page.fill("#body-input", "Hi")
+        page.eval_on_selector("#step-2 details:has(#cc-input)", "el => { el.open = true; }")
+        page.set_input_files("#attachment-input", str(attachment))
+        read("2 composed")
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        page.eval_on_selector("#step-3 details:has(#recipients-table)", "el => { el.open = true; }")
+        read("3 preview")
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
+        _pass_test(page)
+        read("4 tested")
+        _pass_verify(page)
+        read("5 verified")
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        read("6 before sending")
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=10000)
+        read("6 sent")
+        assert not wrong, "\n".join(wrong)
+
+
+# ---------------------------------------------------------------------------
+# Layout with awkward content (docs/phase-h-guards-plan.md, class F)
+# ---------------------------------------------------------------------------
+
+# Everything inside the page column that sticks out of it and isn't inside
+# something that scrolls or clips; how far the page scrolls sideways; and
+# the tallest table cell.
+LAYOUT_JS = """() => {
+    const main = document.querySelector("main");
+    const limit = main.getBoundingClientRect().right + 1;
+    const contained = (el) => {
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+            if (getComputedStyle(p).overflowX !== "visible") return true;
+        }
+        return false;
+    };
+    const name = (el) => el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") +
+        (el.className && typeof el.className === "string" ? "." + el.className.split(" ")[0] : "");
+    const sticking = [];
+    for (const el of main.querySelectorAll("*")) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height || r.right <= limit || contained(el)) continue;
+        if (el.parentElement.getBoundingClientRect().right > limit && el.parentElement !== main) continue;
+        sticking.push(`${name(el)} ends ${Math.round(r.right - limit)}px past the column`);
+    }
+    let tallest = 0;
+    for (const cell of main.querySelectorAll("th, td")) {
+        tallest = Math.max(tallest, cell.getBoundingClientRect().height);
+    }
+    const doc = document.documentElement;
+    return {sticking, sideways: doc.scrollWidth - doc.clientWidth, tallest: Math.round(tallest)};
+}"""
+
+# The desktop window's size, a small laptop window, and a narrow one.
+WIDTHS = [(1100, 800), (800, 600), (480, 800)]
+# A table cell taller than this is a heading or value broken into a column
+# of short lines.
+MAX_CELL_HEIGHT = 150
+UNBROKEN = "Supercalifragilisticexpialidocious" * 4
+LONG_ACCOUNT = "a.very.long.account.name.for.someone@" + "department." * 6 + "example.ac.uk"
+
+
+@pytest.fixture(scope="module")
+def awkward_xlsx(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """What phase H's spreadsheet had and the tests' did not: sixty columns
+    with long headings, long values, and text with nowhere to break."""
+    path = tmp_path_factory.mktemp("layout") / ("quarterly-contact-list-" + "final-" * 8 + "v2.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    assert ws is not None
+    headings = ["email", "name"] + [f"Preferred contact details for correspondence, column {i}" for i in range(58)]
+    ws.append(headings)
+    for who in ("alice", "bob"):
+        ws.append([f"{who}@example.com", f"{who.title()} " + "van der Longname " * 6]
+                  + [UNBROKEN if i % 7 == 0 else "A sentence of ordinary length for a cell. " * 3 for i in range(58)])
+    wb.save(path)
+    return path
+
+
+class TestLayoutWithAwkwardContent:
+    """Phase H: the diagnostics box ran past the page column (fixed twice)
+    and the preview table's header row was very tall. The other tests use
+    two short columns and a short account name, so nothing could go wrong."""
+
+    def test_nothing_leaves_the_page_column(
+        self, wizard: Page, gate: JobGate, awkward_xlsx: Path, tmp_path: Path,
+    ):
+        page = wizard
+        page.route("**/auth/status", lambda route: route.fulfill(
+            json={"authenticated": True, "email": LONG_ACCOUNT, "token_expires_at": None}))
+        page.route("**/auth/debug", lambda route: route.fulfill(json={
+            **DIAGNOSTICS, "accounts": [{"username": LONG_ACCOUNT, "home_account_id": UNBROKEN + "." + UNBROKEN}],
+        }))
+        page.reload()
+        page.wait_for_selector("#step-1.active")
+        attachment = tmp_path / ("minutes-of-the-meeting-" + "draft-" * 10 + ".txt")
+        attachment.write_text("x")
+        problems: list[str] = []
+
+        def measure(where: str) -> None:
+            for width, height in WIDTHS:
+                page.set_viewport_size({"width": width, "height": height})
+                page.wait_for_timeout(100)
+                found = page.evaluate(LAYOUT_JS)
+                at = f"{where}, {width}px wide"
+                problems.extend(f"{at}: {s}" for s in found["sticking"][:5])
+                if found["sideways"] > 1:
+                    problems.append(f"{at}: the page scrolls sideways by {found['sideways']}px")
+                if found["tallest"] > MAX_CELL_HEIGHT:
+                    problems.append(f"{at}: a table cell is {found['tallest']}px tall")
+            page.set_viewport_size({"width": WIDTHS[0][0], "height": WIDTHS[0][1]})
+
+        page.click("#btn-test-connection")
+        expect(page.locator("#auth-diag-content")).to_contain_text("token is valid")
+        page.set_input_files("#spreadsheet-file", str(awkward_xlsx))
+        page.wait_for_selector("#spreadsheet-info:not(.hidden)", timeout=5000)
+        measure("1 uploaded")
+
+        page.click("#btn-next-1")
+        page.wait_for_selector("#step-2.active", timeout=5000)
+        page.eval_on_selector_all("#step-2 details", "all => all.forEach(el => { el.open = true; })")
+        page.select_option("#name-column", "name")
+        page.fill("#subject-input", "Hello {{name}} " + UNBROKEN)
+        page.fill("#body-input", "Dear {{name}},\n" + UNBROKEN + "\n" + "An ordinary sentence. " * 30)
+        page.fill("#cc-input", ", ".join(f"Colleague Number {i} <colleague{i}@example.com>" for i in range(8)))
+        page.fill("#reply-to-input", LONG_ACCOUNT)
+        page.fill("#filter-input", "name!=" + UNBROKEN)
+        page.set_input_files("#attachment-input", str(attachment))
+        measure("2 composed")
+
+        page.click("#btn-next-2")
+        page.wait_for_selector("#step-3.active", timeout=5000)
+        page.eval_on_selector_all("#step-3 details", "all => all.forEach(el => { el.open = true; })")
+        measure("3 preview")
+
+        page.click("#btn-next-3")
+        page.wait_for_selector("#step-4.active", timeout=5000)
+        _pass_test(page)
+        measure("4 tested")
+        _pass_verify(page)
+        measure("5 verified")
+        page.click("#btn-next-5")
+        page.wait_for_selector("#step-6.active", timeout=5000)
+        measure("6 before sending")
+        page.fill("#send-confirm-input", "SEND")
+        page.click("#btn-do-send")
+        expect(page.locator("#send-done-nav")).to_be_visible(timeout=10000)
+        measure("6 sent")
+        assert not problems, "\n".join(problems)

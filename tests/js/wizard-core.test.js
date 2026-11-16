@@ -556,3 +556,21 @@ test("formatSize never shows a small file as 0 KB", () => {
     assert.equal(C.formatSize(150 * 1024), "150 KB");
     assert.equal(C.formatSize(3.5 * 1024 * 1024), "3.5 MB");
 });
+
+test("formatSize at the edges of each unit", () => {
+    assert.equal(C.formatSize(1535), "1 KB");
+    assert.equal(C.formatSize(1536), "2 KB");
+    assert.equal(C.formatSize(1023 * 1024), "1023 KB");
+    // Just under 1 MB used to be "1024 KB".
+    assert.equal(C.formatSize(1024 * 1024 - 1), "1.0 MB");
+    assert.equal(C.formatSize(1024 * 1024), "1.0 MB");
+});
+
+test("count names one of something in the singular", () => {
+    assert.equal(C.count(0, "email"), "0 emails");
+    assert.equal(C.count(1, "email"), "1 email");
+    assert.equal(C.count(2, "email"), "2 emails");
+    assert.equal(C.count(1, "batch", "batches"), "1 batch");
+    assert.equal(C.count(3, "batch", "batches"), "3 batches");
+    assert.equal(C.count("?", "email"), "? emails");
+});

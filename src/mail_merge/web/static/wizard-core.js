@@ -575,14 +575,22 @@
      *  used to show as "0 KB"), then KB, then MB with one decimal. */
     function formatSize(bytes) {
         if (bytes < 1024) return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
-        if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+        // Up to the last size that rounds to 1023 KB; "1024 KB" is 1.0 MB.
+        if (bytes < 1023.5 * 1024) return `${Math.round(bytes / 1024)} KB`;
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    /** `n` of something, in words: "1 email", "2 emails". `n` may be "?"
+     *  while the number isn't known. */
+    function count(n, noun, plural) {
+        return n === 1 ? `1 ${noun}` : `${n} ${plural || `${noun}s`}`;
     }
 
     const WizardCore = {
         jobSucceeded,
         testEmailFailure,
         formatSize,
+        count,
         initialState,
         resetTestAndVerify,
         newMergeState,
