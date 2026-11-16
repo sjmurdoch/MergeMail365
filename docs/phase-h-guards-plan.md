@@ -89,3 +89,28 @@ Updated 2026-11-16. Work is on the `phase-h-guards` branch.
 | Finding 2 (blank HTML preview, Windows) | No: Chromium draws the frame either way, and the recordings (the frame's `srcdoc`) are equal. This one belongs to class D |
 
 The two tests take about 12 seconds together. Before the on-screen rule, the comparison listed some 30 leftovers in hidden steps after New merge (the previous merge's CC on the Preview step, its recipient count on the Send step, and so on). None is visible when its step is next shown, because each is redrawn on entry, which is what the guard checks.
+
+### Phase 2 (G-B, G-C): done
+
+**G-B, `tests/test_web_e2e_restart.py`** (16 tests, about 28 seconds). The server is stopped and a new one started on the same port, with a new startup token and no sessions, as reopening the app does. Each of the six remembered fields is changed last in turn (a field whose change doesn't lead to a save would be the bug), and the spreadsheet is uploaded again either at once or after the auto-save has run with no spreadsheet loaded. A deliberate "none" for the name column must stay "none", and New merge must not be undone by a restart. The table of remembered fields is compared with the `mm_*` keys in `app.js`. The 5-second auto-save is driven by `page.clock`, so nothing waits for it.
+
+| Bug put back | Caught? |
+|---|---|
+| Finding 7 (saved columns not used after an upload) | Yes: 14 of 16 fail |
+| Finding 8 (auto-save before the upload wipes the columns) | Yes: all 7 "upload later" cases fail |
+| **New: the chosen sheet was not restored after a restart** | It failed on the code as it was. `mm_sheet` was applied only on a reload (from `/api/config`), not after an upload, so reopening the app and uploading the workbook silently used the first sheet. Fixed: `restoreSavedSheet()` is used in both places |
+| Finding 6 (pywebview's private mode) | No: this is the window's own storage, class D. `tests/test_web_cli.py` checks the argument passed to pywebview |
+
+The first version of the test chose `E-mail` as the address column and passed for the wrong reason: the page picks a column of that name by itself. The workbook now has a second address column, which the test chooses.
+
+**G-C, `tests/test_web_process.py`** (2 tests, about 2 seconds). Starts `mail_merge.web.main()` in a subprocess with a temporary home directory; only `webbrowser.open` is replaced.
+
+| Bug put back | Caught? |
+|---|---|
+| Finding 9 (probe without `SO_REUSEADDR`: reopening moves to the next port) | Yes on macOS: `assert 5071 == 5070` |
+| No probing at all (two copies on one port) | Yes: `assert 5070 != 5070` |
+| Finding 10 (Windows lets a second socket bind a listening port) | Not checked: needs Windows. The test runs there in CI; the mutant has not been run there |
+
+What reproducing finding 9 showed: the port stays busy only if a connection is still unanswered when the app dies (30 seconds on macOS, twice `net.inet.tcp.msl`); a connection whose request has been answered doesn't hold it. The test therefore holds an open connection, as the page's event stream is during a send. The first version sent a request first, and passed with the fix removed.
+
+Not yet run on Linux or Windows: the branch has not been pushed.
