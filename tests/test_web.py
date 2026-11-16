@@ -1474,7 +1474,9 @@ class TestAttachmentSaving:
             captured["files"] = [
                 (Path(p).name, Path(p).read_bytes()) for p in kwargs.get("attachment", [])
             ]
-            captured["paths"] = list(kwargs.get("attachment", []))
+            # Resolved now: the job deletes them when it ends, and Windows
+            # cannot expand a short name (RUNNER~1) in a path that is gone.
+            captured["paths"] = [Path(p).resolve() for p in kwargs.get("attachment", [])]
             return []
 
         monkeypatch.setattr("mail_merge.api.send_merge", fake_send_merge)
@@ -1551,7 +1553,7 @@ class TestAttachmentSaving:
         wait_for_job(web_client, resp.get_json()["job_id"])
         root = Path(tmp_dir).resolve()
         for p in captured["paths"]:
-            assert Path(p).resolve().is_relative_to(root), p
+            assert p.is_relative_to(root), p
         assert captured["files"] == [("escaped.txt", b"payload")]
         assert not (root.parent / "escaped.txt").exists()
         assert not (root.parent.parent / "escaped.txt").exists()
@@ -1583,7 +1585,7 @@ class TestAttachmentSaving:
         assert resp.status_code == 200
         wait_for_job(web_client, resp.get_json()["job_id"])
         root = Path(tmp_dir).resolve()
-        assert [Path(p).resolve().is_relative_to(root) for p in captured["paths"]] == [True]
+        assert [p.is_relative_to(root) for p in captured["paths"]] == [True]
 
     @pytest.mark.parametrize("bad_name", ["..", ".", "/", "../"])
     def test_filename_with_no_usable_name_is_rejected(
