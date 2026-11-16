@@ -90,7 +90,37 @@ Updated 2026-11-16. Work is on the `phase-h-guards` branch.
 
 The two tests take about 12 seconds together. Before the on-screen rule, the comparison listed some 30 leftovers in hidden steps after New merge (the previous merge's CC on the Preview step, its recipient count on the Send step, and so on). None is visible when its step is next shown, because each is redrawn on entry, which is what the guard checks.
 
-### Phase 2 (G-B, G-C): done
+### Phase 3 (G-E, G-F, G-G): done
+
+**G-G, `tests/test_wording.py`** (22 tests, 3 seconds) and `TestOneOfEverything`.
+
+| Test | Bug put back | Caught? |
+|---|---|---|
+| A dry run never says "sent" (command line and web, individual and BCC) | Finding 15 | Yes: all 4 |
+| The command line and a web job log the same lines | Finding 16 (no "Sending as" in web jobs) | Yes: the 4 sending modes |
+| One of something is not plural, in the logs and on the page | (finding 14's kind) | It failed on the code as it was: "Loaded 1 recipients", "1 columns, 1 rows", "1 emails ready to send", "all 1 emails". Fixed with `sender.count()` and `WizardCore.count()` |
+
+The lines are compared as a set, not in order: a web job fetches its token when the first email needs it, so "Sending as" comes after the first "Sending" line there. `formatSize()` gained boundary cases, which found "1024 KB" for a file just under 1 MB.
+
+**G-F, `TestLayoutWithAwkwardContent`** (10 seconds). Sixty columns with long headings, values with nowhere to break, a 116-character account name, long file names, at 1100, 800 and 480 pixels wide, measured at seven points of the wizard.
+
+| Bug | Caught? |
+|---|---|
+| Finding 12 (diagnostics wider than the column), with its fix removed | Yes |
+| Finding 13 (tall header row), still open | It failed on the code as it was: cells up to 392px tall. Fixed: table rows are one line, cut short with the full text as a title |
+| **New: a long account name made the page scroll sideways** (by 271px at the desktop window's width) | Fixed: it wraps inside the header |
+| **New: the row of steps ran past a 480px window** | Fixed: it wraps |
+
+**G-E, `tests/test_typed_text.py`** (37 tests, under a second). Four fields (address lists, filters with `=` and with `!=`, placeholder names) against nine substitutions. Every pair must read the same as the plain text or be refused; the seven exceptions are listed with reasons.
+
+| Bug | Caught? |
+|---|---|
+| Finding 11 (curly quotes don't quote a display name), put back | Yes |
+| **New: a filter value typed with a curly apostrophe or a no-break space matched nothing**, so `Company!=O’Neil` excluded nobody and those rows would have been sent to. In the macOS app a straight apostrophe cannot be typed | It failed on the code as it was. Fixed: `typed_text.plain()` on both sides of the comparison, and for the column name |
+| **New: `{{Manager’s name}}` named no column** when the heading has a straight apostrophe (refused with a message, so not silent, but untypeable in the macOS app) | Fixed in `template.py` and `template-core.js`, with six shared vectors |
+| **New: an address with invisible characters** (direction marks from Outlook, a zero-width space from a web page) was refused with a message about a character that cannot be seen | Fixed: stripped before parsing |
+
+Left as they are: an address in the spreadsheet's own column with an invisible character is still skipped as invalid, with a warning naming it; a filter value in quotes (`Company="Acme"`) is compared with the quotes.
 
 **G-B, `tests/test_web_e2e_restart.py`** (16 tests, about 28 seconds). The server is stopped and a new one started on the same port, with a new startup token and no sessions, as reopening the app does. Each of the six remembered fields is changed last in turn (a field whose change doesn't lead to a save would be the bug), and the spreadsheet is uploaded again either at once or after the auto-save has run with no spreadsheet loaded. A deliberate "none" for the name column must stay "none", and New merge must not be undone by a restart. The table of remembered fields is compared with the `mm_*` keys in `app.js`. The 5-second auto-save is driven by `page.clock`, so nothing waits for it.
 

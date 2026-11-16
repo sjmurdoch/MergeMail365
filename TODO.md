@@ -41,4 +41,3 @@ From `docs/review-fixes-plan.md` ("Loose ends and things not verified", and the 
 - **Quitting during a send.** Cmd+Q (or closing the window) mid-send quits without asking. The next start reports which emails went out, but a confirmation would be kinder.
 - **No single-instance lock.** A second copy of the app opens on the next port with an empty wizard, and each copy reports the other's running send as interrupted (the "Two web processes" item above).
 - **No way to continue after Stop.** Step 6 offers only New merge after a stopped send; sending to the rest means starting again and filtering out those already sent. Deliberate (the safe path), but the web UI has no resume like the command line's `--output`.
-- **The preview table's header row** is tall when column headings are long.
