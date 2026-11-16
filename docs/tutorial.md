@@ -694,6 +694,17 @@ See `examples/send_merge.py` for a complete example.
 
 ## Releasing a new version
 
+### Checks that CI does not run
+
+Before a release, run the checks that need a screen, on macOS and on Windows (from Git Bash):
+
+```bash
+uv sync --all-extras
+scripts/pre-release-checks.sh
+```
+
+It runs the browser tests in WebKit (macOS only), and `tests/test_window.py`: a merge in the real desktop window, which is then closed and opened again to check that the subject, body, columns and sheet come back. A window appears for about fifteen seconds; sign-in and Microsoft Graph are faked, so nothing is sent.
+
 ### Version bump
 
 The version is defined in `pyproject.toml` (`version = "X.Y.Z"`). Update it, and add a section for the new version to `CHANGELOG.md`, before creating a release:
